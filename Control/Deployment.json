@@ -29,12 +29,12 @@
   },
   "DeploymentGroup3": {
     "Step1": {
-      "Description": "Install App2026",
-      "Reference": "Install App2026"
-    },
-    "Step2": {
       "Description": "Reboot server",
       "Reference": "Reboot"
+    },
+    "Step2": {
+      "Description": "Install App2026",
+      "Reference": "Install App2026"
     }
   },
   "Admin password never expires": {
