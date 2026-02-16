@@ -1,18 +1,38 @@
 {
   "00:15:5D:02:56:01": {
-    "OS": "WIN2025DCC",
+    "OS": "WIN2025DCG",
     "Computername": "srv02",
     "IPAddress": "10.0.3.22/24",
     "AdminPassword": "Qantas-777",
     "SQLServer": "SQL2025",
     "AlwaysOn": "AO2025",
     "Sections": {
-      "NetworkSettings2026": "NICAuto01",
+      "Locale": "Sweden",
+      "NetworkSettings2026": "NicAuto",
       "ADSettings2026": "ADJoinCorp"
     },
-    "DeploymentSteps": ["DeploymentGroup1", "DeploymentGroup2", "DeploymentGroup3"]
+    "DeploymentSteps": ["General Settings", "SMC", "DeploymentGroup3"]
   },
-  "NicAuto01": {
+  "00:15:5D:02:56:02": {
+    "OS": "WIN2025DCC",
+    "Computername": "srv03",
+    "IPAddress": "10.0.3.23/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings2026": "NicAuto",
+      "ADSettings2026": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["General Settings", "SMC"]
+  },
+  "Sweden": {
+    "InputLocale": "sv-SE",
+    "SystemLocale": "sv-SE",
+    "UILanguage": "sv-SE",
+    "UserLocale": "sv-SE",
+    "TimeZone": "W. Europe Standard Time"
+  },
+  "NicAuto": {
     "DefaultGateway": "10.0.3.1",
     "DNSServers": "10.0.3.11"
   },
@@ -21,11 +41,11 @@
     "Domain": "corp",
     "OU": "ou=Servers,dc=corp,dc=dev",
     "User": "ADJoin2026",
-    "Password": "Boeing-707"
+    "Password": "P@ssw0rd2026"
   },
   "Deploy": {
     "Share": "\\\\dc01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",
-    "Password": "Boeing-747400"
+    "Password": "P@ssw0rd2026"
   }
 }

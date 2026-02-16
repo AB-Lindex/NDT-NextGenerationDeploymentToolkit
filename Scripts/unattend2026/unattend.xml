@@ -4,12 +4,12 @@
     <settings pass="windowsPE">
         <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <SetupUILanguage>
-                <UILanguage>en-US</UILanguage>
+                <UILanguage>!UILANGUAGE!</UILanguage>
             </SetupUILanguage>
-            <InputLocale>en-US</InputLocale>
-            <SystemLocale>en-US</SystemLocale>
-            <UILanguage>en-US</UILanguage>
-            <UserLocale>en-US</UserLocale>
+            <InputLocale>!INPUTLOCALE!</InputLocale>
+            <SystemLocale>!SYSTEMLOCALE!</SystemLocale>
+            <UILanguage>!UILANGUAGE!</UILanguage>
+            <UserLocale>!USERLOCALE!</UserLocale>
         </component>
         <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <UserData>
@@ -72,6 +72,12 @@
     
     <!-- OOBE Settings - Administrator Password & Auto Logon -->
     <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <InputLocale>!INPUTLOCALE!</InputLocale>
+            <SystemLocale>!SYSTEMLOCALE!</SystemLocale>
+            <UILanguage>!UILANGUAGE!</UILanguage>
+            <UserLocale>!USERLOCALE!</UserLocale>
+        </component>
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <UserAccounts>
                 <AdministratorPassword>
@@ -101,7 +107,7 @@
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
                 <ProtectYourPC>3</ProtectYourPC>
             </OOBE>
-            <TimeZone>Eastern Standard Time</TimeZone>
+            <TimeZone>!TIMEZONE!</TimeZone>
         </component>
     </settings>
 </unattend>

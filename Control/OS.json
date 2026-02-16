@@ -1,4 +1,6 @@
 {
     "WIN2025DCC": {
-        "Path": "Operating systems\\ref-w2025dcc\\w2025dcc.wim"}
+        "Path": "Operating systems\\ref-w2025dcc\\w2025dcc.wim"},
+    "WIN2025DCG": {
+        "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim"}
 }

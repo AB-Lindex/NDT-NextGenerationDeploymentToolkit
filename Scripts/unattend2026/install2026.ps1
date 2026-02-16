@@ -10,6 +10,19 @@ Add-Content -Path $LogPath -Value "User: $(whoami)"
 $UAC = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 Add-Content -Path $LogPath -Value "UAC: $UAC"
 
+# Map deployment share using credentials from settings.json
+$settingsPath = "C:\temp\settings.json"
+if (Test-Path $settingsPath) {
+    $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
+    Write-Host "Mapping deployment share..." -ForegroundColor Cyan
+    Add-Content -Path $LogPath -Value "Mapping deployment share: $($settings.Share)"
+    net use Z: "$($settings.Share)" /user:"$($settings.Username)" "$($settings.Password)" /persistent:no
+} else {
+    Write-Error "Settings file not found: $settingsPath"
+    Add-Content -Path $LogPath -Value "ERROR: Settings file not found"
+    exit 1
+}
+
 # Execute deployment steps
 & "Z:\Scripts\unattend2026\Install-NDT.ps1"
 

@@ -1,20 +1,28 @@
 {
-  "DeploymentGroup1": {
+  "General Settings": {
     "Step1": {
       "Description": "Admin password never expires",
       "Reference": "Admin password never expires"
+    },
+    "Step2": {
+      "Description": "Disable WAC popup",
+      "Reference": "DisableWACPopup"
+    },
+    "Step3": {
+      "Description": "IE security off",
+      "Reference": "IESecurityOff"
+    },
+    "Step4": {
+      "Description": "IE skip settings",
+      "Reference": "IESkipSettings"
     }
   },
-  "DeploymentGroup2": {
+  "SMC": {
     "Step1": {
       "Description": "Install SMC",
       "Reference": "Install SMC"
     },
     "Step2": {
-      "Description": "Reboot server",
-      "Reference": "Reboot"
-    },
-    "Step3": {
       "Description": "Start SMC",
       "Reference": "Start SMC"
     }
@@ -23,10 +31,23 @@
     "Step1": {
       "Description": "Install App2026",
       "Reference": "Install App2026"
+    },
+    "Step2": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
     }
   },
   "Admin password never expires": {
     "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
+  },
+  "DisableWACPopup": {
+    "Script": "\\Applications\\DisableWACPopup\\Install.ps1"
+  },
+  "IESecurityOff": {
+    "Script": "\\Applications\\IESecurityOff\\Install.ps1"
+  },
+  "IESkipSettings": {
+    "Script": "\\Applications\\IESkipSettings\\Install.ps1"
   },
   "Install SMC": {
     "Script": "\\Applications2026\\Server Manager Client\\Install.ps1"

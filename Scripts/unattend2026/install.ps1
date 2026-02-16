@@ -34,6 +34,33 @@ Set-Partition -DriveLetter $windowsPartition.DriveLetter -NewDriveLetter C
 # Get MAC address once
 $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
 
+# Validate MAC address exists in CustomSettings.json
+$customSettingsPath = "Z:\Control\CustomSettings.json"
+$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+
+if (-not $customSettings.$macAddress) {
+    Write-Host "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -ForegroundColor Red
+    Write-Host "Available MAC addresses in configuration:" -ForegroundColor Yellow
+    $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
+        Write-Host "  $($_.Name)" -ForegroundColor Gray
+    }
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+$machineConfig = $customSettings.$macAddress
+if (-not $machineConfig.OS) {
+    Write-Host "ERROR: OS field not found in configuration for MAC address: $macAddress" -ForegroundColor Red
+    Write-Host "Machine configuration:" -ForegroundColor Yellow
+    $machineConfig | ConvertTo-Json | Write-Host -ForegroundColor Gray
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
+Write-Host "  OS: $($machineConfig.OS)" -ForegroundColor Cyan
+Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
+
 # Get OS WIM path
 $wimPath = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
 
@@ -42,6 +69,7 @@ Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:1 /ApplyDir:C:\
 # Copy and prepare install2026.ps1 with deployment share mapping
 & "Z:\Scripts\Unattend2026\Copy-Install.ps1"
 
+# Setup unattended.xml with settings from CustomSettings.json based on MAC address
 & "Z:\Scripts\Unattend2026\Get-Settings.ps1" -MACAddress $macAddress
 
 New-Item -ItemType Directory -Path "C:\Windows\Panther" -Force
