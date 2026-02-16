@@ -15,8 +15,8 @@
       "Reference": "Reboot"
     },
     "Step3": {
-      "Description": "Enable SMC",
-      "Reference": "Enable SMC"
+      "Description": "Start SMC",
+      "Reference": "Start SMC"
     }
   },
   "DeploymentGroup3": {
@@ -29,13 +29,13 @@
     "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
   },
   "Install SMC": {
-    "Script": "\\Applications\\Server Manager Client\\Install.ps1"
+    "Script": "\\Applications2026\\Server Manager Client\\Install.ps1"
   },
   "Start SMC": {
-    "Script": "\\Applications\\Server Manager Client\\enable-start.ps1"
+    "Script": "\\Applications2026\\Server Manager Client\\enable-start.ps1"
   },
   "Enable SMC": {
-    "Script": "\\Applications\\Server Manager Client\\enable-smc.ps1"
+    "Script": "\\Applications2026\\Server Manager Client\\enable-smc.ps1"
   },
   "Reboot": {
     "Type": "Reboot",

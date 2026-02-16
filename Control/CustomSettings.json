@@ -10,7 +10,7 @@
       "NetworkSettings2026": "NICAuto01",
       "ADSettings2026": "ADJoinCorp"
     },
-    "DeploymentSteps": ["DeploymentGroup1", "DeploymentGroup3"]
+    "DeploymentSteps": ["DeploymentGroup1", "DeploymentGroup2", "DeploymentGroup3"]
   },
   "NicAuto01": {
     "DefaultGateway": "10.0.3.1",
