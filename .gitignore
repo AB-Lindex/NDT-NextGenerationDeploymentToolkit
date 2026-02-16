@@ -3,6 +3,9 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Exclude a folder at the root of the repository
+Applications2026/
+
 # User-specific files
 *.rsuser
 *.suo
