@@ -8,8 +8,8 @@
     "AlwaysOn": "AO2025",
     "Sections": {
       "Locale": "Sweden",
-      "NetworkSettings2026": "NicAuto",
-      "ADSettings2026": "ADJoinCorp"
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
     },
     "DeploymentSteps": ["General Settings", "SMC", "DeploymentGroup3"]
   },
@@ -20,8 +20,8 @@
     "AdminPassword": "Qantas-777",
     "Sections": {
       "Locale": "Sweden",
-      "NetworkSettings2026": "NicAuto",
-      "ADSettings2026": "ADJoinCorp"
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
     },
     "DeploymentSteps": ["General Settings", "SMC"]
   },
