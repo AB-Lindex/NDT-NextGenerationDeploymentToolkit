@@ -1,0 +1,31 @@
+{
+  "00:15:5D:02:56:01": {
+    "OS": "WIN2025DCC",
+    "Computername": "srv02",
+    "IPAddress": "10.0.3.22/24",
+    "AdminPassword": "Qantas-777",
+    "SQLServer": "SQL2025",
+    "AlwaysOn": "AO2025",
+    "Sections": {
+      "NetworkSettings2026": "NICAuto01",
+      "ADSettings2026": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["DeploymentGroup1", "DeploymentGroup3"]
+  },
+  "NicAuto01": {
+    "DefaultGateway": "10.0.3.1",
+    "DNSServers": "10.0.3.11"
+  },
+  "ADJoinCorp": {
+    "JoinDomain": "corp.dev",
+    "Domain": "corp",
+    "OU": "ou=Servers,dc=corp,dc=dev",
+    "User": "ADJoin2026",
+    "Password": "Boeing-707"
+  },
+  "Deploy": {
+    "Share": "\\\\dc01.corp.dev\\Deploy2026",
+    "Username": "Corp\\Deploy2026",
+    "Password": "Boeing-747400"
+  }
+}

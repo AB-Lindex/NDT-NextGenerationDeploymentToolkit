@@ -1,0 +1,2 @@
+powershell.exe -NoLogo -ExecutionPolicy Bypass -noexit -Command "$r=$Host.UI.RawUI; $r.BufferSize = New-Object Management.Automation.Host.Size(160,3000); $r.WindowSize = New-Object Management.Automation.Host.Size(120,35); & 'X:\Deploy\install.ps1'"
+   

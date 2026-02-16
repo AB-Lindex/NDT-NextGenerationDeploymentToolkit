@@ -1,0 +1,42 @@
+{
+  "parameters": {
+    "delay": 900,
+    "delayadd": 120,
+    "InventoryInterval": 48,
+    "IniTechIniVersion": "2.1.32",
+    "BinaryReplaceProgram2024": "replace.ps1",
+    "SyslogServer": "lxappnms01.lindex.local",
+    "UrgentPort": 11000,
+    "KeepLogFiles": 90
+  },
+  "environments": {
+    "lindex.local": {
+      "NewFiles": "\\\\wscorsm01.lindex.local\\servermanager\\smc4\\",
+      "EndpointAddress": "net.tcp://wscorsm01.lindex.local/SMServer/SMServerWCF.svc",
+      "UrgentSender": "10.4.2.40",
+      "DPPath": "\\\\wscorsm01.lindex.local\\servermanager\\DP\\"
+    },
+    "corp.dev": {
+      "NewFiles": "\\\\sm02.corp.dev\\servermanagerDEV\\smc4\\",
+      "EndpointAddress": "net.tcp://sm02.corp.dev/SMServerDEV/SMServerWCF.svc",
+      "UrgentSender": "10.0.3.8",
+      "DPPath": "\\\\sm02.corp.dev\\servermanagerDEV\\DP\\"
+    },
+    "ldxqa.local": {
+      "NewFiles": "\\\\wscorsm02.ldxqa.local\\servermanagerQA\\smc4\\",
+      "EndpointAddress": "net.tcp://wscorsm02.ldxqa.local/SMServerQA/SMServerWCF.svc",
+      "UrgentSender": "10.4.90.5",
+      "DPPath": "\\\\wscorsm02.ldxqa.local\\servermanagerQA\\DP\\"
+    }
+  },
+  "upgrade": {
+    "DPFiles": ["upgrade.rar", "upgrade.7z", "upgrade.zip"],
+    "UpgradeScripts": ["upgrade.vbs", "upgrade.cmd", "upgrade.ps1"],
+    "UPPath": "c:\\install\\upgrade\\",
+    "UNPPath": "c:\\install\\upgrade\\upgdir",
+    "PackageRegistryEntry": "HKEY_LOCAL_MACHINE\\Software\\ServerManager\\Installed\\"
+  },
+  "files": {
+    "file0": "c:\\program files\\internet explorer\\iexplore.exe"
+  }
+}

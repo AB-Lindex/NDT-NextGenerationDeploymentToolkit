@@ -1,0 +1,48 @@
+{
+  "DeploymentGroup1": {
+    "Step1": {
+      "Description": "Admin password never expires",
+      "Reference": "Admin password never expires"
+    }
+  },
+  "DeploymentGroup2": {
+    "Step1": {
+      "Description": "Install SMC",
+      "Reference": "Install SMC"
+    },
+    "Step2": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    },
+    "Step3": {
+      "Description": "Enable SMC",
+      "Reference": "Enable SMC"
+    }
+  },
+  "DeploymentGroup3": {
+    "Step1": {
+      "Description": "Install App2026",
+      "Reference": "Install App2026"
+    }
+  },
+  "Admin password never expires": {
+    "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
+  },
+  "Install SMC": {
+    "Script": "\\Applications\\Server Manager Client\\Install.ps1"
+  },
+  "Start SMC": {
+    "Script": "\\Applications\\Server Manager Client\\enable-start.ps1"
+  },
+  "Enable SMC": {
+    "Script": "\\Applications\\Server Manager Client\\enable-smc.ps1"
+  },
+  "Reboot": {
+    "Type": "Reboot",
+    "Description": "Restart the computer"
+  },
+  "Install App2026": {
+    "Script": "\\Applications\\App2026\\install01.ps1",
+    "Parameters": ["SQLServer", "AlwaysOn"]
+  }
+}
