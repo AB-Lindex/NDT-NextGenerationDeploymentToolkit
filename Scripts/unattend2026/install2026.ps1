@@ -15,8 +15,8 @@ $settingsPath = "C:\temp\settings.json"
 if (Test-Path $settingsPath) {
     $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
     Write-Host "Mapping deployment share..." -ForegroundColor Cyan
-    Add-Content -Path $LogPath -Value "Mapping deployment share: $($settings.Share)"
-    net use Z: "$($settings.Share)" /user:"$($settings.Username)" "$($settings.Password)" /persistent:no
+    Add-Content -Path $LogPath -Value "Mapping deployment share: $($settings.Deploy.Share)"
+    net use Z: "$($settings.Deploy.Share)" /user:"$($settings.Deploy.Username)" "$($settings.Deploy.Password)" /persistent:no
 } else {
     Write-Error "Settings file not found: $settingsPath"
     Add-Content -Path $LogPath -Value "ERROR: Settings file not found"

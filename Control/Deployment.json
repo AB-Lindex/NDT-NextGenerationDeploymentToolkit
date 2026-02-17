@@ -37,6 +37,22 @@
       "Reference": "Install App2026"
     }
   },
+  "SQL2025": {
+    "Step1": {
+      "Description": "ADLogon",
+      "Reference": "ADLogon"
+    },
+    "Step2": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
+  },
+  "RebootMachine": {
+    "Step1": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
+  },
   "Admin password never expires": {
     "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
   },
@@ -58,12 +74,16 @@
   "Enable SMC": {
     "Script": "\\Applications2026\\Server Manager Client\\enable-smc.ps1"
   },
+  "Install App2026": {
+    "Script": "\\Applications\\App2026\\install01.ps1",
+    "Parameters": ["SQLServer", "AlwaysOn"]
+  },
   "Reboot": {
     "Type": "Reboot",
     "Description": "Restart the computer"
   },
-  "Install App2026": {
-    "Script": "\\Applications\\App2026\\install01.ps1",
-    "Parameters": ["SQLServer", "AlwaysOn"]
+  "ADLogon": {
+    "Type": "AutoLogon",
+    "Description": "Configure automatic logon"
   }
 }

@@ -11,7 +11,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings", "SMC", "DeploymentGroup3"]
+    "DeploymentSteps": ["General Settings","SMC","DeploymentGroup3"]
   },
   "00:15:5D:02:56:02": {
     "OS": "WIN2025DCC",
@@ -23,7 +23,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings", "SMC"]
+    "DeploymentSteps": ["General Settings","SMC","SQL2025"]
   },
   "Sweden": {
     "InputLocale": "sv-SE",
@@ -46,6 +46,10 @@
   "Deploy": {
     "Share": "\\\\dc01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",
+    "Password": "P@ssw0rd2026"
+  },
+    "ADLogon": {
+    "Username": "Corp\\ADLogon",
     "Password": "P@ssw0rd2026"
   }
 }
