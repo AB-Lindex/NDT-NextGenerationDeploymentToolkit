@@ -53,6 +53,15 @@
       "Reference": "Reboot"
     }
   },
+  "CreateReferenceImage": {
+    "Step1": {
+      "Description": "Reference deployment",
+      "Reference": "ReferenceImage"
+    }
+  },
+  "ReferenceImage": {
+      "Script": "\\Applications\\CreateReference\\Install.ps1"
+    },
   "Admin password never expires": {
     "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
   },

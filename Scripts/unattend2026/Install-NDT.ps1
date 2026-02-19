@@ -1,3 +1,8 @@
+# NDT  - Next Deployment Tool for 2026 Unattended Deployment.
+# This script is designed to run on the deployed machine after the initial Windows PE phase, and will execute deployment steps defined in Deployment.json based on the machine's MAC address.
+# It supports executing scripts, configuring autologon, and handling reboots as part of the deployment process.
+
+
 # Get MAC address
 $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 

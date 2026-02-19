@@ -96,6 +96,85 @@ foreach ($section in $sections.GetEnumerator()) {
     }
 }
 
+# Post-process unattend.xml for special configurations
+# $needsPostProcessing = $false
+
+# Check if DHCP is requested (IPAddress = "DHCP")
+$isDHCP = $false
+if ($machineConfig.IPAddress -eq "DHCP") {
+    $isDHCP = $true
+} else {
+    foreach ($section in $sections.GetEnumerator()) {
+        if ($section.Value.IPAddress -eq "DHCP") {
+            $isDHCP = $true
+            break
+        }
+    }
+}
+
+# Check if workgroup join is requested (JoinDomain = "WORKGROUP" or empty)
+$isWorkgroup = $false
+$joinDomain = ""
+if ($machineConfig.JoinDomain) {
+    $joinDomain = $machineConfig.JoinDomain
+}
+foreach ($section in $sections.GetEnumerator()) {
+    if ($section.Value.JoinDomain) {
+        $joinDomain = $section.Value.JoinDomain
+    }
+}
+if ($joinDomain -eq "WORKGROUP" -or $joinDomain -eq "") {
+    $isWorkgroup = $true
+}
+
+# Load as XML for manipulation
+if ($isDHCP -or $isWorkgroup) {
+    Write-Host "`nPost-processing unattend.xml..." -ForegroundColor Cyan
+    
+    [xml]$xmlDoc = $unattendContent
+    $nsmgr = New-Object System.Xml.XmlNamespaceManager($xmlDoc.NameTable)
+    $nsmgr.AddNamespace("u", "urn:schemas-microsoft-com:unattend")
+    
+    # Handle DHCP configuration
+    if ($isDHCP) {
+        Write-Host "  Configuring for DHCP..." -ForegroundColor Yellow
+        
+        # Find the Microsoft-Windows-TCPIP component in specialize pass
+        $tcpipComponent = $xmlDoc.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-TCPIP']", $nsmgr)
+        
+        if ($tcpipComponent) {
+            # Remove the static IP configuration - remove the entire Interfaces node
+            $interfaces = $tcpipComponent.SelectSingleNode("u:Interfaces", $nsmgr)
+            if ($interfaces) {
+                $tcpipComponent.RemoveChild($interfaces) | Out-Null
+                Write-Host "    Removed static IP configuration" -ForegroundColor Gray
+            }
+        }
+        
+        # Find and remove the DNS client component
+        $dnsComponent = $xmlDoc.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-DNS-Client']", $nsmgr)
+        if ($dnsComponent) {
+            $dnsComponent.ParentNode.RemoveChild($dnsComponent) | Out-Null
+            Write-Host "    Removed static DNS configuration" -ForegroundColor Gray
+        }
+    }
+    
+    # Handle workgroup configuration
+    if ($isWorkgroup) {
+        Write-Host "  Configuring for workgroup (no domain join)..." -ForegroundColor Yellow
+        
+        # Find and remove the Microsoft-Windows-UnattendedJoin component
+        $joinComponent = $xmlDoc.SelectSingleNode("//u:settings[@pass='specialize']/u:component[@name='Microsoft-Windows-UnattendedJoin']", $nsmgr)
+        if ($joinComponent) {
+            $joinComponent.ParentNode.RemoveChild($joinComponent) | Out-Null
+            Write-Host "    Removed domain join configuration" -ForegroundColor Gray
+        }
+    }
+    
+    # Save modified XML
+    $unattendContent = $xmlDoc.OuterXml
+}
+
 # Ensure c:\temp exists
 if (-not (Test-Path "c:\temp")) {
     New-Item -Path "c:\temp" -ItemType Directory -Force | Out-Null

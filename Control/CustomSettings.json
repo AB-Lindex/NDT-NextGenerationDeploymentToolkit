@@ -15,6 +15,16 @@
   },
   "00:15:5D:02:56:02": {
     "OS": "WIN2025DCC",
+    "Computername": "ref-win2025dcc",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "RefSettings": "RefSettings"
+    },
+    "DeploymentSteps": ["CreateReferenceImage"]
+  },
+  "xx:15:5D:02:56:02": {
+    "OS": "WIN2025DCC",
     "Computername": "srv03",
     "IPAddress": "10.0.3.23/24",
     "AdminPassword": "Qantas-777",
@@ -42,6 +52,18 @@
     "OU": "ou=Servers,dc=corp,dc=dev",
     "User": "ADJoin2026",
     "Password": "P@ssw0rd2026"
+  },
+  "RefSettings": {
+    "Sysprep": "Generalize",
+    "Shutdown": "Shutdown",
+    "IPAddress": "DHCP",
+    "DefaultGateway": "",
+    "DNSServers": "",
+    "JoinDomain": "WORKGROUP",
+    "Domain": "",
+    "OU": "",
+    "User": "",
+    "Password": ""
   },
   "Deploy": {
     "Share": "\\\\dc01.corp.dev\\Deploy2026",

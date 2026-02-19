@@ -18,5 +18,3 @@ net use Z: "$($settings.Share)" /user:"$($settings.Username)" "$($settings.Passw
 read-host "press enter to continue with unmapping deployment share..."
 
 net use Z: /D /Y
-
-read-host "press enter to reboot..."
