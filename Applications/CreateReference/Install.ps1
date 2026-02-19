@@ -98,39 +98,71 @@ Write-Output "--------------------------------------"
 $useReboot = $false
 
 try {
-    # Find the network/PXE boot entry in the UEFI firmware boot manager
-    Write-Output "Scanning firmware boot entries for network boot option..."
-    $fwEntries = bcdedit /enum "{fwbootmgr}" 2>&1
-    Write-Output $fwEntries
+    # Enumerate all UEFI firmware application entries.
+    # Note: `bcdedit /enum {fwbootmgr}` only lists GUIDs referenced BY {fwbootmgr};
+    # `bcdedit /enum firmware` lists the actual firmware application objects with
+    # their description, which is what we need to match against.
+    Write-Output "Scanning UEFI firmware application entries..."
+    $firmwareEntries = bcdedit /enum firmware 2>&1
 
-    # Look for a network-related entry GUID in the displayorder
+    if ($LASTEXITCODE -ne 0) {
+        throw "bcdedit /enum firmware failed (exit $LASTEXITCODE) - system may be BIOS/Legacy, not UEFI: $firmwareEntries"
+    }
+
+    Write-Output "--- Raw firmware entries ---"
+    Write-Output $firmwareEntries
+    Write-Output "----------------------------"
+
+    # Split the output into per-entry blocks (each entry starts with a blank line
+    # followed by a description line and then key/value pairs).
+    $blocks = ($firmwareEntries -join "`n") -split "(?m)(?=^Firmware Application)"
+    Write-Output "Found $($blocks.Count) firmware application block(s)"
+
     $networkGuid = $null
-    $guids = [regex]::Matches($fwEntries, '\{[0-9a-fA-F\-]+\}') | ForEach-Object { $_.Value }
 
-    foreach ($guid in $guids) {
-        $entry = bcdedit /enum $guid 2>&1
-        if ($entry -match 'network|pxe|nic|ethernet' -or $entry -match 'description\s+Network') {
-            $networkGuid = $guid
-            Write-Output "  [OK] Found network boot entry: $guid"
+    foreach ($block in $blocks) {
+        # Extract the 'identifier' value, e.g. {a1b2c3d4-...}
+        if ($block -match 'identifier\s+(\{[0-9a-fA-F\-]+\})') {
+            $candidateGuid = $Matches[1]
+        } else {
+            continue
+        }
+
+        # Match common network/PXE boot entry description patterns (case-insensitive).
+        # Covers: "EFI Network", "IPv4", "IPv6", "PXE", "NIC", "Ethernet",
+        #         "Network Adapter", "LAN", "UNDI", Hyper-V synthetic NIC descriptions.
+        if ($block -imatch 'IPv4|IPv6|PXE|EFI Network|Network Adapter|LAN Boot|UNDI|NIC Boot|Ethernet') {
+            $networkGuid = $candidateGuid
+            Write-Output "  [OK] Found network boot entry: $networkGuid"
+            Write-Output "  Block: $($block.Trim() -replace "`n", ' | ')"
             break
         }
     }
 
     if ($networkGuid) {
-        # Set as one-time boot sequence - fires once then reverts
+        # Set as one-time boot sequence — fires once then reverts to normal boot order.
+        Write-Output "  Setting one-time bootsequence to: $networkGuid"
         $r = bcdedit /set "{fwbootmgr}" bootsequence $networkGuid 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "bootsequence failed: $r" }
+        if ($LASTEXITCODE -ne 0) { throw "bootsequence failed (exit $LASTEXITCODE): $r" }
 
-        Write-Output "  [OK] One-time PXE boot configured"
-        Write-Output "  System will PXE boot into WDS after sysprep reboot"
+        Write-Output "  [OK] One-time PXE boot configured successfully"
+        Write-Output "  System will PXE boot into WDS/WinPE after sysprep reboot"
         $useReboot = $true
     } else {
-        Write-Warning "No network boot entry found in firmware boot manager"
-        Write-Warning "Ensure 'Enable network boot' is checked on the VM network adapter"
-        Write-Output "Falling back to shutdown mode - configure PXE boot manually then start VM"
+        Write-Warning "No network/PXE boot entry found in UEFI firmware application list."
+        Write-Warning ""
+        Write-Warning "  --> For Hyper-V Gen 2 VMs you must set boot order from the HOST:"
+        Write-Warning "      Set-VMFirmware -VMName '<vmname>' -FirstBootDevice (Get-VMNetworkAdapter -VMName '<vmname>')"
+        Write-Warning "  --> Or enable 'Network Boot' in VM firmware settings before this script runs."
+        Write-Warning ""
+        Write-Output "Falling back to shutdown mode - configure PXE boot manually then start the VM."
     }
 } catch {
     Write-Warning "Failed to configure PXE boot sequence: $_"
+    Write-Warning ""
+    Write-Warning "  --> For Hyper-V Gen 2, run this on the HOST (not inside the VM):"
+    Write-Warning "      Set-VMFirmware -VMName '<vmname>' -FirstBootDevice (Get-VMNetworkAdapter -VMName '<vmname>')"
+    Write-Warning ""
     Write-Output "Falling back to shutdown mode"
 }
 

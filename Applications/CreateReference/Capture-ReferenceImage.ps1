@@ -18,7 +18,20 @@ param(
     [string]$TargetDrive = "C:",
     
     [Parameter(Mandatory=$false)]
-    [string]$OutputPath = "Z:\Reference\ref-image.wim"
+    [string]$OutputPath = "Z:\Reference\ref-image.wim",
+
+    # Scratch directory for DISM temp files. MUST be outside the WinPE RAM disk (X:).
+    # Default points to the deployment share so WinPE RAM is not exhausted.
+    # In WinPE the default DISM scratch dir is X:\Windows\Temp (32 MB) - far too small
+    # for capturing a full OS, causing DISM to abort after just a few percent.
+    [Parameter(Mandatory=$false)]
+    [string]$ScratchDir = "Z:\Scratch",
+
+    # Compression level. Use 'fast' in WinPE to avoid OOM with limited RAM.
+    # 'max' (LZX) is extremely memory-intensive and will fail in low-memory WinPE environments.
+    [Parameter(Mandatory=$false)]
+    [ValidateSet("none","fast","max")]
+    [string]$Compress = "fast"
 )
 
 Write-Output "========================================"
@@ -38,12 +51,13 @@ if (-not (Test-Path $outputDir)) {
     New-Item -Path $outputDir -ItemType Directory -Force | Out-Null
 }
 
-# Remove existing WIM if present (DISM errors with code 80 if file already exists)
-if (Test-Path $OutputPath) {
-    Write-Output "Removing existing WIM: $OutputPath"
-    Remove-Item -Path $OutputPath -Force
-    Write-Output "  [OK] Existing WIM removed"
+# Ensure DISM scratch directory exists on the deployment share (NOT on WinPE X: RAM disk)
+if (-not (Test-Path $ScratchDir)) {
+    Write-Output "Creating DISM scratch directory: $ScratchDir"
+    New-Item -Path $ScratchDir -ItemType Directory -Force | Out-Null
 }
+Write-Output "DISM scratch dir : $ScratchDir"
+Write-Output "DISM compression : $Compress"
 
 # Display capture parameters
 Write-Output "Capture Parameters:"
@@ -53,29 +67,54 @@ Write-Output "  Image Name: $ImageName"
 Write-Output "  Description: $ImageDescription"
 Write-Output ""
 
+# Remove existing WIM if present - DISM errors 80 (file exists) if output already exists
+Write-Output "Checking for existing output file..."
+if (Test-Path $OutputPath) {
+    Write-Output "  Found existing file - removing: $OutputPath"
+    Remove-Item -Path $OutputPath -Force
+    Write-Output "  [OK] Removed"
+} else {
+    Write-Output "  [OK] No existing file found"
+}
+# Show what's in the output directory
+Write-Output "Contents of output directory ($outputDir):"
+Get-ChildItem -Path $outputDir -ErrorAction SilentlyContinue | ForEach-Object {
+    Write-Output "    $($_.Name)  ($($_.Length) bytes)"
+}
 Write-Output ""
+
 Write-Output "Starting image capture..."
 Write-Output "This may take 20-60 minutes depending on system size."
 Write-Output ""
 
+# DISM log — persisted on the deployment share for post-mortem analysis
+$dismLog = Join-Path $outputDir "dism-capture.log"
+
 # Build DISM command
+# IMPORTANT: /ScratchDir must point outside the WinPE RAM disk (X:) otherwise
+# DISM hits ERROR_DISK_FULL (0x80070070) after only a few percent.
+# /Compress:fast is chosen for reliability in low-memory WinPE environments;
+# use /Compress:max only when running from a full Windows OS with plenty of RAM.
 $dismArgs = @(
     "/Capture-Image"
     "/ImageFile:$OutputPath"
     "/CaptureDir:$TargetDrive\"
     "/Name:$ImageName"
     "/Description:$ImageDescription"
-    "/Compress:max"
+    "/Compress:$Compress"
     "/Verify"
+    "/ScratchDir:$ScratchDir"
+    "/LogPath:$dismLog"
 )
 
 try {
-    # Run DISM capture
-    $dismOutput = & dism.exe $dismArgs 2>&1
+    # Run DISM directly — do NOT capture to a variable.
+    # Capturing with $out = & dism.exe ... 2>&1 buffers all output until DISM exits,
+    # making progress invisible and hiding the failure reason until the very end.
+    Write-Output "Calling: dism.exe $($dismArgs -join ' ')"
+    Write-Output ""
+    & dism.exe $dismArgs
     $dismExitCode = $LASTEXITCODE
-    
-    # Display output
-    $dismOutput | ForEach-Object { Write-Output $_ }
     
     if ($dismExitCode -eq 0) {
         Write-Output ""
@@ -83,6 +122,7 @@ try {
         Write-Output "Image capture completed successfully!"
         Write-Output "========================================"
         Write-Output "Image location: $OutputPath"
+        Write-Output "DISM log      : $dismLog"
         
         # Display WIM file info
         if (Test-Path $OutputPath) {
@@ -91,6 +131,7 @@ try {
         }
     } else {
         Write-Error "DISM capture failed with exit code: $dismExitCode"
+        Write-Error "Review DISM log for details: $dismLog"
         exit $dismExitCode
     }
 } catch {
