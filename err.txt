@@ -1,0 +1,28 @@
+Starting image capture...
+This may take 20-60 minutes depending on system size.
+
+
+Deployment Image Servicing and Management tool
+Version: 10.0.28000.1
+
+Saving image
+
+[                           1.0%                           ]
+
+[=                          2.0%                           ]
+
+[=                          3.0%                           ]
+
+[==                         4.0%                           ]
+
+Error: 80
+
+The file exists.
+
+The DISM log file can be found at X:\WINDOWS\Logs\DISM\dism.log
+Z:\Applications\CreateReference\Capture-ReferenceImage.ps1 : DISM capture failed with exit code: 80
+At Z:\Scripts\Unattend2026\install.ps1:40 char:9
++         & $captureScriptPath -ImageName $captureConfig.ImageName -Out ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException
+    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException,Capture-ReferenceImage.ps1

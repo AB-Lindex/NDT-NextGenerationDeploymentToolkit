@@ -11,8 +11,7 @@
 [CmdletBinding()]
 param(
     [string]$SysprepAnswerFile = "$PSScriptRoot\unattend-sysprep.xml",
-    [string]$CaptureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1",
-    [string]$LocalBootWim = "C:\boot2026.wim"
+    [string]$CaptureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 )
 
 Write-Output "========================================"
@@ -93,125 +92,46 @@ try {
 
 # Step 3: Configure automatic reboot into WinPE RAM disk
 Write-Output ""
-Write-Output "Step 3: Configuring automatic reboot to WinPE..."
+Write-Output "Step 3: Configuring one-time PXE boot..."
 Write-Output "--------------------------------------"
 
-# Path to boot WIM - try to locate it
-$bootWimPaths = @(
-    "\\$($env:LOGONSERVER.TrimStart('\'))\REMINST\Boot\x64\Images\boot.wim",  # WDS default location
-    "Z:\Boot\boot2026.wim",  # Deployment share
-    "C:\RemoteInstall\Boot\x64\Images\boot.wim"  # Local WDS
-)
+$useReboot = $false
 
-$bootWimPath = $null
-foreach ($path in $bootWimPaths) {
-    if (Test-Path $path) {
-        $bootWimPath = $path
-        Write-Output "Found boot WIM on network: $bootWimPath"
-        break
-    }
-}
+try {
+    # Find the network/PXE boot entry in the UEFI firmware boot manager
+    Write-Output "Scanning firmware boot entries for network boot option..."
+    $fwEntries = bcdedit /enum "{fwbootmgr}" 2>&1
+    Write-Output $fwEntries
 
-if (-not $bootWimPath) {
-    Write-Warning "Could not locate boot2026.wim automatically"
-    Write-Output "Please specify the path to your boot WIM (network path):"
-    $bootWimPath = Read-Host "Boot WIM path"
-    if (-not (Test-Path $bootWimPath)) {
-        Write-Error "Boot WIM not found: $bootWimPath"
-        Write-Output "Continuing with /shutdown - you will need to manually PXE boot..."
-        $useReboot = $false
-    } else {
-        $useReboot = $true
-    }
-} else {
-    $useReboot = $true
-}
+    # Look for a network-related entry GUID in the displayorder
+    $networkGuid = $null
+    $guids = [regex]::Matches($fwEntries, '\{[0-9a-fA-F\-]+\}') | ForEach-Object { $_.Value }
 
-# BCD ramdisk requires a LOCAL path - network paths are not available at boot time
-# Copy the boot WIM to local drive before configuring BCD
-if ($useReboot) {
-    Write-Output "Copying boot WIM to local drive (required for BCD ramdisk)..."
-    Write-Output "  Source: $bootWimPath"
-    Write-Output "  Destination: $LocalBootWim"
-    try {
-        Copy-Item -Path $bootWimPath -Destination $LocalBootWim -Force
-        if (Test-Path $LocalBootWim) {
-            Write-Output "  [OK] Boot WIM copied locally: $LocalBootWim"
-            $bootWimPath = $LocalBootWim
-        } else {
-            throw "File not found after copy"
+    foreach ($guid in $guids) {
+        $entry = bcdedit /enum $guid 2>&1
+        if ($entry -match 'network|pxe|nic|ethernet' -or $entry -match 'description\s+Network') {
+            $networkGuid = $guid
+            Write-Output "  [OK] Found network boot entry: $guid"
+            break
         }
-    } catch {
-        Write-Error "Failed to copy boot WIM locally: $_"
-        Write-Output "Falling back to shutdown mode..."
-        $useReboot = $false
     }
-}
 
-if ($useReboot) {
-    Write-Output "Configuring BCD for one-time WinPE RAM disk boot..."
-    Write-Output "Boot WIM: $bootWimPath"
-    
-    try {
-        # Step 1: Ensure {ramdiskoptions} exists and is configured
-        Write-Output "Configuring ramdisk options..."
-        bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" 2>&1 | Out-Null  # OK if already exists
-        
-        $r1 = bcdedit /set "{ramdiskoptions}" ramdisksdidevice boot 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "ramdisksdidevice failed: $r1" }
-        Write-Output "  [OK] ramdisksdidevice"
-        
-        $r2 = bcdedit /set "{ramdiskoptions}" ramdisksdipath \boot\boot.sdi 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "ramdisksdipath failed: $r2" }
-        Write-Output "  [OK] ramdisksdipath"
-        
-        # Step 2: Create the boot entry - bcdedit generates the GUID, we capture it from output
-        Write-Output "Creating WinPE boot entry..."
-        $createOutput = bcdedit /create /d "WinPE Ramdisk" /application osloader 2>&1
-        Write-Output "  Create output: $createOutput"
-        
-        $ramdiskGuid = [regex]::Match($createOutput, '\{[0-9a-fA-F\-]+\}').Value
-        if (-not $ramdiskGuid) { throw "Could not parse GUID from bcdedit output: $createOutput" }
-        Write-Output "  [OK] Boot entry GUID: $ramdiskGuid"
-        
-        # Step 3: Configure the boot entry
-        $r3 = bcdedit /set $ramdiskGuid systemroot \windows 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "systemroot failed: $r3" }
-        
-        $r4 = bcdedit /set $ramdiskGuid detecthal yes 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "detecthal failed: $r4" }
-        
-        $r5 = bcdedit /set $ramdiskGuid winpe yes 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "winpe failed: $r5" }
-        
-        $r6 = bcdedit /set $ramdiskGuid osdevice "ramdisk=[$bootWimPath],{ramdiskoptions}" 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "osdevice failed: $r6" }
-        
-        $r7 = bcdedit /set $ramdiskGuid device "ramdisk=[$bootWimPath],{ramdiskoptions}" 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "device failed: $r7" }
-        
-        # Step 4: Set as one-time boot (bootsequence removes itself after one boot)
-        $r8 = bcdedit /bootsequence $ramdiskGuid 2>&1
-        if ($LASTEXITCODE -ne 0) { throw "bootsequence failed: $r8" }
-        
-        # Reduce timeout so it boots straight into PE
-        bcdedit /timeout 1 2>&1 | Out-Null
-        
-        # Confirm configuration
-        Write-Output ""
-        Write-Output "Boot entry configured:"
-        bcdedit /enum $ramdiskGuid 2>&1
-        Write-Output ""
-        Write-Output "One-time boot sequence set:"
-        bcdedit /enum "{bootmgr}" 2>&1 | Select-String "bootsequence"
-        Write-Output ""
-        Write-Output "  [OK] BCD configured - system will reboot directly into WinPE!"
-        
-    } catch {
-        Write-Warning "Failed to configure BCD for automatic reboot: $_"
-        Write-Output "Falling back to shutdown mode - manual PXE boot required"
-        $useReboot = $false
+    if ($networkGuid) {
+        # Set as one-time boot sequence - fires once then reverts
+        $r = bcdedit /set "{fwbootmgr}" bootsequence $networkGuid 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "bootsequence failed: $r" }
+
+        Write-Output "  [OK] One-time PXE boot configured"
+        Write-Output "  System will PXE boot into WDS after sysprep reboot"
+        $useReboot = $true
+    } else {
+        Write-Warning "No network boot entry found in firmware boot manager"
+        Write-Warning "Ensure 'Enable network boot' is checked on the VM network adapter"
+        Write-Output "Falling back to shutdown mode - configure PXE boot manually then start VM"
     }
+} catch {
+    Write-Warning "Failed to configure PXE boot sequence: $_"
+    Write-Output "Falling back to shutdown mode"
 }
 
 # Step 4: Run Sysprep

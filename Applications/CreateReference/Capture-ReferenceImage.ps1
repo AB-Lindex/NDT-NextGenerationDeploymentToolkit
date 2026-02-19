@@ -28,11 +28,7 @@ Write-Output ""
 
 # Verify we're in WinPE
 if ($env:COMPUTERNAME -ne "MINWINPC") {
-    Write-Warning "This script is designed to run in Windows PE"
-    $continue = Read-Host "Continue anyway? (yes/no)"
-    if ($continue -ne "yes") {
-        exit 0
-    }
+    Write-Warning "This script is designed to run in Windows PE - continuing anyway"
 }
 
 # Ensure output directory exists
@@ -42,6 +38,13 @@ if (-not (Test-Path $outputDir)) {
     New-Item -Path $outputDir -ItemType Directory -Force | Out-Null
 }
 
+# Remove existing WIM if present (DISM errors with code 80 if file already exists)
+if (Test-Path $OutputPath) {
+    Write-Output "Removing existing WIM: $OutputPath"
+    Remove-Item -Path $OutputPath -Force
+    Write-Output "  [OK] Existing WIM removed"
+}
+
 # Display capture parameters
 Write-Output "Capture Parameters:"
 Write-Output "  Source Drive: $TargetDrive"
@@ -49,13 +52,6 @@ Write-Output "  Output Path: $OutputPath"
 Write-Output "  Image Name: $ImageName"
 Write-Output "  Description: $ImageDescription"
 Write-Output ""
-
-# Confirm before capturing
-$confirm = Read-Host "Start image capture? (yes/no)"
-if ($confirm -ne "yes") {
-    Write-Output "Capture cancelled."
-    exit 0
-}
 
 Write-Output ""
 Write-Output "Starting image capture..."
@@ -108,4 +104,3 @@ Write-Output "  1. Copy the WIM file to your deployment share"
 Write-Output "  2. Update deployment configuration to use the new image"
 Write-Output "  3. Test deployment on a target system"
 Write-Output ""
-Read-Host "Press Enter to exit"
