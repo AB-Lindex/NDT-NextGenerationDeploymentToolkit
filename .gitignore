@@ -6,6 +6,8 @@
 # Exclude a folder at the root of the repository
 Applications2026/
 MDT-Scripts/
+Operating Systems/
+Scratch/
 
 # User-specific files
 *.rsuser
