@@ -94,13 +94,6 @@
                 <Username>Administrator</Username>
                 <LogonCount>999</LogonCount>
             </AutoLogon>
-            <FirstLogonCommands>
-                <SynchronousCommand wcm:action="add">
-                <CommandLine>pwsh.exe -executionpolicy bypass -File c:\temp\install2026.ps1</CommandLine>
-                <Description>Lite Touch new OS</Description>
-                <Order>1</Order>
-                </SynchronousCommand>
-            </FirstLogonCommands>
             <OOBE>
                 <HideEULAPage>true</HideEULAPage>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
@@ -108,6 +101,17 @@
                 <ProtectYourPC>3</ProtectYourPC>
             </OOBE>
             <TimeZone>!TIMEZONE!</TimeZone>
+        </component>
+        <!-- RunSynchronous is used instead of FirstLogonCommands because Server editions
+             (especially Core/no-GUI) skip OOBE and never fire FirstLogonCommands. -->
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Path>pwsh.exe -executionpolicy bypass -File c:\temp\install2026.ps1</Path>
+                    <Description>Lite Touch new OS</Description>
+                    <Order>1</Order>
+                </RunSynchronousCommand>
+            </RunSynchronous>
         </component>
     </settings>
 </unattend>

@@ -14,7 +14,7 @@
     "DeploymentSteps": ["General Settings","SMC","DeploymentGroup3"]
   },
   "00:15:5D:02:56:16": {
-    "OS": "WIN2025DCC",
+    "OS": "WIN2025DC",
     "Computername": "ref-win2025dcc",
     "AdminPassword": "Qantas-777",
     "Sections": {
