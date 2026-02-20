@@ -39,8 +39,12 @@ Write-Output "Reference Image Capture Script (WinPE)"
 Write-Output "========================================"
 Write-Output ""
 
-# Verify we're in WinPE
-if ($env:COMPUTERNAME -ne "MINWINPC") {
+# Verify we're in WinPE.
+# The registry key HKLM:\SYSTEM\CurrentControlSet\Control\MiniNT is created
+# exclusively by the WinPE kernel — it is absent on all full Windows installs.
+# This is the same check MDT/ZTIUtility.vbs uses internally.
+$inWinPE = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\MiniNT"
+if (-not $inWinPE) {
     Write-Warning "This script is designed to run in Windows PE - continuing anyway"
 }
 

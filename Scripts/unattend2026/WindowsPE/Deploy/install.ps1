@@ -15,6 +15,6 @@ net use Z: "$($settings.Share)" /user:"$($settings.Username)" "$($settings.Passw
 
 & "Z:\Scripts\Unattend2026\install.ps1"
 
-read-host "press enter to continue with unmapping deployment share..."
+# read-host "press enter to continue with unmapping deployment share..."
 
 net use Z: /D /Y

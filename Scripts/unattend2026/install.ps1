@@ -47,7 +47,7 @@ if ($captureMode) {
 }
 
 Write-Host "Running normal deployment..." -ForegroundColor Cyan
-read-host "Press Enter to start deployment..."
+# read-host "Press Enter to start deployment..."
 
 # Detect firmware type: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2)
 $firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name "PEFirmwareType" -ErrorAction SilentlyContinue).PEFirmwareType

@@ -34,14 +34,9 @@ Write-Output "  Build Number: $((Get-CimInstance Win32_OperatingSystem).BuildNum
 Write-Output ""
 
 # Confirm before proceeding
-Write-Warning "This script will generalize this system and shut it down."
-Write-Warning "After shutdown, boot into Windows PE to capture the image."
+Write-Warning "This script will generalize this system and reboot it into WinPE automatically."
+Write-Warning "WinPE will capture the image unattended. No manual interaction is required."
 Write-Output ""
-$confirm = Read-Host "Are you ready to proceed? (yes/no)"
-if ($confirm -ne "yes") {
-    Write-Output "Operation cancelled by user."
-    exit 0
-}
 
 # Step 1: Prepare for sysprep
 Write-Output ""
@@ -90,104 +85,54 @@ try {
     Write-Warning "  Could not create flag file: $_"
 }
 
-# Step 3: Configure BCD to boot WinPE from the local disk (MDT-style, no ISO/DVD needed)
-# This is exactly how MDT's LTIApply.wsf InstallPE() works:
-#   1. Copy boot.sdi and the WinPE WIM to the boot partition
-#   2. Add a RamDisk BCD entry pointing at the WIM
-#   3. Set it as the default with a 30-second timeout
-# On next reboot Windows Boot Manager boots WinPE automatically — zero manual interaction.
+# Step 3: Extract WinPE files from ISO (done BEFORE sysprep so we can validate early)
+# BCD is configured AFTER sysprep completes — sysprep's generalize pass resets custom
+# BCD entries on Vista+, so writing BCD before sysprep would be wiped on reboot.
 Write-Output ""
-Write-Output "Step 3: Configuring BCD for automatic WinPE boot (MDT-style)..."
+Write-Output "Step 3: Extracting WinPE files from ISO..."
 Write-Output "--------------------------------------"
 
-$useReboot  = $true
-$bootDrive  = $env:SystemDrive          # C:   (boot partition = OS partition on Gen 1)
-$wimSrc     = "Z:\Boot\boot2026.wim"    # WinPE WIM on the deployment share
+$bootDrive  = $env:SystemDrive          # C:
 $wimDest    = "$bootDrive\sources\boot.wim"
 $sdiDest    = "$bootDrive\Boot\boot.sdi"
-$guidFile   = "$bootDrive\WinPE-BCD-GUID.txt"  # saved so Capture-ReferenceImage.ps1 can clean up
+$guidFile   = "$bootDrive\WinPE-BCD-GUID.txt"
+$isoPath    = "Z:\Boot\boot2026.iso"
 
-# --- 3a: Get boot.sdi (required for the RAM disk) from the PE ISO ----------
-Write-Output "  Extracting boot.sdi from boot2026.iso..."
-$isoPath = "Z:\Boot\boot2026.iso"
 if (-not (Test-Path $isoPath)) {
-    Write-Error "ISO not found at $isoPath — cannot extract boot.sdi"
+    Write-Error "ISO not found at $isoPath"
     exit 1
 }
 try {
-    $mount      = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
-    $isoDrive   = ($mount | Get-Volume).DriveLetter + ":"
-    $sdiSource  = "$isoDrive\Boot\boot.sdi"
-    if (-not (Test-Path $sdiSource)) {
-        Write-Error "boot.sdi not found inside ISO at $sdiSource"
-        Dismount-DiskImage -ImagePath $isoPath | Out-Null
-        exit 1
+    $mount    = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
+    $isoDrive = ($mount | Get-Volume).DriveLetter + ":"
+
+    $sdiSource = "$isoDrive\Boot\boot.sdi"
+    $wimSource = "$isoDrive\sources\boot.wim"
+    foreach ($f in @($sdiSource, $wimSource)) {
+        if (-not (Test-Path $f)) {
+            Write-Error "Expected file not found inside ISO: $f"
+            Dismount-DiskImage -ImagePath $isoPath | Out-Null
+            exit 1
+        }
     }
-    New-Item -ItemType Directory -Force -Path "$bootDrive\Boot" | Out-Null
+
+    New-Item -ItemType Directory -Force -Path "$bootDrive\Boot"    | Out-Null
+    New-Item -ItemType Directory -Force -Path "$bootDrive\sources" | Out-Null
+
     Copy-Item -Path $sdiSource -Destination $sdiDest -Force
     Write-Output "  [OK] boot.sdi copied to $sdiDest"
+
+    Copy-Item -Path $wimSource -Destination $wimDest -Force
+    Write-Output "  [OK] boot.wim copied to $wimDest ($([math]::Round((Get-Item $wimDest).Length/1MB)) MB)"
+
 } catch {
-    Write-Error "Failed to mount ISO or copy boot.sdi: $_"
+    Write-Error "Failed to extract WinPE files from ISO: $_"
     exit 1
 } finally {
     Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
 }
 
-# --- 3b: Copy the WinPE WIM to C:\sources\ -----------------------------------
-Write-Output "  Copying WinPE WIM to $wimDest..."
-New-Item -ItemType Directory -Force -Path "$bootDrive\sources" | Out-Null
-try {
-    Copy-Item -Path $wimSrc -Destination $wimDest -Force -ErrorAction Stop
-    Write-Output "  [OK] WinPE WIM copied ($([math]::Round((Get-Item $wimDest).Length/1MB)) MB)"
-} catch {
-    Write-Error "Failed to copy WinPE WIM: $_"
-    exit 1
-}
-
-# --- 3c: Configure BCD (mirrors MDT LTIApply.wsf InstallPE / ZTIBCDUtility) -
-Write-Output "  Configuring BCD..."
-
-# Ensure {ramdiskoptions} entry exists
-$enumRam = & bcdedit /enum "{ramdiskoptions}" 2>&1
-if ($LASTEXITCODE -ne 0) {
-    & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" | Out-Null
-}
-& bcdedit /set "{ramdiskoptions}" ramdisksdidevice boot     | Out-Null
-& bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi | Out-Null
-
-# Create a new OSLOADER entry for WinPE
-$createOut  = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
-$winpeGuid  = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
-if (-not $winpeGuid) {
-    Write-Error "bcdedit /create failed: $createOut"
-    exit 1
-}
-Write-Output "  WinPE BCD entry: $winpeGuid"
-
-& bcdedit /set $winpeGuid device    "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" | Out-Null
-& bcdedit /set $winpeGuid path      \Windows\System32\winload.exe                           | Out-Null
-& bcdedit /set $winpeGuid osdevice  "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" | Out-Null
-& bcdedit /set $winpeGuid systemroot \Windows    | Out-Null
-& bcdedit /set $winpeGuid detecthal Yes           | Out-Null
-& bcdedit /set $winpeGuid winpe     Yes           | Out-Null
-& bcdedit /set $winpeGuid nx        OptIn         | Out-Null
-
-# Set as default boot entry; restore after 30 s if WinPE fails to start
-& bcdedit /displayorder $winpeGuid /addfirst | Out-Null
-& bcdedit /default      $winpeGuid           | Out-Null
-& bcdedit /timeout      30                   | Out-Null
-
-# Persist the GUID so Capture-ReferenceImage.ps1 can remove the entry after capture
-Set-Content -Path $guidFile -Value $winpeGuid -Force
-Write-Output "  [OK] BCD configured — $winpeGuid is default (timeout 30 s)"
-Write-Output "  [OK] GUID saved to $guidFile for post-capture cleanup"
-Write-Output "--------------------------------------"
-Write-Output ""
-Write-Output "  Sysprep will reboot the VM. Windows Boot Manager will automatically"
-Write-Output "  boot WinPE from the local disk — no DVD / boot-order change required."
-Write-Output "--------------------------------------"
-
-# Step 4: Run Sysprep
+# Step 4: Pre-flight checks
 Write-Output ""
 Write-Output "Step 4: Pre-flight checks..."
 Write-Output "--------------------------------------"
@@ -205,15 +150,15 @@ if (Test-Path $CaptureScriptPath) {
 } else {
     Write-Error "  [ERROR] Capture script not found!"
     Write-Error "  PE environment will not be able to run capture!"
-    $proceed = Read-Host "Continue anyway? (yes/no)"
-    if ($proceed -ne "yes") {
-        exit 1
-    }
+    exit 1
 }
 
-# Step 5: Run Sysprep
+# Step 5: Run Sysprep with /quit
+# /quit generalizes the OS (same as /reboot or /shutdown) but exits sysprep
+# WITHOUT rebooting. This lets us configure the BCD AFTER generalize completes
+# so sysprep cannot wipe our custom boot entry.
 Write-Output ""
-Write-Output "Step 5: Running Sysprep..."
+Write-Output "Step 5: Running Sysprep (/quit — no reboot yet)..."
 Write-Output "--------------------------------------"
 
 $sysprepPath = "$env:SystemRoot\System32\Sysprep\sysprep.exe"
@@ -222,23 +167,16 @@ if (-not (Test-Path $sysprepPath)) {
     exit 1
 }
 
-# Build sysprep command - use /reboot if BCD configured, /shutdown otherwise
-if ($useReboot) {
-    $sysprepArgs = @("/generalize", "/oobe", "/reboot")
-} else {
-    $sysprepArgs = @("/generalize", "/oobe", "/shutdown")
-}
+$sysprepArgs = @("/generalize", "/oobe", "/quit")
 
-# Use answer file if it exists
 if (Test-Path $SysprepAnswerFile) {
-    Write-Output "Using sysprep answer file: $SysprepAnswerFile"
+    Write-Output "  Using sysprep answer file: $SysprepAnswerFile"
     $sysprepArgs += "/unattend:$SysprepAnswerFile"
 } else {
-    Write-Warning "No sysprep answer file found at: $SysprepAnswerFile"
+    Write-Warning "  No sysprep answer file found at: $SysprepAnswerFile"
 }
 
-Write-Output ""
-Write-Output "Sysprep command: $sysprepPath $($sysprepArgs -join ' ')"
+Write-Output "  Sysprep command: $sysprepPath $($sysprepArgs -join ' ')"
 Write-Output ""
 
 Write-Output "========================================"
@@ -246,27 +184,72 @@ Write-Output "FULLY AUTOMATED CAPTURE — MDT Style!"
 Write-Output "========================================"
 Write-Output ""
 Write-Output "The system will:"
-Write-Output "  1. Generalize with Sysprep (/reboot)"
-Write-Output "  2. Reboot — Windows Boot Manager picks WinPE (BCD default)"
-Write-Output "  3. WinPE detects DeployCapture.flag"
-Write-Output "  4. Capture script runs automatically"
+Write-Output "  1. Generalize with Sysprep (/quit — no reboot yet)"
+Write-Output "  2. Configure BCD after sysprep so nothing can wipe it"
+Write-Output "  3. Reboot — Windows Boot Manager boots WinPE from local disk"
+Write-Output "  4. WinPE detects DeployCapture.flag and runs capture"
 Write-Output "  5. Reference WIM is saved; BCD entry is removed"
 Write-Output ""
 Write-Output "NO MANUAL INTERVENTION REQUIRED."
-Write-Output "No ISO, no DVD boot order change — the BCD on the local disk does it all."
 Write-Output ""
 
-Start-Sleep -Seconds 5
+Start-Sleep -Seconds 3
 
 try {
     Write-Output "Starting sysprep..."
     Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -Wait -NoNewWindow
-    
-    # If we reach here, sysprep completed but didn't shutdown (error condition)
-    Write-Warning "Sysprep completed but system did not shut down."
-    Write-Warning "Check sysprep logs: C:\Windows\System32\Sysprep\Panther\setuperr.log"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Sysprep exited with code $LASTEXITCODE"
+        Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
+        exit 1
+    }
+    Write-Output "  [OK] Sysprep generalise complete (system NOT yet rebooted)"
 } catch {
     Write-Error "Sysprep failed: $_"
-    Write-Error "Check sysprep logs: C:\Windows\System32\Sysprep\Panther\setuperr.log"
+    Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
     exit 1
 }
+
+# Step 6: Configure BCD now — AFTER sysprep has finished generalising
+# Writing BCD here means sysprep can no longer touch it before the reboot.
+Write-Output ""
+Write-Output "Step 6: Configuring BCD for WinPE boot..."
+Write-Output "--------------------------------------"
+
+# Always delete and recreate {ramdiskoptions} to avoid stale data from previous runs
+& bcdedit /delete "{ramdiskoptions}" 2>&1 | Out-Null
+$out = & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" 2>&1 ; Write-Output "  create ramdiskoptions: $out"
+$out = & bcdedit /set "{ramdiskoptions}" ramdisksdidevice "partition=$bootDrive" 2>&1 ; Write-Output "  set ramdisksdidevice : $out"
+$out = & bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi 2>&1          ; Write-Output "  set ramdisksdipath   : $out"
+
+$createOut = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
+Write-Output "  create OSLOADER      : $createOut"
+$winpeGuid = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
+if (-not $winpeGuid) {
+    Write-Error "bcdedit /create failed: $createOut"
+    exit 1
+}
+
+$out = & bcdedit /set $winpeGuid device     "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-Output "  set device    : $out"
+$out = & bcdedit /set $winpeGuid path       \Windows\System32\winload.exe 2>&1                           ; Write-Output "  set path      : $out"
+$out = & bcdedit /set $winpeGuid osdevice   "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-Output "  set osdevice  : $out"
+$out = & bcdedit /set $winpeGuid systemroot \Windows 2>&1                                               ; Write-Output "  set systemroot: $out"
+$out = & bcdedit /set $winpeGuid detecthal  Yes 2>&1                                                    ; Write-Output "  set detecthal : $out"
+$out = & bcdedit /set $winpeGuid winpe      Yes 2>&1                                                    ; Write-Output "  set winpe     : $out"
+$out = & bcdedit /set $winpeGuid nx         OptIn 2>&1                                                  ; Write-Output "  set nx        : $out"
+
+$out = & bcdedit /displayorder $winpeGuid /addfirst 2>&1 ; Write-Output "  displayorder  : $out"
+$out = & bcdedit /default      $winpeGuid 2>&1           ; Write-Output "  set default   : $out"
+$out = & bcdedit /timeout      30 2>&1                   ; Write-Output "  set timeout   : $out"
+
+Set-Content -Path $guidFile -Value $winpeGuid -Force
+Write-Output "  [OK] BCD entry $winpeGuid set as default"
+Write-Output "  [OK] GUID saved to $guidFile"
+
+# Step 7: Reboot — BCD is now set, nothing left to wipe it
+Write-Output ""
+Write-Output "Step 7: Rebooting into WinPE..."
+Write-Output "--------------------------------------"
+Write-Output "  Rebooting in 10 seconds. WinPE capture will run automatically."
+Start-Sleep -Seconds 10
+Restart-Computer -Force
