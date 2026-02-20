@@ -166,6 +166,28 @@ try {
             Write-Output "  [OK] Removed temporary $wimOnBoot"
         }
 
+        # ---------------------------------------------------------------
+        # Weekly build: wipe disk 0 and shutdown
+        # We are running in WinPE from the RAM disk (X:) so disk 0 is
+        # not in use and can be safely wiped.  On next power-on the VM
+        # boots from the DVD/ISO, WinPE finds no DeployCapture.flag,
+        # deploys the OS fresh, and the cycle repeats automatically.
+        # ---------------------------------------------------------------
+        Write-Output ""
+        Write-Output "========================================"
+        Write-Output "  Wiping disk and shutting down..."
+        Write-Output "========================================"
+        Write-Output "  Disk 0 will be wiped in 10 seconds."
+        Write-Output "  Next boot from DVD/ISO will deploy a fresh OS."
+
+        Write-Output "  Running diskpart clean on disk 0..."
+        $diskpartScript = "select disk 0`nclean`nexit"
+        $diskpartScript | diskpart
+        Write-Output "  [OK] Disk 0 wiped"
+
+        Write-Output "  Shutting down..."
+        wpeutil shutdown
+
     } else {
         Write-Error "DISM capture failed with exit code: $dismExitCode"
         Write-Error "Review DISM log for details: $dismLog"
@@ -177,8 +199,4 @@ try {
 }
 
 Write-Output ""
-Write-Output "Next steps:"
-Write-Output "  1. Copy the WIM file to your deployment share"
-Write-Output "  2. Update deployment configuration to use the new image"
-Write-Output "  3. Test deployment on a target system"
-Write-Output ""
+Write-Output "If you reach this line, wpeutil shutdown did not exit the script."
