@@ -129,6 +129,39 @@ try {
             $wimSize = (Get-Item $OutputPath).Length / 1GB
             Write-Output "Image size: $([math]::Round($wimSize, 2)) GB"
         }
+
+        # ---------------------------------------------------------------
+        # BCD cleanup (mirrors MDT post-capture behaviour)
+        # Install.ps1 saved the WinPE BCD GUID to C:\WinPE-BCD-GUID.txt
+        # before sysprep.  Remove that entry so the next reboot goes back
+        # to the original Windows boot entry automatically.
+        # ---------------------------------------------------------------
+        $guidFile = "$TargetDrive\WinPE-BCD-GUID.txt"
+        if (Test-Path $guidFile) {
+            $winpeGuid = (Get-Content $guidFile -Raw).Trim()
+            if ($winpeGuid -match '^\{[0-9a-fA-F-]{36}\}$') {
+                Write-Output ""
+                Write-Output "Removing WinPE BCD boot entry ($winpeGuid)..."
+                & bcdedit /displayorder $winpeGuid /remove 2>&1 | Out-Null
+                & bcdedit /delete       $winpeGuid /cleanup  2>&1 | Out-Null
+                # Restore timeout to 0 so the remaining OS entry boots without a menu
+                & bcdedit /timeout 0 2>&1 | Out-Null
+                Remove-Item $guidFile -Force -ErrorAction SilentlyContinue
+                Write-Output "  [OK] WinPE BCD entry removed \u2014 normal boot restored"
+            } else {
+                Write-Warning "  GUID file contained unexpected content: $winpeGuid"
+            }
+        } else {
+            Write-Warning "  WinPE-BCD-GUID.txt not found at $guidFile \u2014 skipping BCD cleanup"
+        }
+
+        # Remove the WinPE WIM from the boot partition (no longer needed)
+        $wimOnBoot = "$TargetDrive\sources\boot.wim"
+        if (Test-Path $wimOnBoot) {
+            Remove-Item $wimOnBoot -Force -ErrorAction SilentlyContinue
+            Write-Output "  [OK] Removed temporary $wimOnBoot"
+        }
+
     } else {
         Write-Error "DISM capture failed with exit code: $dismExitCode"
         Write-Error "Review DISM log for details: $dismLog"

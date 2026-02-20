@@ -90,33 +90,101 @@ try {
     Write-Warning "  Could not create flag file: $_"
 }
 
-# Step 3: Prepare for ISO boot (Hyper-V Generation 1 / BIOS)
-# Gen 1 VMs use a legacy BIOS — bcdedit cannot change the BIOS boot order from inside the guest.
-# Pre-requisites (run ONCE on the Hyper-V HOST before using this script):
-#
-#   $vmName = '<vmname>'
-#   Set-VMDvdDrive -VMName $vmName -Path 'C:\Deploy2026\Boot\boot2026.iso'
-#   Set-VMBios     -VMName $vmName -StartupOrder @('CD','IDE','LegacyNetworkAdapter','Floppy')
-#
-# With the ISO always mounted and CD first in boot order, sysprep can use /reboot.
-# The VM reboots, BIOS finds the ISO on DVD, boots WinPE, and capture runs automatically.
+# Step 3: Configure BCD to boot WinPE from the local disk (MDT-style, no ISO/DVD needed)
+# This is exactly how MDT's LTIApply.wsf InstallPE() works:
+#   1. Copy boot.sdi and the WinPE WIM to the boot partition
+#   2. Add a RamDisk BCD entry pointing at the WIM
+#   3. Set it as the default with a 30-second timeout
+# On next reboot Windows Boot Manager boots WinPE automatically — zero manual interaction.
 Write-Output ""
-Write-Output "Step 3: Gen 1 ISO boot preparation..."
+Write-Output "Step 3: Configuring BCD for automatic WinPE boot (MDT-style)..."
 Write-Output "--------------------------------------"
 
-# ISO is permanently mounted and boot order has CD before HDD — reboot is safe
-$useReboot = $true
+$useReboot  = $true
+$bootDrive  = $env:SystemDrive          # C:   (boot partition = OS partition on Gen 1)
+$wimSrc     = "Z:\Boot\boot2026.wim"    # WinPE WIM on the deployment share
+$wimDest    = "$bootDrive\sources\boot.wim"
+$sdiDest    = "$bootDrive\Boot\boot.sdi"
+$guidFile   = "$bootDrive\WinPE-BCD-GUID.txt"  # saved so Capture-ReferenceImage.ps1 can clean up
 
-Write-Output "  Machine name  : $env:COMPUTERNAME"
-Write-Output "  Boot method   : ISO (Hyper-V Gen 1 / BIOS DVD, always mounted)"
-Write-Output "  Sysprep mode  : /reboot"
+# --- 3a: Get boot.sdi (required for the RAM disk) from the PE ISO ----------
+Write-Output "  Extracting boot.sdi from boot2026.iso..."
+$isoPath = "Z:\Boot\boot2026.iso"
+if (-not (Test-Path $isoPath)) {
+    Write-Error "ISO not found at $isoPath — cannot extract boot.sdi"
+    exit 1
+}
+try {
+    $mount      = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
+    $isoDrive   = ($mount | Get-Volume).DriveLetter + ":"
+    $sdiSource  = "$isoDrive\Boot\boot.sdi"
+    if (-not (Test-Path $sdiSource)) {
+        Write-Error "boot.sdi not found inside ISO at $sdiSource"
+        Dismount-DiskImage -ImagePath $isoPath | Out-Null
+        exit 1
+    }
+    New-Item -ItemType Directory -Force -Path "$bootDrive\Boot" | Out-Null
+    Copy-Item -Path $sdiSource -Destination $sdiDest -Force
+    Write-Output "  [OK] boot.sdi copied to $sdiDest"
+} catch {
+    Write-Error "Failed to mount ISO or copy boot.sdi: $_"
+    exit 1
+} finally {
+    Dismount-DiskImage -ImagePath $isoPath -ErrorAction SilentlyContinue | Out-Null
+}
+
+# --- 3b: Copy the WinPE WIM to C:\sources\ -----------------------------------
+Write-Output "  Copying WinPE WIM to $wimDest..."
+New-Item -ItemType Directory -Force -Path "$bootDrive\sources" | Out-Null
+try {
+    Copy-Item -Path $wimSrc -Destination $wimDest -Force -ErrorAction Stop
+    Write-Output "  [OK] WinPE WIM copied ($([math]::Round((Get-Item $wimDest).Length/1MB)) MB)"
+} catch {
+    Write-Error "Failed to copy WinPE WIM: $_"
+    exit 1
+}
+
+# --- 3c: Configure BCD (mirrors MDT LTIApply.wsf InstallPE / ZTIBCDUtility) -
+Write-Output "  Configuring BCD..."
+
+# Ensure {ramdiskoptions} entry exists
+$enumRam = & bcdedit /enum "{ramdiskoptions}" 2>&1
+if ($LASTEXITCODE -ne 0) {
+    & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" | Out-Null
+}
+& bcdedit /set "{ramdiskoptions}" ramdisksdidevice boot     | Out-Null
+& bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi | Out-Null
+
+# Create a new OSLOADER entry for WinPE
+$createOut  = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
+$winpeGuid  = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
+if (-not $winpeGuid) {
+    Write-Error "bcdedit /create failed: $createOut"
+    exit 1
+}
+Write-Output "  WinPE BCD entry: $winpeGuid"
+
+& bcdedit /set $winpeGuid device    "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" | Out-Null
+& bcdedit /set $winpeGuid path      \Windows\System32\winload.exe                           | Out-Null
+& bcdedit /set $winpeGuid osdevice  "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" | Out-Null
+& bcdedit /set $winpeGuid systemroot \Windows    | Out-Null
+& bcdedit /set $winpeGuid detecthal Yes           | Out-Null
+& bcdedit /set $winpeGuid winpe     Yes           | Out-Null
+& bcdedit /set $winpeGuid nx        OptIn         | Out-Null
+
+# Set as default boot entry; restore after 30 s if WinPE fails to start
+& bcdedit /displayorder $winpeGuid /addfirst | Out-Null
+& bcdedit /default      $winpeGuid           | Out-Null
+& bcdedit /timeout      30                   | Out-Null
+
+# Persist the GUID so Capture-ReferenceImage.ps1 can remove the entry after capture
+Set-Content -Path $guidFile -Value $winpeGuid -Force
+Write-Output "  [OK] BCD configured — $winpeGuid is default (timeout 30 s)"
+Write-Output "  [OK] GUID saved to $guidFile for post-capture cleanup"
+Write-Output "--------------------------------------"
 Write-Output ""
-Write-Output "  PRE-REQUISITES — must be configured ONCE on the Hyper-V HOST:"
-Write-Output "    Set-VMDvdDrive -VMName '$env:COMPUTERNAME' -Path 'C:\Deploy2026\Boot\boot2026.iso'"
-Write-Output "    Set-VMBios     -VMName '$env:COMPUTERNAME' -StartupOrder @('CD','IDE','LegacyNetworkAdapter','Floppy')"
-Write-Output ""
-Write-Output "  After capture WinPE will halt. Eject the ISO from the host to restore normal boot:"
-Write-Output "    Set-VMDvdDrive -VMName '$env:COMPUTERNAME' -Path `$null"
+Write-Output "  Sysprep will reboot the VM. Windows Boot Manager will automatically"
+Write-Output "  boot WinPE from the local disk — no DVD / boot-order change required."
 Write-Output "--------------------------------------"
 
 # Step 4: Run Sysprep
@@ -173,28 +241,19 @@ Write-Output ""
 Write-Output "Sysprep command: $sysprepPath $($sysprepArgs -join ' ')"
 Write-Output ""
 
-if ($useReboot) {
-    Write-Output "========================================"
-    Write-Output "FULLY AUTOMATED CAPTURE - MDT Style!"
-    Write-Output "========================================"
-    Write-Output ""
-    Write-Output "The system will:"
-    Write-Output "  1. Generalize with sysprep"
-    Write-Output "  2. Automatically reboot into WinPE (RAM disk)"
-    Write-Output "  3. PE will detect DeployCapture.flag"
-    Write-Output "  4. Capture script runs automatically"
-    Write-Output "  5. Reference WIM is created"
-    Write-Output ""
-    Write-Output "NO MANUAL INTERVENTION REQUIRED!"
-    Write-Output "Just wait for the process to complete."
-} else {
-    Write-Output "The system will be generalized and shut down."
-    Write-Output ""
-    Write-Output "MANUAL STEPS REQUIRED AFTER SHUTDOWN:"
-    Write-Output "  1. Configure VM to PXE boot (Firmware settings)"
-    Write-Output "  2. Start the VM"
-    Write-Output "  3. PE will detect DeployCapture.flag and run capture"
-}
+Write-Output "========================================"
+Write-Output "FULLY AUTOMATED CAPTURE — MDT Style!"
+Write-Output "========================================"
+Write-Output ""
+Write-Output "The system will:"
+Write-Output "  1. Generalize with Sysprep (/reboot)"
+Write-Output "  2. Reboot — Windows Boot Manager picks WinPE (BCD default)"
+Write-Output "  3. WinPE detects DeployCapture.flag"
+Write-Output "  4. Capture script runs automatically"
+Write-Output "  5. Reference WIM is saved; BCD entry is removed"
+Write-Output ""
+Write-Output "NO MANUAL INTERVENTION REQUIRED."
+Write-Output "No ISO, no DVD boot order change — the BCD on the local disk does it all."
 Write-Output ""
 
 Start-Sleep -Seconds 5
