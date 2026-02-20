@@ -89,6 +89,16 @@ try {
         Write-Host "  [OK] Copied: $($file.Name)" -ForegroundColor Gray
     }
 
+    # Inject Unattend.xml into Windows\System32\ so WinPE auto-runs install.ps1 on boot
+    $unattendSource = Join-Path $scriptDir "Unattend.xml"
+    $unattendDest   = Join-Path $mountDir "Windows\System32\Unattend.xml"
+    if (Test-Path $unattendSource) {
+        Copy-Item -Path $unattendSource -Destination $unattendDest -Force
+        Write-Host "  [OK] Unattend.xml injected -> Windows\System32\Unattend.xml" -ForegroundColor Gray
+    } else {
+        Write-Warning "  Unattend.xml not found at: $unattendSource — WinPE will not auto-run install.ps1"
+    }
+
     # -------------------------------------------------------
     # Step 4: Unmount and commit WIM
     # -------------------------------------------------------

@@ -47,6 +47,12 @@
       "Reference": "Reboot"
     }
   },
+  "Powershell7": {
+    "Step1": {
+      "Description": "Install Powershell 7",
+      "Reference": "Install PowerShell 7"
+    }
+  },
   "RebootMachine": {
     "Step1": {
       "Description": "Reboot server",
@@ -94,5 +100,9 @@
   "ADLogon": {
     "Type": "AutoLogon",
     "Description": "Configure automatic logon"
+  },
+  "Install PowerShell 7": {
+    "Script": "\\Applications\\PowerShell7\\Install.ps1",
+    "Description": "Install PowerShell 7"
   }
 }

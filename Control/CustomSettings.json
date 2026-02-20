@@ -21,7 +21,7 @@
       "Locale": "Sweden",
       "RefSettings": "RefSettings"
     },
-    "DeploymentSteps": ["CreateReferenceImage"]
+    "DeploymentSteps": ["Powershell7","CreateReferenceImage"]
   },
   "00:15:5D:02:56:02": {
     "OS": "WIN2025DCC",

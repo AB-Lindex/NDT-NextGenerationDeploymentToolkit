@@ -86,7 +86,7 @@ try {
 }
 
 # Step 3: Extract WinPE files from ISO (done BEFORE sysprep so we can validate early)
-# BCD is configured AFTER sysprep completes — sysprep's generalize pass resets custom
+# BCD is configured AFTER sysprep completes - sysprep's generalize pass resets custom
 # BCD entries on Vista+, so writing BCD before sysprep would be wiped on reboot.
 Write-Output ""
 Write-Output "Step 3: Extracting WinPE files from ISO..."
@@ -158,7 +158,7 @@ if (Test-Path $CaptureScriptPath) {
 # WITHOUT rebooting. This lets us configure the BCD AFTER generalize completes
 # so sysprep cannot wipe our custom boot entry.
 Write-Output ""
-Write-Output "Step 5: Running Sysprep (/quit — no reboot yet)..."
+Write-Output "Step 5: Running Sysprep (/quit - no reboot yet)..."
 Write-Output "--------------------------------------"
 
 $sysprepPath = "$env:SystemRoot\System32\Sysprep\sysprep.exe"
@@ -180,13 +180,13 @@ Write-Output "  Sysprep command: $sysprepPath $($sysprepArgs -join ' ')"
 Write-Output ""
 
 Write-Output "========================================"
-Write-Output "FULLY AUTOMATED CAPTURE — MDT Style!"
+Write-Output "FULLY AUTOMATED CAPTURE - MDT Style!"
 Write-Output "========================================"
 Write-Output ""
 Write-Output "The system will:"
-Write-Output "  1. Generalize with Sysprep (/quit — no reboot yet)"
+Write-Output "  1. Generalize with Sysprep (/quit - no reboot yet)"
 Write-Output "  2. Configure BCD after sysprep so nothing can wipe it"
-Write-Output "  3. Reboot — Windows Boot Manager boots WinPE from local disk"
+Write-Output "  3. Reboot - Windows Boot Manager boots WinPE from local disk"
 Write-Output "  4. WinPE detects DeployCapture.flag and runs capture"
 Write-Output "  5. Reference WIM is saved; BCD entry is removed"
 Write-Output ""
@@ -210,7 +210,7 @@ try {
     exit 1
 }
 
-# Step 6: Configure BCD now — AFTER sysprep has finished generalising
+# Step 6: Configure BCD now - AFTER sysprep has finished generalising
 # Writing BCD here means sysprep can no longer touch it before the reboot.
 Write-Output ""
 Write-Output "Step 6: Configuring BCD for WinPE boot..."
@@ -246,7 +246,7 @@ Set-Content -Path $guidFile -Value $winpeGuid -Force
 Write-Output "  [OK] BCD entry $winpeGuid set as default"
 Write-Output "  [OK] GUID saved to $guidFile"
 
-# Step 7: Reboot — BCD is now set, nothing left to wipe it
+# Step 7: Reboot - BCD is now set, nothing left to wipe it
 Write-Output ""
 Write-Output "Step 7: Rebooting into WinPE..."
 Write-Output "--------------------------------------"
