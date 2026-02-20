@@ -140,6 +140,19 @@ try {
     $makeMediaCmd = Join-Path $winPERoot "MakeWinPEMedia.cmd"
     $winPEArch    = Join-Path $winPERoot "amd64"   # only present when WinPE Add-on is installed
 
+    # Set ADK environment variables required by copype.cmd / MakeWinPEMedia.cmd.
+    # These are normally injected by DandISetEnv.bat (the Deployment Tools shell),
+    # but since we are running from a plain PowerShell session they must be set manually.
+    $env:WinPERoot    = $winPERoot
+    $env:OSCDImgRoot  = Join-Path $adkRoot "Deployment Tools\amd64\Oscdimg"
+    $env:DISMRoot     = Join-Path $adkRoot "Deployment Tools\amd64\DISM"
+
+    # MakeWinPEMedia.cmd calls 'oscdimg' by bare name — add its directory to PATH
+    # so it is found by cmd.exe child processes.
+    if ($env:PATH -notlike "*$($env:OSCDImgRoot)*") {
+        $env:PATH = $env:OSCDImgRoot + ";" + $env:PATH
+    }
+
     if (-not (Test-Path $copypeCmd)) {
         Write-Warning "copype.cmd not found at: $copypeCmd"
         Write-Warning "The Windows ADK itself does not appear to be installed."
@@ -176,14 +189,8 @@ try {
         # and it cannot locate its own amd64\ subfolder.
         # Fix: explicitly set the process-level CWD before spawning cmd.exe.
         Write-Host "  Running copype amd64 -> $isoStagingDir ..." -ForegroundColor Gray
-        $savedDir = [System.Environment]::CurrentDirectory
-        [System.Environment]::CurrentDirectory = $winPERoot
-        try {
-            cmd.exe /c "copype.cmd amd64 `"$isoStagingDir`""
-            if ($LASTEXITCODE -ne 0) { throw "copype.cmd failed (exit $LASTEXITCODE)" }
-        } finally {
-            [System.Environment]::CurrentDirectory = $savedDir
-        }
+        cmd.exe /c "cd /d `"$winPERoot`" && copype.cmd amd64 `"$isoStagingDir`""
+        if ($LASTEXITCODE -ne 0) { throw "copype.cmd failed (exit $LASTEXITCODE)" }
         Write-Host "  [OK] PE staging directory created" -ForegroundColor Green
 
         # Replace the stock boot.wim with our customised one (credentials + deploy scripts baked in)
@@ -200,14 +207,8 @@ try {
         # MakeWinPEMedia builds a bootable ISO with both BIOS (etfsboot) and EFI boot sectors.
         # The BIOS sector is required for Hyper-V Generation 1 VMs.
         Write-Host "  Running MakeWinPEMedia /iso ..." -ForegroundColor Gray
-        $savedDir = [System.Environment]::CurrentDirectory
-        [System.Environment]::CurrentDirectory = $winPERoot
-        try {
-            cmd.exe /c "MakeWinPEMedia.cmd /iso `"$isoStagingDir`" `"$isoFile`""
-            if ($LASTEXITCODE -ne 0) { throw "MakeWinPEMedia.cmd failed (exit $LASTEXITCODE)" }
-        } finally {
-            [System.Environment]::CurrentDirectory = $savedDir
-        }
+        cmd.exe /c "cd /d `"$winPERoot`" && MakeWinPEMedia.cmd /iso `"$isoStagingDir`" `"$isoFile`""
+        if ($LASTEXITCODE -ne 0) { throw "MakeWinPEMedia.cmd failed (exit $LASTEXITCODE)" }
         Write-Host "  [OK] ISO created: $isoFile" -ForegroundColor Green
 
         # Staging directory is no longer needed — the ISO is self-contained

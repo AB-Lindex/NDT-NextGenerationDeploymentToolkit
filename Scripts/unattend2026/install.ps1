@@ -49,7 +49,14 @@ if ($captureMode) {
 Write-Host "Running normal deployment..." -ForegroundColor Cyan
 read-host "Press Enter to start deployment..."
 
-$diskpartScript = @"
+# Detect firmware type: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2)
+$firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name "PEFirmwareType" -ErrorAction SilentlyContinue).PEFirmwareType
+$isUEFI = ($firmwareType -eq 2)
+
+Write-Host "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
+
+if ($isUEFI) {
+    $diskpartScript = @"
 select disk 0
 clean
 convert gpt
@@ -62,6 +69,19 @@ format quick fs=ntfs label="Windows"
 assign letter=C
 exit
 "@
+} else {
+    # Gen 1 / BIOS: MBR with single active primary partition
+    $diskpartScript = @"
+select disk 0
+clean
+convert mbr
+create partition primary
+format quick fs=ntfs label="Windows"
+assign letter=C
+active
+exit
+"@
+}
 
 $diskpartScript | diskpart
 
@@ -128,5 +148,10 @@ Copy-Item "C:\temp\unattend.xml" "C:\Windows\Panther\unattend.xml"
 Dism.exe /Image:C:\ /Apply-Unattend:"C:\Windows\Panther\unattend.xml"
 remove-item "C:\temp\unattend.xml"
 
-BCDBoot.exe C:\windows /l en-US
+if ($isUEFI) {
+    BCDBoot.exe C:\windows /l en-US /s S: /f UEFI
+} else {
+    # Gen 1 / BIOS: boot store goes on the Windows partition
+    BCDBoot.exe C:\windows /l en-US /s C: /f BIOS
+}
 BCDEdit.exe /timeout 0
