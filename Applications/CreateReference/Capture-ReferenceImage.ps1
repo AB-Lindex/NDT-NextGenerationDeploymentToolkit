@@ -18,7 +18,7 @@ param(
     [string]$TargetDrive = "C:",
     
     [Parameter(Mandatory=$false)]
-    [string]$OutputPath = "Z:\Reference\ref-image.wim",
+    [string]$OutputPath = "",
 
     # Scratch directory for DISM temp files. MUST be outside the WinPE RAM disk (X:).
     # Default points to the deployment share so WinPE RAM is not exhausted.
@@ -38,6 +38,13 @@ Write-Output "========================================"
 Write-Output "Reference Image Capture Script (WinPE)"
 Write-Output "========================================"
 Write-Output ""
+
+# Derive output path from ImageName if not explicitly provided
+if (-not $OutputPath) {
+    $safeImageName = ($ImageName -replace '[^\w\-]', '').ToLower()
+    $OutputPath = "Z:\Reference\$safeImageName.wim"
+    Write-Output "OutputPath derived from ImageName: $OutputPath"
+}
 
 # Verify we're in WinPE.
 # The registry key HKLM:\SYSTEM\CurrentControlSet\Control\MiniNT is created
