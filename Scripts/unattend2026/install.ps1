@@ -132,10 +132,12 @@ Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
 Write-Host "  OS: $($machineConfig.OS)" -ForegroundColor Cyan
 Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
 
-# Get OS WIM path
-$wimPath = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
+# Get OS WIM info (path and index)
+$osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
+$wimPath = $osInfo.Path
+$wimIndex = $osInfo.Index
 
-Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:1 /ApplyDir:C:\
+Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:$wimIndex /ApplyDir:C:\
 
 # Copy and prepare install2026.ps1 with deployment share mapping
 & "Z:\Scripts\Unattend2026\Copy-Install.ps1"

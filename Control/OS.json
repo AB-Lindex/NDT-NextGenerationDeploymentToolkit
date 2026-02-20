@@ -1,6 +1,20 @@
 {
     "WIN2025DCC": {
-        "Path": "Operating systems\\ref-w2025dcc\\w2025dcc.wim"},
+        "Path": "Operating systems\\ref-w2025dcc\\w2025dcc.wim",
+        "Index": 1},
     "WIN2025DCG": {
-        "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim"}
+        "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim",
+        "Index": 1},
+    "WIN2025STD": {
+        "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim",
+        "Index": 1},
+    "WIN2025STDG": {
+        "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim",
+        "Index": 2},
+    "WIN2025DC": {
+        "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim",
+        "Index": 3},
+    "WIN2025DCX": {
+        "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim",
+        "Index": 4}
 }

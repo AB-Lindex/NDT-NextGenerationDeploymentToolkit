@@ -42,10 +42,17 @@ if (-not $wimPath) {
     exit 1
 }
 
+# Get index from OS config, default to 1 if not specified
+$wimIndex = if ($osInfo.Index) { $osInfo.Index } else { 1 }
+
 # Build full path with Z:\
 $fullPath = "Z:\$wimPath"
 
 Write-Host "WIM Path: $fullPath" -ForegroundColor Green
+Write-Host "WIM Index: $wimIndex" -ForegroundColor Green
 
-# Return the path
-return $fullPath
+# Return path and index as object
+return [PSCustomObject]@{
+    Path  = $fullPath
+    Index = $wimIndex
+}
