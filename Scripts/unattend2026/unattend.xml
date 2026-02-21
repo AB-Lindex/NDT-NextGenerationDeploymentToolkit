@@ -22,6 +22,56 @@
     
     <!-- Specialize Settings - Network & Computer Name -->
     <settings pass="specialize">
+        <!--
+            Deployment bootstrap: runs during the specialize pass for ALL deployment types,
+            whether the OS was sysprepped or is a clean (non-sysprepped) image from Microsoft.
+
+            This component pre-registers the deployment script as a RunOnce entry and enables
+            AutoLogon so that the script always fires on the first logon regardless of whether
+            the oobeSystem pass (and therefore FirstLogonCommands) was executed or not.
+
+            For sysprepped images  : specialize runs → RunOnce + AutoLogon set here → OOBE runs
+                                     → oobeSystem AutoLogon / FirstLogonCommands also fire.
+                                     install2026.ps1 re-registers RunOnce at its own start, so
+                                     the deployment survives any reboot until complete.
+
+            For non-sysprepped images: specialize runs → RunOnce + AutoLogon set here → Windows
+                                     boots directly to the desktop → AutoLogon triggers → RunOnce
+                                     fires install2026.ps1 → script re-registers RunOnce at its
+                                     own start for reboot persistence.
+
+            install2026.ps1 removes the RunOnce entry only on successful completion.
+        -->
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+            <RunSynchronous>
+                <!-- Each Path must stay under the 259-character limit for Windows Setup to accept the answer file. -->
+                <!-- Split into one reg.exe call per entry rather than chaining with cmd /c && -->
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Description>Bootstrap: register RunOnce to launch deployment script after logon</Description>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v "Deploy2026" /t REG_SZ /d "powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1" /f</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Description>Bootstrap: enable AutoAdminLogon so RunOnce fires without manual logon</Description>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v AutoAdminLogon /t REG_SZ /d "1" /f</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <Description>Bootstrap: set AutoLogon username</Description>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultUserName /t REG_SZ /d "Administrator" /f</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>4</Order>
+                    <Description>Bootstrap: set AutoLogon password</Description>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /t REG_SZ /d "!ADMINPASSWORD!" /f</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
             <ComputerName>!COMPUTERNAME!</ComputerName>
         </component>

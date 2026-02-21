@@ -50,7 +50,26 @@ Write-Host "Unmounting deployment share Z:..." -ForegroundColor Yellow
 net use Z: /delete /yes
 Add-Content -Path $LogPath -Value "Z: drive unmounted at $(Get-Date)"
 
-# Deployment complete - remove RunOnce so the script does not run again on next boot
-Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
-Add-Content -Path $LogPath -Value "RunOnce removed - deployment complete at $(Get-Date)"
+# Check whether Install-NDT.ps1 scheduled a reboot during this run.
+# A Reboot deployment step registers RunOnce\ContinueDeployment and calls shutdown.exe,
+# then exits back here. If that key exists the machine is about to reboot - we must NOT
+# clean up AutoLogon or RunOnce, because both need to survive the reboot so deployment
+# can continue automatically on the next logon.
+$pendingReboot = Get-ItemProperty -Path $runOnceKey -Name 'ContinueDeployment' -ErrorAction SilentlyContinue
+
+if ($pendingReboot) {
+    Add-Content -Path $LogPath -Value "Reboot pending (ContinueDeployment RunOnce found) - skipping cleanup at $(Get-Date)"
+    Add-Content -Path $LogPath -Value "AutoLogon and RunOnce entries left intact for post-reboot continuation"
+} else {
+    # No reboot pending - deployment is complete. Remove RunOnce and AutoLogon.
+    Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
+    Add-Content -Path $LogPath -Value "RunOnce removed - deployment complete at $(Get-Date)"
+
+    # Remove the registry-based AutoLogon that was set during the specialize pass
+    # (needed for both sysprepped and non-sysprepped deployment paths).
+    $winlogonKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+    Set-ItemProperty -Path $winlogonKey -Name AutoAdminLogon -Value '0' -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $winlogonKey -Name DefaultPassword -ErrorAction SilentlyContinue
+    Add-Content -Path $LogPath -Value "AutoLogon disabled - deployment complete at $(Get-Date)"
+}
 

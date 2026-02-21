@@ -74,7 +74,7 @@ $captureFlagContent = @{
     CaptureScript = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
     CreatedDate = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     ImageName = "Windows Server 2025 Reference"
-    OutputPath = "Z:\Reference\ref-image.wim"
+    OutputPath = "Z:\Reference\$($env:COMPUTERNAME.ToLower()).wim"
 }
 
 try {

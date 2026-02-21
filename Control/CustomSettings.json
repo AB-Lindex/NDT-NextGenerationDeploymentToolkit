@@ -23,7 +23,7 @@
     },
     "DeploymentSteps": ["Powershell7","CreateReferenceImage"]
   },
-  "00:15:5D:02:56:02": {
+  "00:15:5D:02:59:16": {
     "OS": "WIN2025DCC",
     "Computername": "srv03",
     "IPAddress": "10.0.3.23/24",
