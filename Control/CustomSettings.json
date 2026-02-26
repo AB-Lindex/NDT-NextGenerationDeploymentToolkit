@@ -21,7 +21,7 @@
       "Locale": "Sweden",
       "RefSettings": "RefSettings"
     },
-    "DeploymentSteps": ["Powershell7","CreateReferenceImage"]
+    "DeploymentSteps": ["CreateReferenceImage"]
   },
   "00:15:5D:02:59:16": {
     "OS": "WIN2025DCC",
@@ -35,7 +35,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","Reboot and App2026"]
+    "DeploymentSteps": ["General Settings","SQL2025"]
   },
   "Sweden": {
     "InputLocale": "sv-SE",

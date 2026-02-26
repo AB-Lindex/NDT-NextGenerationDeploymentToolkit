@@ -2,6 +2,32 @@
 # This script is designed to run on the deployed machine after the initial Windows PE phase, and will execute deployment steps defined in Deployment.json based on the machine's MAC address.
 # It supports executing scripts, configuring autologon, and handling reboots as part of the deployment process.
 
+$LogPath = 'C:\temp\install-NDT.log'
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$ForegroundColor = 'White',
+        [string]$Level = 'INFO'
+    )
+    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    Add-Content -Path $LogPath -Value "$ts [$Level] $Message"
+    switch ($Level) {
+        'WARN'  { Write-Warning $Message }
+        'ERROR' { Write-Host $Message -ForegroundColor Red }
+        default { Write-Host $Message -ForegroundColor $ForegroundColor }
+    }
+}
+
+try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
+Write-Log 'Install-NDT.ps1 started' -ForegroundColor Cyan
+Write-Log '-----------------------------------' -ForegroundColor Cyan
+Write-Log "Hostname : $env:COMPUTERNAME"
+Write-Log "User     : $(whoami)"
+Write-Log "Domain   : $env:USERDOMAIN"
+Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
+Write-Log "IP       : $sysIP"
+Write-Log '-----------------------------------' -ForegroundColor Cyan
 
 # Get MAC address
 $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
@@ -17,13 +43,13 @@ $deployment = Get-Content -Path $deploymentPath -Raw | ConvertFrom-Json
 # Get machine configuration by MAC address
 $machineConfig = $customSettings.$macAddress
 if (-not $machineConfig) {
-    Write-Error "No configuration found for MAC address: $macAddress"
+    Write-Log "No configuration found for MAC address: $macAddress" -Level ERROR
     exit 1
 }
 
 # Check if DeploymentSteps reference exists
 if (-not $machineConfig.DeploymentSteps) {
-    Write-Host "No deployment steps defined for this machine" -ForegroundColor Yellow
+    Write-Log 'No deployment steps defined for this machine' -ForegroundColor Yellow
     exit 0
 }
 
@@ -33,7 +59,7 @@ if ($deploymentGroupRefs -is [string]) {
     $deploymentGroupRefs = @($deploymentGroupRefs)
 }
 
-Write-Host "Deployment groups: $($deploymentGroupRefs -join ', ')" -ForegroundColor Cyan
+Write-Log "Deployment groups: $($deploymentGroupRefs -join ', ')" -ForegroundColor Cyan
 
 # Load settings.json for autologon credentials
 $settingsPath = "C:\temp\settings.json"
@@ -41,12 +67,12 @@ if (Test-Path $settingsPath) {
     $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
     $autoLogonSettings = $settings.AutoLogon
 } else {
-    Write-Warning "Settings file not found: $settingsPath"
+    Write-Log "Settings file not found: $settingsPath" -Level WARN
     $autoLogonSettings = $null
 }
 
 # Load or create install progress tracker
-$progressPath = "C:\temp\install.json"
+$progressPath = "C:\temp\install-steps.json"
 if (Test-Path $progressPath) {
     $progress = Get-Content -Path $progressPath -Raw | ConvertFrom-Json
     $completedSteps = @($progress.CompletedSteps)
@@ -54,19 +80,19 @@ if (Test-Path $progressPath) {
     $completedSteps = @()
 }
 
-Write-Host "`nExecuting Deployment Steps..." -ForegroundColor Green
-Write-Host "=============================" -ForegroundColor Green
+Write-Log "`nExecuting Deployment Steps..." -ForegroundColor Green
+Write-Log '=============================' -ForegroundColor Green
 
 # Process each deployment group
 foreach ($deploymentGroupName in $deploymentGroupRefs) {
     $deploymentGroup = $deployment.$deploymentGroupName
 
     if (-not $deploymentGroup) {
-        Write-Warning "Deployment group '$deploymentGroupName' not found in Deployment.json"
+        Write-Log "Deployment group '$deploymentGroupName' not found in Deployment.json" -Level WARN
         continue
     }
     
-    Write-Host "`nProcessing group: $deploymentGroupName" -ForegroundColor Yellow
+    Write-Log "`nProcessing group: $deploymentGroupName" -ForegroundColor Yellow
 
     # Execute each deployment step from the deployment group
     foreach ($stepProperty in $deploymentGroup.PSObject.Properties) {
@@ -81,23 +107,23 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     
     # Check if step already completed
     if ($completedSteps -contains $uniqueStepId) {
-        Write-Host "`n[$stepName] $description" -ForegroundColor Gray
-        Write-Host "Already completed - skipping" -ForegroundColor Gray
+        Write-Log "`n[$stepName] $description" -ForegroundColor Gray
+        Write-Log 'Already completed - skipping' -ForegroundColor Gray
         continue
     }
     
-    Write-Host "`n[$stepName] $description" -ForegroundColor Cyan
+    Write-Log "`n[$stepName] $description" -ForegroundColor Cyan
     
     # Get the referenced section from Deployment.json
     $stepSection = $deployment.$stepReference
     if (-not $stepSection) {
-        Write-Warning "Step reference '$stepReference' not found in Deployment.json"
+        Write-Log "Step reference '$stepReference' not found in Deployment.json" -Level WARN
         continue
     }
     
     # Check if this is a reboot action
     if ($stepSection.Type -eq "Reboot") {
-        Write-Host "Rebooting system..." -ForegroundColor Yellow
+        Write-Log 'Rebooting system...' -ForegroundColor Yellow
         
         # Mark this step as completed before rebooting
         $completedSteps += $uniqueStepId
@@ -113,18 +139,16 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon -Value '1' -Type String -Force
         if ($autoLogonSettings -and $autoLogonSettings.Username) {
             Set-ItemProperty -Path $winlogonPath -Name DefaultUserName -Value $autoLogonSettings.Username -Type String -Force
-            "$autoLogonDomain = $autoLogonSettings.Domain`n$autoLogonUser = $autoLogonSettings.Username" | Write-Host -ForegroundColor Gray
         }
         if ($autoLogonSettings -and $autoLogonSettings.Password) {
             Set-ItemProperty -Path $winlogonPath -Name DefaultPassword -Value $autoLogonSettings.Password -Type String -Force
-            "Password set for AutoLogon user: $($autoLogonSettings.Password)" | Write-Host -ForegroundColor Gray
         }
         if ($autoLogonSettings -and $autoLogonSettings.Domain) {
             Set-ItemProperty -Path $winlogonPath -Name DefaultDomainName -Value $autoLogonSettings.Domain -Type String -Force
         } else {
             Remove-ItemProperty -Path $winlogonPath -Name DefaultDomainName -ErrorAction SilentlyContinue
         }
-        Write-Host "AutoLogon set for user: $($autoLogonSettings.Username)" -ForegroundColor Green
+        Write-Log "AutoLogon set for user: $($autoLogonSettings.Username)" -ForegroundColor Green
 
         # Schedule reboot then exit 0.
         # exit 0 called inside a script invoked with & terminates the entire
@@ -133,20 +157,20 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         # end-of-deployment cleanup.  install2026.ps1 calls this script via pwsh.exe -File
         # so exit here terminates the child pwsh.exe process; $LASTEXITCODE in the
         # parent powershell.exe is set to 3010.
-        Write-Host "System will restart in 5 seconds..." -ForegroundColor Red
-        read-host "Press Enter to reboot..."
+        Write-Log 'Shutdown initiated - system will restart in 120 seconds' -ForegroundColor Red
         shutdown.exe /r /t 10 /c "Deployment step requires restart"
+        Write-Log 'Exiting with code 3010 (reboot pending)' -ForegroundColor Red
         exit 3010
     }
     
     # Check if this is an AutoLogon configuration change
     if ($stepSection.Type -eq "AutoLogon") {
-        Write-Host "Configuring new AutoLogon credentials..." -ForegroundColor Yellow
+        Write-Log 'Configuring new AutoLogon credentials...' -ForegroundColor Yellow
 
         # Look up credentials from CustomSettings.json using the step reference as the key
         $autoLogonConfig = $customSettings.$stepReference
         if (-not $autoLogonConfig) {
-            Write-Warning "AutoLogon section '$stepReference' not found in CustomSettings.json - skipping"
+            Write-Log "AutoLogon section '$stepReference' not found in CustomSettings.json - skipping" -Level WARN
             continue
         }
 
@@ -165,8 +189,8 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             $autoLogonUser   = $fullUsername
         }
 
-        Write-Host "  Domain  : $autoLogonDomain" -ForegroundColor Gray
-        Write-Host "  Username: $autoLogonUser"   -ForegroundColor Gray
+        Write-Log "  Domain  : $autoLogonDomain" -ForegroundColor Gray
+        Write-Log "  Username: $autoLogonUser" -ForegroundColor Gray
 
         # Write directly to the Winlogon registry - this is the authoritative write.
         # The Reboot step that follows will call exit 0 (killing the process), so we
@@ -180,7 +204,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         } else {
             Remove-ItemProperty -Path $winlogonPath -Name DefaultDomainName -ErrorAction SilentlyContinue
         }
-        Write-Host "AutoLogon registry written: $autoLogonDomain\$autoLogonUser" -ForegroundColor Green
+        Write-Log "AutoLogon registry written: $autoLogonDomain\$autoLogonUser" -ForegroundColor Green
 
         # Also update settings.json and $autoLogonSettings so a subsequent Reboot step
         # in the same run uses the correct credentials (belt and braces).
@@ -198,13 +222,13 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
             ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
 
-        Write-Host "AutoLogon step completed" -ForegroundColor Green
+        Write-Log 'AutoLogon step completed' -ForegroundColor Green
         continue
     }
     
     $scriptPath = $stepSection.Script
     if (-not $scriptPath) {
-        Write-Warning "No script path defined in section '$stepReference'"
+        Write-Log "No script path defined in section '$stepReference'" -Level WARN
         continue
     }
     
@@ -214,20 +238,20 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         $psVersion = "pwsh"
     }
     
-    Write-Host "Script: $scriptPath" -ForegroundColor Gray
-    Write-Host "PowerShell: $psVersion" -ForegroundColor Gray
+    Write-Log "Script: $scriptPath" -ForegroundColor Gray
+    Write-Log "PowerShell: $psVersion" -ForegroundColor Gray
     
     # Build script parameters if defined in Deployment.json
     $scriptParams = @{}
     if ($stepSection.Parameters) {
-        Write-Host "Parameters:" -ForegroundColor Gray
+        Write-Log 'Parameters:' -ForegroundColor Gray
         foreach ($paramName in $stepSection.Parameters) {
             if ($machineConfig.PSObject.Properties.Name -contains $paramName) {
                 $paramValue = $machineConfig.$paramName
                 $scriptParams[$paramName] = $paramValue
-                Write-Host "  $paramName = $paramValue" -ForegroundColor Gray
+                Write-Log "  $paramName = $paramValue" -ForegroundColor Gray
             } else {
-                Write-Warning "Parameter '$paramName' not found in machine configuration"
+                Write-Log "Parameter '$paramName' not found in machine configuration" -Level WARN
             }
         }
     }
@@ -237,7 +261,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     
     if (Test-Path $fullScriptPath) {
         try {
-            Write-Host "Executing..." -ForegroundColor Yellow
+            Write-Log 'Executing...' -ForegroundColor Yellow
             
             # Check file extension to determine execution method
             $fileExtension = [System.IO.Path]::GetExtension($fullScriptPath).ToLower()
@@ -261,7 +285,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
                 }
             }
             
-            Write-Host "Completed successfully" -ForegroundColor Green
+            Write-Log 'Completed successfully' -ForegroundColor Green
             
             # Add to completed steps (with group name for uniqueness)
             $completedSteps += $uniqueStepId
@@ -272,19 +296,19 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
             
         } catch {
-            Write-Error "Failed to execute: $_"
+            Write-Log "Failed to execute: $_" -Level ERROR
         }
     } else {
-        Write-Warning "Script not found: $fullScriptPath"
+        Write-Log "Script not found: $fullScriptPath" -Level WARN
     }
     }
 }
 
-Write-Host "`n=============================" -ForegroundColor Green
-Write-Host "All deployment steps completed" -ForegroundColor Green
+Write-Log "`n=============================" -ForegroundColor Green
+Write-Log 'All deployment steps completed' -ForegroundColor Green
 
 # Clean up AutoLogon and RunOnce registry entries
-Write-Host "`nCleaning up deployment registry entries..." -ForegroundColor Cyan
+Write-Log "`nCleaning up deployment registry entries..." -ForegroundColor Cyan
 
 try {
     $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
@@ -292,31 +316,31 @@ try {
     # Disable AutoLogon
     if (Get-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -ErrorAction SilentlyContinue) {
         Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "0" -Type String
-        Write-Host "- Disabled AutoAdminLogon" -ForegroundColor Gray
+        Write-Log '- Disabled AutoAdminLogon' -ForegroundColor Gray
     }
     
     # Remove AutoLogonCount
     if (Get-ItemProperty -Path $winlogonPath -Name "AutoLogonCount" -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $winlogonPath -Name "AutoLogonCount" -ErrorAction SilentlyContinue
-        Write-Host "- Removed AutoLogonCount" -ForegroundColor Gray
+        Write-Log '- Removed AutoLogonCount' -ForegroundColor Gray
     }
     
     # Remove DefaultPassword (if exists)
     if (Get-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -ErrorAction SilentlyContinue
-        Write-Host "- Removed DefaultPassword" -ForegroundColor Gray
+        Write-Log '- Removed DefaultPassword' -ForegroundColor Gray
     }
     
     # Remove DefaultDomainName (if exists)
     if (Get-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -ErrorAction SilentlyContinue
-        Write-Host "- Removed DefaultDomainName" -ForegroundColor Gray
+        Write-Log '- Removed DefaultDomainName' -ForegroundColor Gray
     }
     
-    Write-Host "Registry cleanup completed successfully" -ForegroundColor Green
+    Write-Log 'Registry cleanup completed successfully' -ForegroundColor Green
 } catch {
-    Write-Warning "Error during registry cleanup: $_"
+    Write-Log "Error during registry cleanup: $_" -Level WARN
 }
 
-Write-Host "`n"
+Write-Log 'Installation complete' -ForegroundColor Green
 read-host "Installation complete. Press Enter to continue..."

@@ -240,7 +240,7 @@ $out = & bcdedit /set $winpeGuid nx         OptIn 2>&1                          
 
 $out = & bcdedit /displayorder $winpeGuid /addfirst 2>&1 ; Write-Output "  displayorder  : $out"
 $out = & bcdedit /default      $winpeGuid 2>&1           ; Write-Output "  set default   : $out"
-$out = & bcdedit /timeout      30 2>&1                   ; Write-Output "  set timeout   : $out"
+$out = & bcdedit /timeout      5 2>&1                    ; Write-Output "  set timeout   : $out"
 
 Set-Content -Path $guidFile -Value $winpeGuid -Force
 Write-Output "  [OK] BCD entry $winpeGuid set as default"

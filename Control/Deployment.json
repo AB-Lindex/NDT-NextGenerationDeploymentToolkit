@@ -55,10 +55,6 @@
     "Step1": {
       "Description": "Install Powershell 7",
       "Reference": "Install PowerShell 7"
-    },
-    "Step2": {
-      "Description": "Reboot server",
-      "Reference": "Reboot"
     }
   },
   "RebootMachine": {
