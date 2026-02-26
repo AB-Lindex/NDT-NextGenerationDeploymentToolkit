@@ -27,7 +27,7 @@
       "Reference": "Start SMC"
     }
   },
-  "DeploymentGroup3": {
+  "Reboot and App2026": {
     "Step1": {
       "Description": "Reboot server",
       "Reference": "Reboot"
@@ -45,6 +45,10 @@
     "Step2": {
       "Description": "Reboot server",
       "Reference": "Reboot"
+    },
+    "Step3": {
+      "Description": "Install App2026",
+      "Reference": "Install App2026"
     }
   },
   "Powershell7": {

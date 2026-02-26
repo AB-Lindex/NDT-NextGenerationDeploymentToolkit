@@ -106,116 +106,99 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             LastUpdated = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         }
         $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
-        
-        # Configure RunOnce registry entry to continue deployment after reboot
-        Write-Host "Configuring post-reboot deployment continuation..." -ForegroundColor Cyan
-        $runOncePath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
-        $runOnceCommand = "pwsh.exe -executionpolicy bypass -File c:\temp\install2026.ps1"
-        Set-ItemProperty -Path $runOncePath -Name "ContinueDeployment" -Value $runOnceCommand -Type String
-        
-        # Ensure AutoLogon is still configured (in case it was cleared)
-        $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-        Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1" -Type String
-        
-        # Set autologon credentials from settings.json
-        if ($autoLogonSettings) {
-            if ($autoLogonSettings.Domain) {
-                Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $autoLogonSettings.Domain -Type String
-                Write-Host "Set DefaultDomainName: $($autoLogonSettings.Domain)" -ForegroundColor Gray
-            }
-            if ($autoLogonSettings.Username) {
-                Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $autoLogonSettings.Username -Type String
-                Write-Host "Set DefaultUserName: $($autoLogonSettings.Username)" -ForegroundColor Gray
-            }
-            if ($autoLogonSettings.Password) {
-                Set-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -Value $autoLogonSettings.Password -Type String
-                Write-Host "Set DefaultPassword for autologon" -ForegroundColor Gray
-            } else {
-                Write-Warning "AutoLogon password not found in settings.json - may fail to autologon after reboot"
-            }
+
+        # Write AutoLogon credentials directly to the Winlogon registry.
+        # RunOnce\Deploy2026 was already registered by install2026.ps1 at startup.
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon -Value '1' -Type String -Force
+        if ($autoLogonSettings -and $autoLogonSettings.Username) {
+            Set-ItemProperty -Path $winlogonPath -Name DefaultUserName -Value $autoLogonSettings.Username -Type String -Force
+            "$autoLogonDomain = $autoLogonSettings.Domain`n$autoLogonUser = $autoLogonSettings.Username" | Write-Host -ForegroundColor Gray
+        }
+        if ($autoLogonSettings -and $autoLogonSettings.Password) {
+            Set-ItemProperty -Path $winlogonPath -Name DefaultPassword -Value $autoLogonSettings.Password -Type String -Force
+            "Password set for AutoLogon user: $($autoLogonSettings.Password)" | Write-Host -ForegroundColor Gray
+        }
+        if ($autoLogonSettings -and $autoLogonSettings.Domain) {
+            Set-ItemProperty -Path $winlogonPath -Name DefaultDomainName -Value $autoLogonSettings.Domain -Type String -Force
         } else {
-            Write-Warning "AutoLogon settings not found in settings.json - may fail to autologon after reboot"
+            Remove-ItemProperty -Path $winlogonPath -Name DefaultDomainName -ErrorAction SilentlyContinue
         }
-        
-        # Optionally set a high LogonCount to ensure multiple reboots are handled
-        if (-not (Get-ItemProperty -Path $winlogonPath -Name "AutoLogonCount" -ErrorAction SilentlyContinue)) {
-            Set-ItemProperty -Path $winlogonPath -Name "AutoLogonCount" -Value 999 -Type DWord
-        }
-        
-        Write-Host "Post-reboot continuation configured successfully" -ForegroundColor Green
-        
-        # Initiate reboot with a 10 second delay
-        Write-Host "System will restart in 10 seconds..." -ForegroundColor Red
-        # read-host "Press Enter to restart immediately or wait for automatic reboot..."
-        Start-Sleep -Seconds 2
+        Write-Host "AutoLogon set for user: $($autoLogonSettings.Username)" -ForegroundColor Green
+
+        # Schedule reboot then exit 0.
+        # exit 0 called inside a script invoked with & terminates the entire
+        # powershell.exe host process immediately - this is intentional.
+        # exit 3010 (standard "reboot required" code) signals install2026.ps1 to skip
+        # end-of-deployment cleanup.  install2026.ps1 calls this script via pwsh.exe -File
+        # so exit here terminates the child pwsh.exe process; $LASTEXITCODE in the
+        # parent powershell.exe is set to 3010.
+        Write-Host "System will restart in 5 seconds..." -ForegroundColor Red
+        read-host "Press Enter to reboot..."
         shutdown.exe /r /t 10 /c "Deployment step requires restart"
-        exit 0
+        exit 3010
     }
     
     # Check if this is an AutoLogon configuration change
     if ($stepSection.Type -eq "AutoLogon") {
         Write-Host "Configuring new AutoLogon credentials..." -ForegroundColor Yellow
-        
-        # Get the AutoLogon settings from CustomSettings.json using the step reference
+
+        # Look up credentials from CustomSettings.json using the step reference as the key
         $autoLogonConfig = $customSettings.$stepReference
         if (-not $autoLogonConfig) {
-            Write-Warning "AutoLogon configuration '$stepReference' not found in CustomSettings.json"
+            Write-Warning "AutoLogon section '$stepReference' not found in CustomSettings.json - skipping"
             continue
         }
-        
-        # Parse the username to extract domain and username
+
+        # Parse Domain\Username or UPN format
         $fullUsername = $autoLogonConfig.Username
         $autoLogonPassword = $autoLogonConfig.Password
-        
+
         if ($fullUsername -match '^(.+)\\(.+)$') {
-            # Domain\Username format
             $autoLogonDomain = $Matches[1]
-            $autoLogonUser = $Matches[2]
+            $autoLogonUser   = $Matches[2]
         } elseif ($fullUsername -match '^(.+)@(.+)$') {
-            # UPN format (User@Domain)
-            $autoLogonUser = $Matches[1]
+            $autoLogonUser   = $Matches[1]
             $autoLogonDomain = $Matches[2]
         } else {
-            # No domain specified, assume local
-            $autoLogonDomain = "."
-            $autoLogonUser = $fullUsername
+            $autoLogonDomain = '.'
+            $autoLogonUser   = $fullUsername
         }
-        
-        Write-Host "  Domain: $autoLogonDomain" -ForegroundColor Gray
-        Write-Host "  Username: $autoLogonUser" -ForegroundColor Gray
-        
-        # Update settings.json with new AutoLogon credentials
-        if (Test-Path $settingsPath) {
-            $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
-            $settings.AutoLogon.Domain = $autoLogonDomain
-            $settings.AutoLogon.Username = $autoLogonUser
-            $settings.AutoLogon.Password = $autoLogonPassword
-            $settings | ConvertTo-Json -Depth 3 | Set-Content -Path $settingsPath -Encoding UTF8
-            Write-Host "Updated settings.json with new AutoLogon credentials" -ForegroundColor Green
-            
-            # Reload autologon settings for subsequent reboots
-            $autoLogonSettings = $settings.AutoLogon
+
+        Write-Host "  Domain  : $autoLogonDomain" -ForegroundColor Gray
+        Write-Host "  Username: $autoLogonUser"   -ForegroundColor Gray
+
+        # Write directly to the Winlogon registry - this is the authoritative write.
+        # The Reboot step that follows will call exit 0 (killing the process), so we
+        # cannot rely on any in-memory state surviving. The registry IS the state.
+        $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+        Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon    -Value '1'              -Type String -Force
+        Set-ItemProperty -Path $winlogonPath -Name DefaultUserName   -Value $autoLogonUser   -Type String -Force
+        Set-ItemProperty -Path $winlogonPath -Name DefaultPassword   -Value $autoLogonPassword -Type String -Force
+        if ($autoLogonDomain -and $autoLogonDomain -ne '.') {
+            Set-ItemProperty -Path $winlogonPath -Name DefaultDomainName -Value $autoLogonDomain -Type String -Force
         } else {
-            Write-Warning "Settings file not found: $settingsPath"
+            Remove-ItemProperty -Path $winlogonPath -Name DefaultDomainName -ErrorAction SilentlyContinue
         }
-        
-        # Update registry immediately for next login
-        $winlogonPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon"
-        Set-ItemProperty -Path $winlogonPath -Name "AutoAdminLogon" -Value "1" -Type String
-        Set-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -Value $autoLogonDomain -Type String
-        Set-ItemProperty -Path $winlogonPath -Name "DefaultUserName" -Value $autoLogonUser -Type String
-        Set-ItemProperty -Path $winlogonPath -Name "DefaultPassword" -Value $autoLogonPassword -Type String
-        Write-Host "Updated registry with new AutoLogon credentials" -ForegroundColor Green
-        
-        # Mark this step as completed
+        Write-Host "AutoLogon registry written: $autoLogonDomain\$autoLogonUser" -ForegroundColor Green
+
+        # Also update settings.json and $autoLogonSettings so a subsequent Reboot step
+        # in the same run uses the correct credentials (belt and braces).
+        if (Test-Path $settingsPath) {
+            $s = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            $s.AutoLogon.Domain   = $autoLogonDomain
+            $s.AutoLogon.Username = $autoLogonUser
+            $s.AutoLogon.Password = $autoLogonPassword
+            $s | ConvertTo-Json -Depth 3 | Set-Content $settingsPath -Encoding UTF8
+            $autoLogonSettings = $s.AutoLogon
+        }
+
+        # Mark step completed
         $completedSteps += $uniqueStepId
-        $progressData = @{
-            CompletedSteps = $completedSteps
-            LastUpdated = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        }
-        $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
-        
-        Write-Host "AutoLogon configuration completed successfully" -ForegroundColor Green
+        @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+            ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+
+        Write-Host "AutoLogon step completed" -ForegroundColor Green
         continue
     }
     
@@ -328,13 +311,6 @@ try {
     if (Get-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -ErrorAction SilentlyContinue) {
         Remove-ItemProperty -Path $winlogonPath -Name "DefaultDomainName" -ErrorAction SilentlyContinue
         Write-Host "- Removed DefaultDomainName" -ForegroundColor Gray
-    }
-    
-    # Clean up RunOnce entries
-    $runOncePath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
-    if (Get-ItemProperty -Path $runOncePath -Name "ContinueDeployment" -ErrorAction SilentlyContinue) {
-        Remove-ItemProperty -Path $runOncePath -Name "ContinueDeployment" -ErrorAction SilentlyContinue
-        Write-Host "- Removed RunOnce ContinueDeployment entry" -ForegroundColor Gray
     }
     
     Write-Host "Registry cleanup completed successfully" -ForegroundColor Green

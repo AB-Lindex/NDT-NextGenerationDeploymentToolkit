@@ -28,12 +28,14 @@
     "Computername": "srv03",
     "IPAddress": "10.0.3.23/24",
     "AdminPassword": "Qantas-777",
+    "SQLServer": "SQL2025",
+    "AlwaysOn": "AO2025",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","SMC","SQL2025"]
+    "DeploymentSteps": ["General Settings","Reboot and App2026"]
   },
   "Sweden": {
     "InputLocale": "sv-SE",

@@ -157,3 +157,5 @@ if ($isUEFI) {
     BCDBoot.exe C:\windows /l en-US /s C: /f BIOS
 }
 BCDEdit.exe /timeout 0
+
+read-host "Image applied and unattend.xml configured. Press Enter to continue to next steps"
