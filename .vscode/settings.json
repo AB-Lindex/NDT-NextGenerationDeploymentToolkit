@@ -1,0 +1,11 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "Build-NDTPEImage": true,
+        "Test-Path": true,
+        "Get-ItemProperty": true,
+        "Get-WdsBootImage": true,
+        "New-Item": true,
+        "Out-Null": true,
+        "Get-Item": true
+    }
+}

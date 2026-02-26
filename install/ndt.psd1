@@ -14,7 +14,7 @@
     RootModule        = 'ndt.psm1'
 
     # Functions to export
-    FunctionsToExport = @('Install-NDT')
+    FunctionsToExport = @('Install-NDT', 'Build-NDTPEImage')
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()
@@ -27,7 +27,7 @@
         PSData = @{
             Tags        = @('NDT', 'Deployment', 'MDT', 'LiteTouch')
             ProjectUri  = ''
-            ReleaseNotes = '1.0.0 — Initial release. Provides Install-NDT.'
+            ReleaseNotes = '1.0.0 — Initial release. Provides Install-NDT, Build-NDTPEImage.'
         }
     }
 }

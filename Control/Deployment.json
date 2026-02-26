@@ -69,6 +69,12 @@
       "Reference": "ReferenceImage"
     }
   },
+  "WDS": {
+    "Step1": {
+      "Description": "Install WDS role",
+      "Reference": "InstallWDS"
+    }
+  },
   "ReferenceImage": {
       "Script": "\\Applications\\CreateReference\\Install.ps1"
     },
@@ -108,5 +114,9 @@
   "Install PowerShell 7": {
     "Script": "\\Applications\\PowerShell7\\Install.ps1",
     "Description": "Install PowerShell 7"
+  },
+  "InstallWDS": {
+    "Script": "\\Applications\\WDS\\Install.ps1",
+    "Description": "Install Windows Deployment Services role"
   }
 }
