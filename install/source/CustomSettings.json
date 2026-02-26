@@ -1,0 +1,79 @@
+{
+  "00:15:5D:02:56:01": {
+    "OS": "WIN2025DCG",
+    "Computername": "srv02",
+    "IPAddress": "10.0.3.22/24",
+    "AdminPassword": "Qantas-777",
+    "SQLServer": "SQL2025",
+    "AlwaysOn": "AO2025",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["General Settings","SMC","DeploymentGroup3"]
+  },
+  "00:15:5D:02:56:16": {
+    "OS": "WIN2025DC",
+    "Computername": "ref-win2025dcc",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "RefSettings": "RefSettings"
+    },
+    "DeploymentSteps": ["CreateReferenceImage"]
+  },
+  "00:15:5D:02:59:16": {
+    "OS": "WIN2025DCC",
+    "Computername": "srv03",
+    "IPAddress": "10.0.3.23/24",
+    "AdminPassword": "Qantas-777",
+    "SQLServer": "SQL2025",
+    "AlwaysOn": "AO2025",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["General Settings","SQL2025"]
+  },
+  "Sweden": {
+    "InputLocale": "sv-SE",
+    "SystemLocale": "sv-SE",
+    "UILanguage": "sv-SE",
+    "UserLocale": "sv-SE",
+    "TimeZone": "W. Europe Standard Time"
+  },
+  "NicAuto": {
+    "DefaultGateway": "10.0.3.1",
+    "DNSServers": "10.0.3.11"
+  },
+  "ADJoinCorp": {
+    "JoinDomain": "corp.dev",
+    "Domain": "corp",
+    "OU": "ou=Servers,dc=corp,dc=dev",
+    "User": "ADJoin2026",
+    "Password": "P@ssw0rd2026"
+  },
+  "RefSettings": {
+    "Sysprep": "Generalize",
+    "Shutdown": "Shutdown",
+    "IPAddress": "DHCP",
+    "DefaultGateway": "",
+    "DNSServers": "",
+    "JoinDomain": "WORKGROUP",
+    "Domain": "",
+    "OU": "",
+    "User": "",
+    "Password": ""
+  },
+  "Deploy": {
+    "Share": "\\\\dc01.corp.dev\\Deploy2026",
+    "Username": "Corp\\Deploy2026",
+    "Password": "P@ssw0rd2026"
+  },
+  "ADLogon": {
+    "Username": "Corp\\ADLogon",
+    "Password": "P@ssw0rd2026"
+  }
+}
