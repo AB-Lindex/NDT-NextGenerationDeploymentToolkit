@@ -343,4 +343,4 @@ try {
 }
 
 Write-Log 'Installation complete' -ForegroundColor Green
-read-host "Installation complete. Press Enter to continue..."
+# read-host "Installation complete. Press Enter to continue..."

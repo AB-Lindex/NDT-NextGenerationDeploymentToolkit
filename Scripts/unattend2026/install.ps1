@@ -158,4 +158,4 @@ if ($isUEFI) {
 }
 BCDEdit.exe /timeout 0
 
-read-host "Image applied and unattend.xml configured. Press Enter to continue to next steps"
+# read-host "Image applied and unattend.xml configured. Press Enter to continue to next steps"
