@@ -71,7 +71,7 @@ Deploy2026/
 │   └── OS.json                   # OS image catalog (WIM path + index per OS key)
 ├── Operating Systems/            # WIM files for each OS
 ├── Applications/                 # General application installers
-├── Applications2026/             # Product-specific installers
+├── Applications2026/             # Company-specific installers (not checked in at Github)
 ├── Scripts/
 │   └── unattend2026/
 │       ├── install.ps1           # WinPE phase: partition, apply image, prepare first-boot
@@ -82,7 +82,6 @@ Deploy2026/
 │       ├── Get-OS.ps1            # Resolves WIM path/index from OS.json
 │       ├── Get-Settings.ps1      # Generates unattend.xml from template + CustomSettings.json
 │       └── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json on C:\temp
-└── MDT-Scripts/                  # Retained MDT scripts (reference / legacy)
 ```
 
 ---
