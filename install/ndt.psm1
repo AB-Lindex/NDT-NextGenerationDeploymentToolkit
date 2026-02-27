@@ -1,4 +1,4 @@
-function Install-NDT {
+﻿function Install-NDT {
     <#
     .SYNOPSIS
         Installs and configures an NDT deployment share.
@@ -28,7 +28,7 @@ function Install-NDT {
 
     .PARAMETER DeployPassword
         Password for the deploy account as a SecureString. Stored in CustomSettings.json.
-        Default: the lab default converted to SecureString — replace for production use.
+        Mandatory — you will be prompted if not supplied.
 
     .PARAMETER RepoZipUrl
         URL of the GitHub repository archive ZIP to download seed control files from.
@@ -53,8 +53,8 @@ function Install-NDT {
         [string]$ShareUNC = "\\$($env:COMPUTERNAME)\Deploy2026",
         [Parameter()]
         [string]$DeployUsername = 'Corp\Deploy2026',
-        [Parameter()]
-        [SecureString]$DeployPassword, # Suggestion: P@ssw0rd2026
+        [Parameter(Mandatory)]
+        [SecureString]$DeployPassword,
         [Parameter()]
         [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip'
     )
@@ -98,7 +98,7 @@ function Install-NDT {
     $customSettingsDest   = Join-Path $controlDir 'CustomSettings.json'
 
     if (-not (Test-Path $customSettingsDest)) {
-        Write-Warning "CustomSettings.json not found at '$customSettingsDest' — skipping stamp."
+        Write-Warning "CustomSettings.json not found at '$customSettingsDest' - skipping stamp."
     } else {
         if ($PSCmdlet.ShouldProcess($customSettingsDest, 'Stamp Deploy section')) {
             # Decode the SecureString to plain text only long enough to write the file.
@@ -123,7 +123,7 @@ function Install-NDT {
     $existingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue
 
     if ($existingShare) {
-        Write-Verbose "SMB share '$ShareName' already exists — skipping creation."
+        Write-Verbose "SMB share '$ShareName' already exists - skipping creation."
     } else {
         if ($PSCmdlet.ShouldProcess($ShareName, "Create SMB share pointing to '$LocalPath'")) {
             New-SmbShare -Name $ShareName -Path $LocalPath -Description 'NDT Deployment Share' | Out-Null
@@ -241,6 +241,29 @@ function Build-NDTPEImage {
     # ── Verify Administrator ────────────────────────────────────────────────────
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) { throw 'Build-NDTPEImage must be run as Administrator.' }
+
+    # ── Pre-flight: verify WDS is configured (skip if -SkipWDS) ────────────────
+    if (-not $SkipWDS) {
+        $wdsState = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Parameters' `
+                        -Name 'WdsInstallState' -ErrorAction SilentlyContinue).WdsInstallState
+        # WdsInstallState 4 = fully configured; anything else (or missing key) means WDS is not ready.
+        if ($wdsState -ne 4) {
+            Write-Warning @'
+WDS (Windows Deployment Services) is not configured on this server.
+The build will complete, but the WDS boot-image update (Step 7) will fail.
+
+To configure WDS before running this command:
+  1. Install the WDS role if not already present:
+       Install-WindowsFeature WDS -IncludeManagementTools
+  2. Configure it (replace paths/options as needed):
+       wdsutil /Initialize-Server /RemInst:"C:\RemoteInstall"
+  3. Then re-run: Build-NDTPEImage
+
+To skip WDS and build the WIM only:
+    Build-NDTPEImage -SkipWDS
+'@
+        }
+    }
 
     # ── Resolve paths ───────────────────────────────────────────────────────────
     $wimFile            = Join-Path $LocalPath 'Boot\boot2026.wim'
