@@ -20,7 +20,7 @@ function Install-NDT {
 
     .PARAMETER ShareUNC
         Full UNC path used to access the deployment share (stored in CustomSettings.json).
-        Default: \\dc01.corp.dev\Deploy2026
+        Default: \\<current hostname>\Deploy2026
 
     .PARAMETER DeployUsername
         Domain account used by clients to connect to the deployment share.
@@ -50,7 +50,7 @@ function Install-NDT {
         [Parameter()]
         [string]$ShareName = 'Deploy2026',
         [Parameter()]
-        [string]$ShareUNC = '\\dc01.corp.dev\Deploy2026',
+        [string]$ShareUNC = "\\$($env:COMPUTERNAME)\Deploy2026",
         [Parameter()]
         [string]$DeployUsername = 'Corp\Deploy2026',
         [Parameter()]
