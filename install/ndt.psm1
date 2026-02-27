@@ -4,14 +4,11 @@ function Install-NDT {
         Installs and configures an NDT deployment share.
 
     .DESCRIPTION
-        Creates the full NDT deployment share folder structure on the local machine,
-        downloads the NDT repository ZIP from GitHub to obtain the seed control files
-        (CustomSettings.json, Deployment.json, OS.json), stamps the Deploy section of
-        CustomSettings.json with the supplied parameters, creates the Windows SMB share,
-        and grants the deploy account the required permissions.
-
-        No local 'source' folder is required — templates are always fetched fresh from
-        the repository.
+        Bootstraps an NDT deployment share by downloading the repository ZIP from GitHub,
+        extracting it directly into the target LocalPath (preserving the full folder
+        structure), stamping the Deploy section of Control\CustomSettings.json with the
+        supplied parameters, creating the Windows SMB share, and granting the deploy
+        account the required permissions.
 
     .PARAMETER LocalPath
         Local filesystem path where the deployment share will be created.
@@ -62,38 +59,9 @@ function Install-NDT {
         [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip'
     )
 
-    #region ── Folder structure ──────────────────────────────────────────────────
-    $subFolders = @(
-        'Applications',
-        'Applications2026',
-        'Boot',
-        'Control',
-        'MDT-Scripts',
-        'Operating Systems',
-        'Reference',
-        'Scratch',
-        'Scripts'
-    )
-
-    Write-Verbose "Creating deployment share folder structure under '$LocalPath'."
-    foreach ($folder in $subFolders) {
-        $target = Join-Path $LocalPath $folder
-        if (-not (Test-Path $target)) {
-            if ($PSCmdlet.ShouldProcess($target, 'Create directory')) {
-                New-Item -ItemType Directory -Path $target -Force | Out-Null
-                Write-Verbose "  Created: $target"
-            }
-        } else {
-            Write-Verbose "  Exists:  $target"
-        }
-    }
-    #endregion
-
-    #region ── Download repo ZIP and extract seed control files ────────────────────
-    $tempZip    = Join-Path $env:TEMP 'ndt-repo.zip'
-    $tempDir    = Join-Path $env:TEMP 'ndt-repo'
-    $sourceDir  = $null
-    $controlDir = Join-Path $LocalPath 'Control'
+    #region ── Download and extract repository ZIP into LocalPath ────────────────
+    $tempZip = Join-Path $env:TEMP 'ndt-repo.zip'
+    $tempDir = Join-Path $env:TEMP 'ndt-repo'
 
     try {
         Write-Verbose "Downloading NDT repository ZIP from '$RepoZipUrl'..."
@@ -108,79 +76,48 @@ function Install-NDT {
             Write-Verbose "  Extracted to: $tempDir"
         }
 
-        # Locate install\source inside the extracted archive.
-        # Handles any branch/tag prefix (e.g. NDT-...-main\install\source).
-        $sourceDir = Get-ChildItem -Path $tempDir -Recurse -Directory -Filter 'source' |
-            Where-Object { $_.Parent.Name -eq 'install' } |
-            Select-Object -First 1 -ExpandProperty FullName
+        # GitHub archive ZIPs always extract into a single top-level folder
+        # (e.g. NDT-NextGenerationDeploymentToolkit-main). Find it.
+        $repoRoot = Get-ChildItem -Path $tempDir -Directory | Select-Object -First 1 -ExpandProperty FullName
+        if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
+        Write-Verbose "  Repository root: $repoRoot"
 
-        if (-not $sourceDir) {
-            throw "Could not locate 'install\source' folder in the downloaded ZIP."
+        if ($PSCmdlet.ShouldProcess($LocalPath, 'Copy repository content to LocalPath')) {
+            if (-not (Test-Path $LocalPath)) { New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null }
+            Copy-Item -Path (Join-Path $repoRoot '*') -Destination $LocalPath -Recurse -Force
+            Write-Verbose "  Repository content copied to: $LocalPath"
         }
-        Write-Verbose "  Source files at: $sourceDir"
     } finally {
-        # Remove the ZIP immediately; extracted dir is cleaned after files are copied.
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
     #endregion
 
-    #region ── Copy static reference files (Deployment.json, OS.json) ───────────
-    $referenceFiles = @(
-        'Deployment.json',
-        'OS.json'
-    )
+    #region ── Stamp Deploy section of CustomSettings.json with parameters ────────
+    $controlDir           = Join-Path $LocalPath 'Control'
+    $customSettingsDest   = Join-Path $controlDir 'CustomSettings.json'
 
-    Write-Verbose "Copying reference control files from '$sourceDir' to '$controlDir'."
-    foreach ($file in $referenceFiles) {
-        $src  = Join-Path $sourceDir $file
-        $dest = Join-Path $controlDir $file
-
-        if (-not (Test-Path $src)) {
-            Write-Warning "Source file not found, skipping: $src"
-            continue
-        }
-
-        if ($PSCmdlet.ShouldProcess($dest, "Copy '$file'")) {
-            Copy-Item -Path $src -Destination $dest -Force
-            Write-Verbose "  Copied: $file"
-        }
-    }
-    #endregion
-
-    #region ── Generate CustomSettings.json from template + parameters ───────────
-    $customSettingsSrc  = Join-Path $sourceDir  'CustomSettings.json'
-    $customSettingsDest = Join-Path $controlDir 'CustomSettings.json'
-
-    if (-not (Test-Path $customSettingsSrc)) {
-        Write-Warning "Source CustomSettings.json not found at '$customSettingsSrc' — skipping."
+    if (-not (Test-Path $customSettingsDest)) {
+        Write-Warning "CustomSettings.json not found at '$customSettingsDest' — skipping stamp."
     } else {
-        if ($PSCmdlet.ShouldProcess($customSettingsDest, 'Generate CustomSettings.json')) {
+        if ($PSCmdlet.ShouldProcess($customSettingsDest, 'Stamp Deploy section')) {
             # Decode the SecureString to plain text only long enough to write the file.
             $bstr          = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($DeployPassword)
             $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 
-            # Load the template and overwrite the Deploy section with the supplied parameters.
-            $settings = Get-Content $customSettingsSrc -Raw | ConvertFrom-Json
-
+            $settings = Get-Content $customSettingsDest -Raw | ConvertFrom-Json
             $settings.Deploy.Share    = $ShareUNC
             $settings.Deploy.Username = $DeployUsername
             $settings.Deploy.Password = $plainPassword
 
             $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $customSettingsDest -Encoding UTF8
-            Write-Verbose "Generated CustomSettings.json with Deploy section stamped from parameters."
+            Write-Verbose 'Deploy section stamped in CustomSettings.json.'
 
-            # Wipe the plain-text copy from memory.
             $plainPassword = $null
         }
     }
     #endregion
-
-    # Clean up the extracted repo temp directory.
-    if ($null -ne $tempDir -and (Test-Path $tempDir)) {
-        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Verbose "  Cleaned up temp directory: $tempDir"
-    }
 
     #region ── SMB share ─────────────────────────────────────────────────────────
     $existingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue

@@ -69,10 +69,14 @@
       "Reference": "ReferenceImage"
     }
   },
-  "WDS": {
+  "Deployment": {
     "Step1": {
       "Description": "Install WDS role",
       "Reference": "InstallWDS"
+    },
+    "Step2": {
+      "Description": "Install ADK",
+      "Reference": "ADK"
     }
   },
   "ReferenceImage": {
@@ -118,5 +122,9 @@
   "InstallWDS": {
     "Script": "\\Applications\\WDS\\Install.ps1",
     "Description": "Install Windows Deployment Services role"
-  }
+  },
+  "ADK": {
+    "Script": "\\Applications\\ADK\\install.ps1",
+    "Description": "Install Windows ADK and WinPE add-on"
+   }
 }
