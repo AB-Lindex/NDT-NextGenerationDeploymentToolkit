@@ -5,9 +5,13 @@ function Install-NDT {
 
     .DESCRIPTION
         Creates the full NDT deployment share folder structure on the local machine,
-        copies reference control files (CustomSettings.json, Deployment.json, OS.json)
-        from the module's source folder, creates the Windows SMB share, and grants
-        the deploy account the required permissions.
+        downloads the NDT repository ZIP from GitHub to obtain the seed control files
+        (CustomSettings.json, Deployment.json, OS.json), stamps the Deploy section of
+        CustomSettings.json with the supplied parameters, creates the Windows SMB share,
+        and grants the deploy account the required permissions.
+
+        No local 'source' folder is required — templates are always fetched fresh from
+        the repository.
 
     .PARAMETER LocalPath
         Local filesystem path where the deployment share will be created.
@@ -29,11 +33,18 @@ function Install-NDT {
         Password for the deploy account as a SecureString. Stored in CustomSettings.json.
         Default: the lab default converted to SecureString — replace for production use.
 
+    .PARAMETER RepoZipUrl
+        URL of the GitHub repository archive ZIP to download seed control files from.
+        Default: https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip
+
     .EXAMPLE
         Install-NDT
 
     .EXAMPLE
         Install-NDT -LocalPath D:\Deploy2026 -ShareName Deploy2026 -DeployUsername "Corp\Deploy2026"
+
+    .EXAMPLE
+        Install-NDT -RepoZipUrl 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/dev.zip'
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -46,7 +57,9 @@ function Install-NDT {
         [Parameter()]
         [string]$DeployUsername = 'Corp\Deploy2026',
         [Parameter()]
-        [SecureString]$DeployPassword # Suggestion: P@ssw0rd2026
+        [SecureString]$DeployPassword, # Suggestion: P@ssw0rd2026
+        [Parameter()]
+        [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip'
     )
 
     #region ── Folder structure ──────────────────────────────────────────────────
@@ -76,10 +89,42 @@ function Install-NDT {
     }
     #endregion
 
-    #region ── Copy static reference files (Deployment.json, OS.json) ───────────
-    $sourceDir  = Join-Path $PSScriptRoot 'source'
+    #region ── Download repo ZIP and extract seed control files ────────────────────
+    $tempZip    = Join-Path $env:TEMP 'ndt-repo.zip'
+    $tempDir    = Join-Path $env:TEMP 'ndt-repo'
+    $sourceDir  = $null
     $controlDir = Join-Path $LocalPath 'Control'
 
+    try {
+        Write-Verbose "Downloading NDT repository ZIP from '$RepoZipUrl'..."
+        if ($PSCmdlet.ShouldProcess($RepoZipUrl, 'Download repository ZIP')) {
+            Invoke-WebRequest -Uri $RepoZipUrl -OutFile $tempZip -UseBasicParsing
+            Write-Verbose "  Downloaded: $tempZip"
+        }
+
+        if ($PSCmdlet.ShouldProcess($tempDir, 'Extract repository ZIP')) {
+            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+            Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+            Write-Verbose "  Extracted to: $tempDir"
+        }
+
+        # Locate install\source inside the extracted archive.
+        # Handles any branch/tag prefix (e.g. NDT-...-main\install\source).
+        $sourceDir = Get-ChildItem -Path $tempDir -Recurse -Directory -Filter 'source' |
+            Where-Object { $_.Parent.Name -eq 'install' } |
+            Select-Object -First 1 -ExpandProperty FullName
+
+        if (-not $sourceDir) {
+            throw "Could not locate 'install\source' folder in the downloaded ZIP."
+        }
+        Write-Verbose "  Source files at: $sourceDir"
+    } finally {
+        # Remove the ZIP immediately; extracted dir is cleaned after files are copied.
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+    }
+    #endregion
+
+    #region ── Copy static reference files (Deployment.json, OS.json) ───────────
     $referenceFiles = @(
         'Deployment.json',
         'OS.json'
@@ -130,6 +175,12 @@ function Install-NDT {
         }
     }
     #endregion
+
+    # Clean up the extracted repo temp directory.
+    if ($null -ne $tempDir -and (Test-Path $tempDir)) {
+        Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Verbose "  Cleaned up temp directory: $tempDir"
+    }
 
     #region ── SMB share ─────────────────────────────────────────────────────────
     $existingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue
