@@ -527,3 +527,404 @@ To skip WDS and build the WIM only:
         throw
     }
 }
+
+#region ── Server management (CustomSettings.json) ───────────────────────────
+
+function Get-NDTServer {
+    <#
+    .SYNOPSIS
+        Retrieves server entries from CustomSettings.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER MAC
+        Return only the entry with this MAC address.
+    .PARAMETER Computername
+        Return only entries matching this computer name.
+    .EXAMPLE
+        Get-NDTServer
+    .EXAMPLE
+        Get-NDTServer -MAC '00:15:5D:02:56:01'
+    .EXAMPLE
+        Get-NDTServer -Computername srv02
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$MAC,
+        [Parameter()]
+        [string]$Computername
+    )
+
+    $path = Join-Path $LocalPath 'Control\CustomSettings.json'
+    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+
+    $settings   = Get-Content $path -Raw | ConvertFrom-Json
+    $macPattern = '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+
+    $entries = $settings.PSObject.Properties |
+        Where-Object { $_.Name -match $macPattern } |
+        ForEach-Object {
+            $obj = [ordered]@{ MAC = $_.Name.ToUpper() }
+            foreach ($prop in $_.Value.PSObject.Properties) { $obj[$prop.Name] = $prop.Value }
+            [PSCustomObject]$obj
+        }
+
+    if ($MAC)          { $entries = $entries | Where-Object { $_.MAC -eq $MAC.ToUpper() } }
+    if ($Computername) { $entries = $entries | Where-Object { $_.Computername -eq $Computername } }
+
+    $entries
+}
+
+function Add-NDTServer {
+    <#
+    .SYNOPSIS
+        Adds a new server entry to CustomSettings.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER MAC
+        MAC address of the server (colon-separated, any case).
+    .PARAMETER Computername
+        Target computer name.
+    .PARAMETER OS
+        OS key from OS.json to deploy.
+    .PARAMETER IPAddress
+        Static IP in CIDR notation (e.g. 10.0.3.22/24), or 'DHCP'.
+    .PARAMETER AdminPassword
+        Local administrator password.
+    .PARAMETER Sections
+        Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
+    .PARAMETER DeploymentSteps
+        Ordered array of deployment group names from Deployment.json.
+    .PARAMETER Properties
+        Hashtable of arbitrary extra key-value pairs to include in the entry.
+    .EXAMPLE
+        Add-NDTServer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
+            -IPAddress '10.0.3.25/24' -DeploymentSteps 'General Settings','SMC' `
+            -Sections @{ Locale = 'Sweden'; NetworkSettings = 'NicAuto'; ADSettings = 'ADJoinCorp' }
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory)]
+        [string]$MAC,
+        [Parameter(Mandatory)]
+        [string]$Computername,
+        [Parameter(Mandatory)]
+        [string]$OS,
+        [Parameter()]
+        [string]$IPAddress,
+        [Parameter()]
+        [string]$AdminPassword,
+        [Parameter()]
+        [hashtable]$Sections,
+        [Parameter()]
+        [string[]]$DeploymentSteps,
+        [Parameter()]
+        [hashtable]$Properties
+    )
+
+    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
+    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+
+    $normalMAC = $MAC.ToUpper()
+    $settings  = Get-Content $path -Raw | ConvertFrom-Json
+
+    if ($settings.PSObject.Properties[$normalMAC]) {
+        throw "Server '$normalMAC' already exists. Use Set-NDTServer to update it."
+    }
+
+    $entry = [ordered]@{ OS = $OS; Computername = $Computername }
+    if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
+    if ($PSBoundParameters.ContainsKey('AdminPassword'))   { $entry.AdminPassword   = $AdminPassword }
+    if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
+    if ($PSBoundParameters.ContainsKey('DeploymentSteps')) { $entry.DeploymentSteps = $DeploymentSteps }
+    if ($PSBoundParameters.ContainsKey('Properties')) {
+        foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
+    }
+
+    if ($PSCmdlet.ShouldProcess($normalMAC, 'Add server entry')) {
+        $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
+        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        Write-Verbose "Added server '$normalMAC' ($Computername)."
+    }
+}
+
+function Set-NDTServer {
+    <#
+    .SYNOPSIS
+        Updates an existing server entry in CustomSettings.json.
+        Only parameters that are explicitly supplied are changed.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER MAC
+        MAC address of the server entry to update.
+    .PARAMETER Properties
+        Hashtable of arbitrary extra key-value pairs to set or add.
+    .EXAMPLE
+        Set-NDTServer -MAC '00:15:5D:02:56:01' -DeploymentSteps 'General Settings','SMC','SQL2025'
+    .EXAMPLE
+        Set-NDTServer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$MAC,
+        [Parameter()]
+        [string]$Computername,
+        [Parameter()]
+        [string]$OS,
+        [Parameter()]
+        [string]$IPAddress,
+        [Parameter()]
+        [string]$AdminPassword,
+        [Parameter()]
+        [hashtable]$Sections,
+        [Parameter()]
+        [string[]]$DeploymentSteps,
+        [Parameter()]
+        [hashtable]$Properties
+    )
+
+    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
+    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+
+    $normalMAC = $MAC.ToUpper()
+    $settings  = Get-Content $path -Raw | ConvertFrom-Json
+    $entry     = $settings.PSObject.Properties[$normalMAC]
+
+    if (-not $entry) { throw "Server '$normalMAC' not found in CustomSettings.json." }
+
+    if ($PSCmdlet.ShouldProcess($normalMAC, 'Update server entry')) {
+        if ($PSBoundParameters.ContainsKey('Computername'))   { $entry.Value.Computername   = $Computername }
+        if ($PSBoundParameters.ContainsKey('OS'))             { $entry.Value.OS             = $OS }
+        if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
+        if ($PSBoundParameters.ContainsKey('AdminPassword'))  { $entry.Value.AdminPassword  = $AdminPassword }
+        if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
+        if ($PSBoundParameters.ContainsKey('DeploymentSteps')){ $entry.Value.DeploymentSteps = $DeploymentSteps }
+        if ($PSBoundParameters.ContainsKey('Properties')) {
+            foreach ($kv in $Properties.GetEnumerator()) {
+                if ($entry.Value.PSObject.Properties[$kv.Key]) {
+                    $entry.Value.PSObject.Properties[$kv.Key].Value = $kv.Value
+                } else {
+                    $entry.Value | Add-Member -MemberType NoteProperty -Name $kv.Key -Value $kv.Value
+                }
+            }
+        }
+        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        Write-Verbose "Updated server '$normalMAC'."
+    }
+}
+
+function Remove-NDTServer {
+    <#
+    .SYNOPSIS
+        Removes a server entry from CustomSettings.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER MAC
+        MAC address of the server entry to remove.
+    .EXAMPLE
+        Remove-NDTServer -MAC '00:15:5D:02:56:01'
+    .EXAMPLE
+        Get-NDTServer -Computername srv02 | Remove-NDTServer
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$MAC
+    )
+
+    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
+    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+
+    $normalMAC = $MAC.ToUpper()
+    $settings  = Get-Content $path -Raw | ConvertFrom-Json
+
+    if (-not $settings.PSObject.Properties[$normalMAC]) {
+        throw "Server '$normalMAC' not found in CustomSettings.json."
+    }
+
+    if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove server entry')) {
+        $settings.PSObject.Properties.Remove($normalMAC)
+        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        Write-Verbose "Removed server '$normalMAC'."
+    }
+}
+
+#endregion
+
+#region ── OS management (OS.json) ───────────────────────────────────────────
+
+function Get-NDTOs {
+    <#
+    .SYNOPSIS
+        Retrieves OS entries from OS.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER Key
+        Return only the entry with this key.
+    .EXAMPLE
+        Get-NDTOs
+    .EXAMPLE
+        Get-NDTOs -Key WIN2025DCG
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$Key
+    )
+
+    $path = Join-Path $LocalPath 'Control\OS.json'
+    if (-not (Test-Path $path)) { throw "OS.json not found at: $path" }
+
+    $catalog = Get-Content $path -Raw | ConvertFrom-Json
+
+    $entries = $catalog.PSObject.Properties | ForEach-Object {
+        [PSCustomObject]@{
+            Key   = $_.Name
+            Path  = $_.Value.Path
+            Index = $_.Value.Index
+        }
+    }
+
+    if ($Key) { $entries = $entries | Where-Object { $_.Key -eq $Key } }
+
+    $entries
+}
+
+function Add-NDTOs {
+    <#
+    .SYNOPSIS
+        Adds a new OS entry to OS.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER Key
+        Unique key for this OS entry (e.g. WIN2025DCG).
+    .PARAMETER Path
+        Share-relative path to the WIM file (backslash-rooted).
+    .PARAMETER Index
+        WIM image index to apply.
+    .EXAMPLE
+        Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\ref-w2025dcg\w2025dcg.wim' -Index 1
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory)]
+        [string]$Key,
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [int]$Index
+    )
+
+    $osPath = Join-Path $LocalPath 'Control\OS.json'
+    if (-not (Test-Path $osPath)) { throw "OS.json not found at: $osPath" }
+
+    $catalog = Get-Content $osPath -Raw | ConvertFrom-Json
+
+    if ($catalog.PSObject.Properties[$Key]) {
+        throw "OS key '$Key' already exists. Use Set-NDTOs to update it."
+    }
+
+    if ($PSCmdlet.ShouldProcess($Key, 'Add OS entry')) {
+        $catalog | Add-Member -MemberType NoteProperty -Name $Key -Value ([PSCustomObject]@{ Path = $Path; Index = $Index })
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        Write-Verbose "Added OS '$Key'."
+    }
+}
+
+function Set-NDTOs {
+    <#
+    .SYNOPSIS
+        Updates the Path and/or Index of an existing OS entry in OS.json.
+        Only parameters that are explicitly supplied are changed.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER Key
+        Key of the OS entry to update.
+    .PARAMETER Path
+        New share-relative WIM path.
+    .PARAMETER Index
+        New WIM image index.
+    .EXAMPLE
+        Set-NDTOs -Key WIN2025DCG -Index 2
+    .EXAMPLE
+        Get-NDTOs -Key WIN2025DCG | Set-NDTOs -Path 'Operating Systems\new\install.wim' -Index 1
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$Key,
+        [Parameter()]
+        [string]$Path,
+        [Parameter()]
+        [int]$Index
+    )
+
+    $osPath = Join-Path $LocalPath 'Control\OS.json'
+    if (-not (Test-Path $osPath)) { throw "OS.json not found at: $osPath" }
+
+    $catalog = Get-Content $osPath -Raw | ConvertFrom-Json
+    $entry   = $catalog.PSObject.Properties[$Key]
+
+    if (-not $entry) { throw "OS key '$Key' not found in OS.json." }
+
+    if ($PSCmdlet.ShouldProcess($Key, 'Update OS entry')) {
+        if ($PSBoundParameters.ContainsKey('Path'))  { $entry.Value.Path  = $Path }
+        if ($PSBoundParameters.ContainsKey('Index')) { $entry.Value.Index = $Index }
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        Write-Verbose "Updated OS '$Key'."
+    }
+}
+
+function Remove-NDTOs {
+    <#
+    .SYNOPSIS
+        Removes an OS entry from OS.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER Key
+        Key of the OS entry to remove.
+    .EXAMPLE
+        Remove-NDTOs -Key WIN2025DCG
+    .EXAMPLE
+        Get-NDTOs | Where-Object Index -eq 3 | Remove-NDTOs
+    #>
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$Key
+    )
+
+    $osPath = Join-Path $LocalPath 'Control\OS.json'
+    if (-not (Test-Path $osPath)) { throw "OS.json not found at: $osPath" }
+
+    $catalog = Get-Content $osPath -Raw | ConvertFrom-Json
+
+    if (-not $catalog.PSObject.Properties[$Key]) {
+        throw "OS key '$Key' not found in OS.json."
+    }
+
+    if ($PSCmdlet.ShouldProcess($Key, 'Remove OS entry')) {
+        $catalog.PSObject.Properties.Remove($Key)
+        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        Write-Verbose "Removed OS '$Key'."
+    }
+}
+
+#endregion
