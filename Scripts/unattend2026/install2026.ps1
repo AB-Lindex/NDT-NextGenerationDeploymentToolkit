@@ -128,8 +128,15 @@ New-Item -Path $deployCompleteFlagPath -ItemType File -Force | Out-Null
 
 # Remove sensitive/temporary deployment files from C:\temp.
 # Note: deploy-complete.flag is intentionally kept so the double-invocation guard works.
-Remove-Item -Path 'C:\temp\settings.json'    -Force -ErrorAction SilentlyContinue
-Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
+
+# the removal of settings.json and install2026.ps1 is commented out for debugging purposes
+# these files may be needed for troubleshooting if any issues arise in the field. 
+# In a production deployment, these should be removed to prevent sensitive information 
+# from being left on the machine.
+
+#Remove-Item -Path 'C:\temp\settings.json'    -Force -ErrorAction SilentlyContinue
+#Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
+
 Write-Log 'Removed settings.json and install2026.ps1 from C:\temp' -ForegroundColor Gray
 
 Write-Log "Deployment complete - cleanup done at $(Get-Date)" -ForegroundColor Green
