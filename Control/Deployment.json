@@ -52,7 +52,7 @@
     "Description": "Install Nuget provider for PowerShell"
   },
   "Pause": {
-    "Script": "\\Applications\\Pause\\Pause.ps1",
-    "Description": "Pause execution until user launches the next step"
+    "Type": "Pause",
+    "Description": "Pause deployment — creates a desktop shortcut to resume"
   }
 }

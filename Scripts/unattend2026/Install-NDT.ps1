@@ -125,6 +125,32 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         continue
     }
     
+    # Check if this is a Pause action
+    if ($stepSection.Type -eq 'Pause') {
+        Write-Log 'Pausing deployment...' -ForegroundColor Yellow
+
+        # Run Pause.ps1 to create the desktop shortcut
+        $pauseScript = 'Z:\Applications\Pause\Pause.ps1'
+        if (Test-Path $pauseScript) {
+            & $pauseScript
+        } else {
+            Write-Log "Pause.ps1 not found at: $pauseScript" -Level WARN
+        }
+
+        # Mark this step as completed so resuming via the shortcut skips past it
+        $completedSteps += $uniqueStepId
+        @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+            ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+
+        # Exit 3011 — signals install2026.ps1 that deployment is paused (not a reboot).
+        # install2026.ps1 will remove RunOnce\Deploy2026 so that rebooting while paused
+        # does NOT auto-resume deployment.  The operator must double-click the desktop
+        # shortcut to continue; that shortcut re-runs install2026.ps1 which re-registers
+        # RunOnce and then continues from the next pending step.
+        Write-Log 'Exiting with code 3011 (deployment paused - RunOnce will be removed)' -ForegroundColor Yellow
+        exit 3011
+    }
+
     # Check if this is a reboot action
     if ($stepSection.Type -eq "Reboot") {
         Write-Log 'Rebooting system...' -ForegroundColor Yellow

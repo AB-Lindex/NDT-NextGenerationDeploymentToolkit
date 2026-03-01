@@ -244,10 +244,21 @@ function Build-NDTPEImage {
 
     # ── Pre-flight: verify WDS is configured (skip if -SkipWDS) ────────────────
     if (-not $SkipWDS) {
-        $wdsState = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Parameters' `
-                        -Name 'WdsInstallState' -ErrorAction SilentlyContinue).WdsInstallState
-        # WdsInstallState 4 = fully configured; anything else (or missing key) means WDS is not ready.
-        if ($wdsState -ne 4) {
+        # Two-stage check:
+        #   1. Service exists — the WDS role is installed.
+        #   2. wdsutil /get-server exit code — 0 means WDS is initialized and configured;
+        #      non-zero means the role is present but wdsutil /Initialize-Server has not
+        #      been run yet (or the service is stopped/broken).
+        # Note: the WdsInstallState registry value documented in older guides is not
+        #       present on all Windows Server versions and cannot be relied upon.
+        $wdsSvc = Get-Service -Name 'WDSServer' -ErrorAction SilentlyContinue
+        $wdsReady = $false
+        if ($wdsSvc) {
+            wdsutil /get-server /show:config 2>&1 | Out-Null
+            $wdsReady = ($LASTEXITCODE -eq 0)
+        }
+
+        if (-not $wdsReady) {
             Write-Warning @'
 WDS (Windows Deployment Services) is not configured on this server.
 The build will complete, but the WDS boot-image update (Step 7) will fail.
@@ -347,25 +358,6 @@ To skip WDS and build the WIM only:
             cmd.exe /c "cd /d `"$winPERoot`" && copype.cmd amd64 `"$IsoStagingDir`""
             if ($LASTEXITCODE -ne 0) { throw "copype.cmd failed (exit $LASTEXITCODE)" }
             Write-Host "  [OK] Fresh staging tree created: $IsoStagingDir" -ForegroundColor Green
-
-            # Enable F8 debug shell: stamp advancedoptions yes in both BCD stores.
-            # winpeshl.exe only intercepts F8 at boot when the BCD entry has this flag set.
-            # Without it the key is silently ignored and [LaunchApps] runs with no escape hatch.
-            # copype creates two BCD stores:
-            #   media\Boot\BCD                      — BIOS (MBR) boot path
-            #   media\EFI\Microsoft\Boot\BCD        — UEFI boot path
-            $bcdStores = @(
-                (Join-Path $IsoStagingDir 'media\Boot\BCD'),
-                (Join-Path $IsoStagingDir 'media\EFI\Microsoft\Boot\BCD')
-            )
-            foreach ($bcdStore in $bcdStores) {
-                if (Test-Path $bcdStore) {
-                    bcdedit /store "$bcdStore" /set '{default}' advancedoptions yes 2>&1 | Out-Null
-                    Write-Host "  [OK] F8 advanced options enabled: $bcdStore" -ForegroundColor Gray
-                } else {
-                    Write-Warning "  BCD store not found, skipping F8 setup: $bcdStore"
-                }
-            }
         }
 
         $stagingBootWim = Join-Path $IsoStagingDir 'media\sources\boot.wim'
@@ -378,8 +370,8 @@ To skip WDS and build the WIM only:
         }
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Mount staging boot.wim')) {
-            $result = dism /Mount-Wim /WimFile:"$stagingBootWim" /Index:1 /MountDir:"$MountDir" 2>&1
-            if ($LASTEXITCODE -ne 0) { throw "DISM mount failed: $result" }
+            dism /Mount-Wim /WimFile:"$stagingBootWim" /Index:1 /MountDir:"$MountDir"
+            if ($LASTEXITCODE -ne 0) { throw "DISM mount failed (exit $LASTEXITCODE)" }
             Write-Host "  [OK] WIM mounted at: $MountDir" -ForegroundColor Green
         }
 
@@ -409,8 +401,8 @@ To skip WDS and build the WIM only:
                     continue
                 }
                 Write-Host "  Adding $pkg ..." -ForegroundColor Gray
-                $result = dism /Image:"$MountDir" /Add-Package /PackagePath:"$cabPath" 2>&1
-                if ($LASTEXITCODE -ne 0) { throw "DISM Add-Package failed for ${pkg}: $result" }
+                dism /Image:"$MountDir" /Add-Package /PackagePath:"$cabPath"
+                if ($LASTEXITCODE -ne 0) { throw "DISM Add-Package failed for ${pkg} (exit $LASTEXITCODE)" }
                 Write-Host "  [OK] $pkg" -ForegroundColor Gray
             }
             Write-Host '  [OK] All optional packages added' -ForegroundColor Green
@@ -430,33 +422,60 @@ To skip WDS and build the WIM only:
                 Write-Host "  [OK] Copied: $($file.Name)" -ForegroundColor Gray
             }
 
-            # Inject startnet.cmd — contains only "wpeinit".
-            # This is the fallback when NO winpeshl.ini is present, but we keep it
-            # in place as a safety net.
-            $startnetSource = Join-Path $winPEScriptDir 'startnet.cmd'
-            $startnetDest   = Join-Path $MountDir 'Windows\System32\startnet.cmd'
-            if (Test-Path $startnetSource) {
-                Copy-Item -Path $startnetSource -Destination $startnetDest -Force
-                Write-Host '  [OK] startnet.cmd -> Windows\System32\startnet.cmd' -ForegroundColor Gray
-            } else {
-                Write-Warning "startnet.cmd not found at: $startnetSource"
-            }
+            # Generate StartDeploy.cmd directly into X:\Deploy\ inside the WIM.
+            # This is the MDT-equivalent of the F8 debug shell:
+            #   - wpeinit runs first (DHCP, PnP — same role as MDT's bddrun.exe)
+            #   - A 5-second countdown prompts the user to press S for a command prompt
+            #   - If S is pressed, cmd.exe /k opens; typing EXIT resumes deployment
+            #   - On timeout (or C) deployment continues straight to install.ps1
+            # MDT achieves this via bddrun.exe intercepting F8; without that binary
+            # a choice/countdown is the correct equivalent in plain WinPE.
+            $startDeployContent = @'
+@echo off
+wpeinit
+echo.
+echo  ===========================================================
+echo    NDT  -  Next Deployment Tool
+echo  ===========================================================
+echo.
+echo   Press S within 5 seconds for a debug command prompt.
+echo   (MDT equivalent: F8 during WinPE startup)
+echo.
+choice /c SC /n /t 5 /d C /m "  S = Debug shell     C = Start deployment (auto)"
+if not errorlevel 2 (
+    echo.
+    echo  Debug shell  --  type EXIT to continue deployment.
+    cmd.exe /k
+)
+wpeutil WaitForNetwork
+powershell.exe -ExecutionPolicy Bypass -NonInteractive -File X:\Deploy\install.ps1
+'@
+            $startDeployDest = Join-Path $wimDeployDir 'StartDeploy.cmd'
+            Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
+            Write-Host '  [OK] StartDeploy.cmd generated -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
 
-            # Inject winpeshl.ini to Windows\System32\.
-            # winpeshl.exe reads this and:
-            #   - Intercepts F8 at startup -> drops to cmd.exe shell (debug)
-            #   - Otherwise runs [LaunchApps] sequentially:
-            #       1. wpeinit.exe  — DHCP, PnP (same role as MDT's bddrun.exe)
-            #       2. StartDeploy.cmd — wpeutil WaitForNetwork -> install.ps1
-            # MDT equivalent: bddrun.exe calls wpeinit internally then launches LiteTouch.wsf
-            $winpeshlSource = Join-Path $winPEScriptDir 'winpeshl.ini'
-            $winpeshlDest   = Join-Path $MountDir 'Windows\System32\winpeshl.ini'
-            if (Test-Path $winpeshlSource) {
-                Copy-Item -Path $winpeshlSource -Destination $winpeshlDest -Force
-                Write-Host '  [OK] winpeshl.ini -> Windows\System32\winpeshl.ini' -ForegroundColor Gray
-            } else {
-                Write-Warning "winpeshl.ini not found at: $winpeshlSource"
-            }
+            # Generate winpeshl.ini directly — tells winpeshl.exe to run StartDeploy.cmd.
+            # winpeshl.exe reads [LaunchApps] and executes each entry in order.
+            # Having winpeshl.ini present (rather than relying on startnet.cmd) is what
+            # allows the custom launcher (and therefore the S-key debug prompt) to run.
+            $winpeshlContent = @'
+[Options]
+DebugShell=Yes
+
+[LaunchApps]
+%SYSTEMDRIVE%\Deploy\StartDeploy.cmd
+'@
+            $winpeshlDest = Join-Path $MountDir 'Windows\System32\winpeshl.ini'
+            Set-Content -Path $winpeshlDest -Value $winpeshlContent -Encoding ASCII
+            Write-Host '  [OK] winpeshl.ini generated -> Windows\System32\winpeshl.ini' -ForegroundColor Gray
+
+            # startnet.cmd fallback — only executed when winpeshl.ini is absent.
+            # Write a minimal version so that if winpeshl.ini were ever missing the
+            # machine still initialises the network; without this it would hang silently.
+            $startnetContent = "@echo off`r`nwpeinit`r`n"
+            $startnetDest    = Join-Path $MountDir 'Windows\System32\startnet.cmd'
+            Set-Content -Path $startnetDest -Value $startnetContent -Encoding ASCII
+            Write-Host '  [OK] startnet.cmd (fallback) -> Windows\System32\startnet.cmd' -ForegroundColor Gray
 
             # Unattend.xml at WIM root — display settings only.
             # RunSynchronous is NOT used here; winpeshl.ini is the launcher.
@@ -473,8 +492,8 @@ To skip WDS and build the WIM only:
         Write-Host "`nStep 6: Committing WIM..." -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Commit and unmount WIM')) {
-            $result = dism /Unmount-Wim /MountDir:"$MountDir" /Commit 2>&1
-            if ($LASTEXITCODE -ne 0) { throw "DISM unmount/commit failed: $result" }
+            dism /Unmount-Wim /MountDir:"$MountDir" /Commit
+            if ($LASTEXITCODE -ne 0) { throw "DISM unmount/commit failed (exit $LASTEXITCODE)" }
             Write-Host '  [OK] WIM committed and unmounted' -ForegroundColor Green
 
             $bootDir = Split-Path $wimFile -Parent

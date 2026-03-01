@@ -86,5 +86,11 @@
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
     }
+  },
+  "MakePause": {
+    "Step1": {
+      "Description": "Make a pause",
+      "Reference": "Pause"
+    }
   }
 }

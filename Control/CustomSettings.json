@@ -47,7 +47,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","SQL2025"]
+    "DeploymentSteps": ["General Settings","MakePause","SQL2025"]
   },
   "Sweden": {
     "InputLocale": "sv-SE",

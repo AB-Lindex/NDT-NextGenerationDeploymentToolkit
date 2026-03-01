@@ -63,6 +63,13 @@ if (Test-Path $rebootFlagPath) {
 Set-ItemProperty -Path $runOnceKey -Name $runOnceValue -Value $runOnceCmd -Force
 Write-Log 'RunOnce\Deploy2026 registered'
 
+# If we're resuming from a Pause, the shortcut on the Public Desktop is no longer needed.
+$pauseShortcut = 'C:\Users\Public\Desktop\Continue Deployment.lnk'
+if (Test-Path $pauseShortcut) {
+    Remove-Item $pauseShortcut -Force -ErrorAction SilentlyContinue
+    Write-Log 'Removed "Continue Deployment" shortcut from Public Desktop'
+}
+
 # Map deployment share
 $settingsPath = 'C:\temp\settings.json'
 if (-not (Test-Path $settingsPath)) {
@@ -107,6 +114,13 @@ Write-Log "Install-NDT.ps1 exited with code $LASTEXITCODE"
 if ($LASTEXITCODE -eq 3010) {
     Write-Log "Reboot pending - writing reboot flag and exiting" -ForegroundColor Yellow
     New-Item -Path $rebootFlagPath -ItemType File -Force | Out-Null
+    net use Z: /delete /yes
+    exit 0
+}
+
+if ($LASTEXITCODE -eq 3011) {
+    Write-Log "Deployment paused - removing RunOnce\Deploy2026 so a reboot does not auto-resume" -ForegroundColor Yellow
+    Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
     net use Z: /delete /yes
     exit 0
 }

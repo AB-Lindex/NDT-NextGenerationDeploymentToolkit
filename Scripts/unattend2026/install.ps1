@@ -98,7 +98,7 @@ if (-not $osInfo -or -not $osInfo.Path -or -not $osInfo.Index) {
     exit 1
 }
 
-$wimPath  = "Z:\$($osInfo.Path)"
+$wimPath  = $osInfo.Path
 $wimIndex = $osInfo.Index
 
 if (-not (Test-Path $wimPath)) {
