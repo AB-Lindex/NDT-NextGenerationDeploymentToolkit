@@ -98,8 +98,14 @@ Write-Output "Starting image capture..."
 Write-Output "This may take 20-60 minutes depending on system size."
 Write-Output ""
 
-# DISM log — persisted on the deployment share for post-mortem analysis
-$dismLog = Join-Path $outputDir "dism-capture.log"
+# DISM log — named after the WIM so parallel captures don't collide.
+# Persisted on the deployment share for post-mortem analysis.
+$dismLogBase = [System.IO.Path]::GetFileNameWithoutExtension($OutputPath)
+$dismLog = Join-Path $outputDir "$dismLogBase-dism.log"
+if (Test-Path $dismLog) {
+    Write-Output "Removing previous DISM log: $dismLog"
+    Remove-Item $dismLog -Force
+}
 
 # Build DISM command
 # IMPORTANT: /ScratchDir must point outside the WinPE RAM disk (X:) otherwise

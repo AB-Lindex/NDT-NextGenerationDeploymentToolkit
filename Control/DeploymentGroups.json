@@ -65,6 +65,10 @@
   },
   "CreateReferenceImage": {
     "Step1": {
+      "Description": "Pause before reference deployment",
+      "Reference": "Pause"
+    },
+    "Step2": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
     }
