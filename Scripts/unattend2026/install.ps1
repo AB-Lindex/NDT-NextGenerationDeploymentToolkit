@@ -50,10 +50,73 @@ Write-Host "Running normal deployment..." -ForegroundColor Cyan
 # read-host "Press Enter to start deployment..."
 
 # Detect firmware type: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2)
+# Done early so we can report it, but disk is NOT touched until all validations pass.
 $firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name "PEFirmwareType" -ErrorAction SilentlyContinue).PEFirmwareType
 $isUEFI = ($firmwareType -eq 2)
-
 Write-Host "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
+
+# ------------------------------------------------------------------
+# STEP 1 - Validate MAC address
+# ------------------------------------------------------------------
+$macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
+
+$customSettingsPath = "Z:\Control\CustomSettings.json"
+$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+
+if (-not $customSettings.$macAddress) {
+    Write-Host "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -ForegroundColor Red
+    Write-Host "Available MAC addresses in configuration:" -ForegroundColor Yellow
+    $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
+        Write-Host "  $($_.Name)" -ForegroundColor Gray
+    }
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+$machineConfig = $customSettings.$macAddress
+if (-not $machineConfig.OS) {
+    Write-Host "ERROR: OS field not found in configuration for MAC address: $macAddress" -ForegroundColor Red
+    Write-Host "Machine configuration:" -ForegroundColor Yellow
+    $machineConfig | ConvertTo-Json | Write-Host -ForegroundColor Gray
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
+Write-Host "  OS          : $($machineConfig.OS)" -ForegroundColor Cyan
+Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
+
+# ------------------------------------------------------------------
+# STEP 2 - Resolve and validate OS / WIM
+# ------------------------------------------------------------------
+$osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
+
+if (-not $osInfo -or -not $osInfo.Path -or -not $osInfo.Index) {
+    Write-Host "ERROR: Get-OS.ps1 returned no result for OS key '$($machineConfig.OS)'" -ForegroundColor Red
+    Write-Host "Check that '$($machineConfig.OS)' exists in Z:\Control\OS.json" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+$wimPath  = "Z:\$($osInfo.Path)"
+$wimIndex = $osInfo.Index
+
+if (-not (Test-Path $wimPath)) {
+    Write-Host "ERROR: WIM file not found at: $wimPath" -ForegroundColor Red
+    Write-Host "  OS key   : $($machineConfig.OS)" -ForegroundColor Yellow
+    Write-Host "  Path     : $wimPath" -ForegroundColor Yellow
+    Write-Host "  Index    : $wimIndex" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+
+Write-Host "  WIM Path : $wimPath" -ForegroundColor Cyan
+Write-Host "  WIM Index: $wimIndex" -ForegroundColor Cyan
+
+# ------------------------------------------------------------------
+# STEP 3 - All validations passed - safe to wipe and partition disk
+# ------------------------------------------------------------------
+Write-Host "All pre-flight checks passed - partitioning disk 0..." -ForegroundColor Green
 
 if ($isUEFI) {
     $diskpartScript = @"
@@ -102,42 +165,17 @@ Format-Volume -DriveLetter $windowsPartition.DriveLetter -FileSystem NTFS -NewFi
 Set-Partition -DriveLetter $windowsPartition.DriveLetter -NewDriveLetter C
 #>
 
-# Get MAC address once
-$macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
-
-# Validate MAC address exists in CustomSettings.json
-$customSettingsPath = "Z:\Control\CustomSettings.json"
-$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
-
-if (-not $customSettings.$macAddress) {
-    Write-Host "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -ForegroundColor Red
-    Write-Host "Available MAC addresses in configuration:" -ForegroundColor Yellow
-    $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
-        Write-Host "  $($_.Name)" -ForegroundColor Gray
-    }
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-$machineConfig = $customSettings.$macAddress
-if (-not $machineConfig.OS) {
-    Write-Host "ERROR: OS field not found in configuration for MAC address: $macAddress" -ForegroundColor Red
-    Write-Host "Machine configuration:" -ForegroundColor Yellow
-    $machineConfig | ConvertTo-Json | Write-Host -ForegroundColor Gray
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
-Write-Host "  OS: $($machineConfig.OS)" -ForegroundColor Cyan
-Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
-
-# Get OS WIM info (path and index)
-$osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
-$wimPath = $osInfo.Path
-$wimIndex = $osInfo.Index
-
+# ------------------------------------------------------------------
+# STEP 4 - Apply OS image
+# ------------------------------------------------------------------
 Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:$wimIndex /ApplyDir:C:\
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: DISM /Apply-Image failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "  WIM Path : $wimPath" -ForegroundColor Yellow
+    Write-Host "  WIM Index: $wimIndex" -ForegroundColor Yellow
+    Read-Host "Press Enter to exit"
+    exit $LASTEXITCODE
+}
 
 # Copy and prepare install2026.ps1 with deployment share mapping
 & "Z:\Scripts\Unattend2026\Copy-Install.ps1"

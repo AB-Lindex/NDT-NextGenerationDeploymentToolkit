@@ -347,6 +347,25 @@ To skip WDS and build the WIM only:
             cmd.exe /c "cd /d `"$winPERoot`" && copype.cmd amd64 `"$IsoStagingDir`""
             if ($LASTEXITCODE -ne 0) { throw "copype.cmd failed (exit $LASTEXITCODE)" }
             Write-Host "  [OK] Fresh staging tree created: $IsoStagingDir" -ForegroundColor Green
+
+            # Enable F8 debug shell: stamp advancedoptions yes in both BCD stores.
+            # winpeshl.exe only intercepts F8 at boot when the BCD entry has this flag set.
+            # Without it the key is silently ignored and [LaunchApps] runs with no escape hatch.
+            # copype creates two BCD stores:
+            #   media\Boot\BCD                      — BIOS (MBR) boot path
+            #   media\EFI\Microsoft\Boot\BCD        — UEFI boot path
+            $bcdStores = @(
+                (Join-Path $IsoStagingDir 'media\Boot\BCD'),
+                (Join-Path $IsoStagingDir 'media\EFI\Microsoft\Boot\BCD')
+            )
+            foreach ($bcdStore in $bcdStores) {
+                if (Test-Path $bcdStore) {
+                    bcdedit /store "$bcdStore" /set '{default}' advancedoptions yes 2>&1 | Out-Null
+                    Write-Host "  [OK] F8 advanced options enabled: $bcdStore" -ForegroundColor Gray
+                } else {
+                    Write-Warning "  BCD store not found, skipping F8 setup: $bcdStore"
+                }
+            }
         }
 
         $stagingBootWim = Join-Path $IsoStagingDir 'media\sources\boot.wim'
