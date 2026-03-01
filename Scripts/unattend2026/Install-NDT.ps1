@@ -36,7 +36,11 @@ $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 $customSettingsPath = "Z:\Control\CustomSettings.json"
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 
-# Load Deployment.json
+# Load DeploymentGroups.json (groups → ordered steps with References)
+$deploymentGroupsPath = "Z:\Control\DeploymentGroups.json"
+$deploymentGroups = Get-Content -Path $deploymentGroupsPath -Raw | ConvertFrom-Json
+
+# Load Deployment.json (actions → scripts / Reboot / AutoLogon entries)
 $deploymentPath = "Z:\Control\Deployment.json"
 $deployment = Get-Content -Path $deploymentPath -Raw | ConvertFrom-Json
 
@@ -85,10 +89,10 @@ Write-Log '=============================' -ForegroundColor Green
 
 # Process each deployment group
 foreach ($deploymentGroupName in $deploymentGroupRefs) {
-    $deploymentGroup = $deployment.$deploymentGroupName
+    $deploymentGroup = $deploymentGroups.$deploymentGroupName
 
     if (-not $deploymentGroup) {
-        Write-Log "Deployment group '$deploymentGroupName' not found in Deployment.json" -Level WARN
+        Write-Log "Deployment group '$deploymentGroupName' not found in DeploymentGroups.json" -Level WARN
         continue
     }
     

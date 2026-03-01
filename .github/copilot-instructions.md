@@ -13,7 +13,8 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ├── Boot/boot2026.wim              ← WinPE image served by WDS
 ├── Control/
 │   ├── CustomSettings.json        ← per-machine config keyed by MAC + shared sections
-│   ├── Deployment.json            ← deployment groups and step/action definitions
+│   ├── DeploymentGroups.json      ← named groups: ordered steps referencing Deployment.json keys
+│   ├── Deployment.json            ← action definitions: scripts, Reboot, AutoLogon
 │   └── OS.json                    ← OS catalog: key → WIM path + index
 ├── Operating Systems/             ← WIM files
 ├── Applications/                  ← generic app installers (PS scripts)
@@ -29,10 +30,14 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   └── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
 ├── MDT-Scripts/                   ← legacy MDT helper scripts (reference only)
 └── install/                       ← PowerShell module to bootstrap a new NDT server
-    ├── ndt.psm1                   ← exports Install-NDT
-    ├── ndt.psd1                   ← module manifest (requires PS 5.1)
-    └── source/                    ← seed copies of the three control files
+    ├── NDT/
+    │   ├── ndt.psm1               ← module script (exports all NDT-* commands)
+    │   └── ndt.psd1               ← module manifest (requires PS 5.1)
+    ├── ndt.nuspec                 ← NuGet package spec (reference; PSGallery uses psd1)
+    ├── Publish-NDT.ps1            ← publishes the module to PSGallery
+    └── source/                    ← seed copies of the control files
         ├── CustomSettings.json
+        ├── DeploymentGroups.json
         ├── Deployment.json
         └── OS.json
 ```
@@ -63,7 +68,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
 1. Read machine's `DeploymentSteps` from `CustomSettings.json` (matched by MAC).
-2. Load ordered steps from `Deployment.json` for each group.
+2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `Deployment.json`.
 3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
 4. Execute steps by type:
    - **Script** — run `.ps1`/`.cmd`/`.bat`; optional `Parameters` array names keys to pull from `CustomSettings.json`.
@@ -107,9 +112,9 @@ Two kinds of top-level keys:
 "ADLogon":     { "Username": "Corp\\ADLogon", "Password": "..." }
 ```
 
-### Deployment.json
+### DeploymentGroups.json
 
-**Group block** — ordered steps referencing action entries:
+Named groups of ordered steps. Each step has a `Reference` key into `Deployment.json`:
 ```jsonc
 "General Settings": {
   "Step1": { "Description": "Admin password never expires", "Reference": "Admin password never expires" },
@@ -117,7 +122,9 @@ Two kinds of top-level keys:
 }
 ```
 
-**Action entry** — what to run (three forms):
+### Deployment.json
+
+Action definitions only — what to run (three forms):
 ```jsonc
 "Install App2026": { "Script": "\\Applications\\App2026\\install01.ps1", "Parameters": ["SQLServer", "AlwaysOn"] },
 "Reboot":          { "Type": "Reboot",    "Description": "Restart the computer" },
