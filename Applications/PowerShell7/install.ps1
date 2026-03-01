@@ -17,3 +17,5 @@ if ($msiAsset) {
 } else {
     Write-Error "MSI asset not found in the latest release."
 }
+
+read-host "Press Enter to continue..."

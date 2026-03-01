@@ -1,9 +1,18 @@
+Param(
+    # Pass -Resume when manually continuing after a Pause step (i.e. via the
+    # desktop shortcut).  Without this switch the script exits immediately if
+    # a pause.flag is present, preventing the spurious double-invocation that
+    # the Windows shell causes after any RunOnce-triggered session.
+    [switch]$Resume
+)
+
 $LogPath    = 'C:\temp\install2026.log'
 $winlogonKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $runOnceKey  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 $runOnceValue = 'Deploy2026'
 $runOnceCmd   = 'powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1'
 $deployCompleteFlagPath = 'C:\temp\deploy-complete.flag'
+$pauseFlagPath           = 'C:\temp\pause.flag'
 
 function Write-Log {
     param(
@@ -39,6 +48,23 @@ Write-Log "-----------------------------------" -ForegroundColor Cyan
 if (Test-Path $deployCompleteFlagPath) {
     Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting' -ForegroundColor Yellow
     exit 0
+}
+
+# Guard against the spurious re-invocation that occurs after a Pause step.
+# When Install-NDT.ps1 exits with 3011 the Windows shell can fire install2026.ps1
+# a second time in the same logon session (same double-invocation problem as the
+# deploy-complete.flag scenario above).  Writing pause.flag on 3011 and checking
+# it here lets that second call exit before it re-registers RunOnce or removes
+# the desktop shortcut.
+# -Resume clears the flag and falls through so the operator's manual click works.
+if (Test-Path $pauseFlagPath) {
+    if ($Resume) {
+        Remove-Item $pauseFlagPath -Force -ErrorAction SilentlyContinue
+        Write-Log 'Resuming deployment after Pause (pause.flag removed)' -ForegroundColor Cyan
+    } else {
+        Write-Log 'Deployment is paused (pause.flag present) - exiting. Use the desktop shortcut to resume.' -ForegroundColor Yellow
+        exit 0
+    }
 }
 
 # Check for pending reboot flag. This flag is written when a deployment reboot is
@@ -122,9 +148,11 @@ if ($ndtExitCode -eq 3010) {
     exit 0
 
 } elseif ($ndtExitCode -eq 3011) {
-    # Pause step — remove RunOnce so rebooting while paused does NOT auto-resume.
-    # The operator must use the desktop shortcut to resume manually.
-    Write-Log 'Deployment paused - removing RunOnce\Deploy2026' -ForegroundColor Yellow
+    # Pause step — write pause.flag before removing RunOnce so that the spurious
+    # second invocation (shell double-fire) exits at the early-exit guard above
+    # instead of re-registering RunOnce and continuing deployment.
+    Write-Log 'Deployment paused - writing pause.flag and removing RunOnce\Deploy2026' -ForegroundColor Yellow
+    New-Item -Path $pauseFlagPath -ItemType File -Force | Out-Null
     Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
     net use Z: /delete /yes
     exit 0
