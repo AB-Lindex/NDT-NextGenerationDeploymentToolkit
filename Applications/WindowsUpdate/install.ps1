@@ -10,6 +10,11 @@ if ($WUCount.count -gt 0) {
    Get-WUInstall -NotCategory "drivers" -AcceptAll -Install -IgnoreReboot
 }
 if (Get-WURebootStatus -Silent) {
-   shutdown.exe -r -t 5
+    # Signal the NDT step engine to reboot and re-run this step.
+    # The orchestrator (Install-NDT.ps1) owns the actual shutdown call.
+    exit 3010
 }
+
+# No reboot required - all patches installed.
+exit 0
 

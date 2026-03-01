@@ -151,6 +151,57 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         exit 3011
     }
 
+    # Check if this is a WindowsUpdate action
+    # The WU script exits 3010 when a reboot is required, 0 when fully patched.
+    # We deliberately do NOT mark the step complete on a 3010 exit so that the
+    # engine re-runs Windows Update after the reboot, iterating until no more
+    # patches require a restart.
+    if ($stepSection.Type -eq 'WindowsUpdate') {
+        $wuScript = "Z:$($stepSection.Script)"
+        if (-not (Test-Path $wuScript)) {
+            Write-Log "Windows Update script not found: $wuScript" -Level WARN
+            continue
+        }
+
+        Write-Log 'Running Windows Update...' -ForegroundColor Yellow
+        & $wuScript
+        $wuExitCode = $LASTEXITCODE
+        Write-Log "Windows Update script exited with code $wuExitCode"
+
+        if ($wuExitCode -eq 3010) {
+            # Reboot required — do NOT add to completedSteps so this step reruns after reboot.
+            Write-Log 'Windows Update requires a reboot - initiating restart...' -ForegroundColor Yellow
+
+            # Configure AutoLogon so deployment resumes automatically after the reboot.
+            $winlogonPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+            Set-ItemProperty -Path $winlogonPath -Name AutoAdminLogon -Value '1' -Type String -Force
+            if ($autoLogonSettings -and $autoLogonSettings.Username) {
+                Set-ItemProperty -Path $winlogonPath -Name DefaultUserName  -Value $autoLogonSettings.Username -Type String -Force
+            }
+            if ($autoLogonSettings -and $autoLogonSettings.Password) {
+                Set-ItemProperty -Path $winlogonPath -Name DefaultPassword   -Value $autoLogonSettings.Password -Type String -Force
+            }
+            if ($autoLogonSettings -and $autoLogonSettings.Domain) {
+                Set-ItemProperty -Path $winlogonPath -Name DefaultDomainName -Value $autoLogonSettings.Domain  -Type String -Force
+            } else {
+                Remove-ItemProperty -Path $winlogonPath -Name DefaultDomainName -ErrorAction SilentlyContinue
+            }
+            Write-Log "AutoLogon set for user: $($autoLogonSettings.Username)" -ForegroundColor Green
+
+            Write-Log 'Shutdown initiated - system will restart in 10 seconds' -ForegroundColor Red
+            shutdown.exe /r /t 10 /c "Windows Update requires restart"
+            Write-Log 'Exiting with code 3010 (WU reboot pending)' -ForegroundColor Red
+            exit 3010
+        } else {
+            # Exit 0 (or anything other than 3010): no reboot needed, patching complete.
+            Write-Log 'Windows Update complete - no further reboots required' -ForegroundColor Green
+            $completedSteps += $uniqueStepId
+            @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+                ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+            continue
+        }
+    }
+
     # Check if this is a reboot action
     if ($stepSection.Type -eq "Reboot") {
         Write-Log 'Rebooting system...' -ForegroundColor Yellow

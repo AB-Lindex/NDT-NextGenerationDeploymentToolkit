@@ -69,7 +69,7 @@
       "Reference": "InstallNuget"
     },
     "Step2": {
-      "Description": "Pause before reference deployment",
+      "Description": "Pause before Updates",
       "Reference": "Pause"
     },
     "Step3": {
@@ -77,6 +77,14 @@
       "Reference": "WindowsUpdate"
     },
     "Step4": {
+      "Description": "Pause before reference deployment",
+      "Reference": "Pause"
+    },
+    "Step5": {
+      "Description": "Cleanup image before sysprep",
+      "Reference": "Cleanup Image"
+    },
+    "Step6": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
     }

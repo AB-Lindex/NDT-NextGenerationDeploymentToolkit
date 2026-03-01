@@ -59,5 +59,9 @@
     "Type": "WindowsUpdate",
     "Script": "\\Applications\\WindowsUpdate\\install.ps1",
     "Description": "Install Windows updates"
+  },
+  "Cleanup Image": {
+    "Script": "\\Applications\\Cleanup Image\\CleanupBeforeSysprep.ps1",
+    "Description": "Cleanup reference image"
   }
 }
