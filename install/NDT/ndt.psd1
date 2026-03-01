@@ -31,7 +31,7 @@
     PrivateData = @{
         PSData = @{
             Tags        = @('NDT', 'Deployment', 'MDT', 'LiteTouch')
-            ProjectUri  = ''
+            ProjectUri  = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit'
             ReleaseNotes = '1.0.0 — Initial release. Provides Install-NDT, Build-NDTPEImage.'
         }
     }
