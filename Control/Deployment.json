@@ -54,5 +54,10 @@
   "Pause": {
     "Type": "Pause",
     "Description": "Pause deployment — creates a desktop shortcut to resume"
+  },
+  "WindowsUpdate": {
+    "Type": "WindowsUpdate",
+    "Script": "\\Applications\\WindowsUpdate\\install.ps1",
+    "Description": "Install Windows updates"
   }
 }

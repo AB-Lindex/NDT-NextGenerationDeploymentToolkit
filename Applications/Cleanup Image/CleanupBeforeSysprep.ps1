@@ -26,7 +26,7 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Write-Output "[$ts][$Level] $Message"
+    Write-Host "[$ts][$Level] $Message"
 }
 
 #endregion

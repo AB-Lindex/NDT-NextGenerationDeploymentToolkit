@@ -65,10 +65,18 @@
   },
   "CreateReferenceImage": {
     "Step1": {
+      "Description": "Install Nuget",
+      "Reference": "InstallNuget"
+    },
+    "Step2": {
       "Description": "Pause before reference deployment",
       "Reference": "Pause"
     },
-    "Step2": {
+    "Step3": {
+      "Description": "Install Windows updates",
+      "Reference": "WindowsUpdate"
+    },
+    "Step4": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
     }
