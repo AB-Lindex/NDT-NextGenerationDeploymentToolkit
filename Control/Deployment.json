@@ -77,6 +77,10 @@
     "Step2": {
       "Description": "Install ADK",
       "Reference": "ADK"
+    },
+    "Step3": {
+      "Description": "Install Nuget",
+      "Reference": "InstallNuget"
     }
   },
   "ReferenceImage": {
@@ -126,5 +130,9 @@
   "ADK": {
     "Script": "\\Applications\\ADK\\install.ps1",
     "Description": "Install Windows ADK and WinPE add-on"
+   },
+   "InstallNuget": {
+    "Script": "\\Applications\\Nuget\\install.ps1",
+    "Description": "Install Nuget provider for PowerShell"
    }
 }
