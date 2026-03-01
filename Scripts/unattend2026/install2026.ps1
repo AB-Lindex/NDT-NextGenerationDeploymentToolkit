@@ -105,53 +105,55 @@ if (-not (Test-Path $pwshExe)) {
 # Using a child process instead of & means exit inside Install-NDT.ps1 terminates
 # only that child process; $LASTEXITCODE in this script reflects the exit code.
 # Exit codes:
-#   0    - all steps completed, no reboot required
-#   3010 - reboot required; AutoLogon registry already written by Install-NDT.ps1
+#   0    - all steps completed successfully, no reboot required
+#   3010 - deployment reboot step; AutoLogon registry already written by Install-NDT.ps1
+#   3011 - deployment paused (Pause step); RunOnce must be removed so reboot stays paused
 # Use the full path - the PS5 process $PATH is stale and won't resolve pwsh.exe by name.
 & $pwshExe -ExecutionPolicy Bypass -File 'Z:\Scripts\unattend2026\Install-NDT.ps1'
-Write-Log "Install-NDT.ps1 exited with code $LASTEXITCODE"
+$ndtExitCode = $LASTEXITCODE
+Write-Log "Install-NDT.ps1 exited with code $ndtExitCode"
 
-if ($LASTEXITCODE -eq 3010) {
-    Write-Log "Reboot pending - writing reboot flag and exiting" -ForegroundColor Yellow
+if ($ndtExitCode -eq 3010) {
+    # Reboot step — write reboot flag so the next logon knows a reboot was expected.
+    # RunOnce\Deploy2026 remains registered; deployment resumes automatically after reboot.
+    Write-Log 'Reboot pending - writing reboot flag and exiting' -ForegroundColor Yellow
     New-Item -Path $rebootFlagPath -ItemType File -Force | Out-Null
     net use Z: /delete /yes
     exit 0
-}
 
-if ($LASTEXITCODE -eq 3011) {
-    Write-Log "Deployment paused - removing RunOnce\Deploy2026 so a reboot does not auto-resume" -ForegroundColor Yellow
+} elseif ($ndtExitCode -eq 3011) {
+    # Pause step — remove RunOnce so rebooting while paused does NOT auto-resume.
+    # The operator must use the desktop shortcut to resume manually.
+    Write-Log 'Deployment paused - removing RunOnce\Deploy2026' -ForegroundColor Yellow
     Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
     net use Z: /delete /yes
     exit 0
+
+} elseif ($ndtExitCode -eq 0) {
+    # All steps completed — run end-of-deployment cleanup.
+    net use Z: /delete /yes
+    Write-Log "Z: unmapped at $(Get-Date)"
+
+    # Remove RunOnce and disable AutoLogon
+    Remove-ItemProperty -Path $runOnceKey  -Name $runOnceValue       -ErrorAction SilentlyContinue
+    Set-ItemProperty   -Path $winlogonKey -Name AutoAdminLogon -Value '0' -Type String -Force
+    Remove-ItemProperty -Path $winlogonKey -Name DefaultPassword     -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $winlogonKey -Name DefaultDomainName   -ErrorAction SilentlyContinue
+
+    # Write sentinel so any duplicate invocations in the same logon session exit immediately.
+    New-Item -Path $deployCompleteFlagPath -ItemType File -Force | Out-Null
+
+    # Remove sensitive/temporary deployment files from C:\temp.
+    # Commented out for debugging purposes - enable in production.
+    #Remove-Item -Path 'C:\temp\settings.json'    -Force -ErrorAction SilentlyContinue
+    #Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
+
+    Write-Log "Deployment complete - cleanup done at $(Get-Date)" -ForegroundColor Green
+
+} else {
+    # Unexpected exit code - unmap share and log, but do not create deploy-complete.flag.
+    Write-Log "Unexpected exit code $ndtExitCode from Install-NDT.ps1 - deployment may be incomplete" -Level WARN
+    net use Z: /delete /yes
+    exit $ndtExitCode
 }
-
-# Only reached when ALL deployment steps complete with no reboot.
-net use Z: /delete /yes
-Write-Log "Z: unmounted at $(Get-Date)"
-
-# Deployment complete - remove RunOnce and disable AutoLogon
-Remove-ItemProperty -Path $runOnceKey  -Name $runOnceValue       -ErrorAction SilentlyContinue
-Set-ItemProperty   -Path $winlogonKey -Name AutoAdminLogon -Value '0' -Type String -Force
-Remove-ItemProperty -Path $winlogonKey -Name DefaultPassword     -ErrorAction SilentlyContinue
-Remove-ItemProperty -Path $winlogonKey -Name DefaultDomainName   -ErrorAction SilentlyContinue
-
-# Write sentinel file so any subsequent invocation of this script in the same boot
-# session (e.g. the RunOnce that Windows captured before FirstLogonCommands fired)
-# exits immediately without doing any work.
-New-Item -Path $deployCompleteFlagPath -ItemType File -Force | Out-Null
-
-# Remove sensitive/temporary deployment files from C:\temp.
-# Note: deploy-complete.flag is intentionally kept so the double-invocation guard works.
-
-# the removal of settings.json and install2026.ps1 is commented out for debugging purposes
-# these files may be needed for troubleshooting if any issues arise in the field. 
-# In a production deployment, these should be removed to prevent sensitive information 
-# from being left on the machine.
-
-#Remove-Item -Path 'C:\temp\settings.json'    -Force -ErrorAction SilentlyContinue
-#Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
-
-Write-Log 'Removed settings.json and install2026.ps1 from C:\temp' -ForegroundColor Gray
-
-Write-Log "Deployment complete - cleanup done at $(Get-Date)" -ForegroundColor Green
 

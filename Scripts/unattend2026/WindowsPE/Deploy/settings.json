@@ -1,5 +1,6 @@
 {
-  "Share": "\\\\dc01.corp.dev\\Deploy2026",
-  "Username": "Corp\\Deploy2026",
-  "Password": "P@ssw0rd2026"
+  "_comment": "This file is a placeholder. Build-NDTPEImage overwrites it from Control\\CustomSettings.json (Deploy section) at build time.",
+  "Share": "\\\\<server>\\Deploy2026",
+  "Username": "<domain>\\<account>",
+  "Password": "<password>"
 }

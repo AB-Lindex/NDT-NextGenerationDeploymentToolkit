@@ -283,7 +283,6 @@ To skip WDS and build the WIM only:
     $winPEScriptDir     = Join-Path $LocalPath 'Scripts\unattend2026\WindowsPE'
     $deploySource       = Join-Path $winPEScriptDir 'Deploy'
     $unattendSource     = Join-Path $winPEScriptDir 'Unattend.xml'
-    $settingsOutput     = Join-Path $deploySource  'settings.json'
 
     # ── Locate Windows ADK ──────────────────────────────────────────────────────
     $adkRoot    = $null
@@ -335,16 +334,12 @@ To skip WDS and build the WIM only:
             Password = $deploySection.Password
         }
 
-        if (-not (Test-Path $deploySource)) {
-            New-Item -Path $deploySource -ItemType Directory -Force | Out-Null
-        }
-
-        if ($PSCmdlet.ShouldProcess($settingsOutput, 'Write settings.json')) {
-            $settingsObj | ConvertTo-Json | Set-Content -Path $settingsOutput -Encoding UTF8
-            Write-Host '  [OK] settings.json written' -ForegroundColor Green
-            Write-Verbose "  Share   : $($settingsObj.Share)"
-            Write-Verbose "  Username: $($settingsObj.Username)"
-        }
+        # settings.json is injected directly into the WIM in Step 5 — the source-folder
+        # copy (Scripts\unattend2026\WindowsPE\Deploy\settings.json) is intentionally
+        # NOT modified so it stays as a safe placeholder in source control.
+        Write-Host '  [OK] settings.json prepared (will be written into WIM in Step 5)' -ForegroundColor Green
+        Write-Verbose "  Share   : $($settingsObj.Share)"
+        Write-Verbose "  Username: $($settingsObj.Username)"
 
         # ── Step 2: Create fresh WinPE staging tree with copype ─────────────────
         # Always build from the clean ADK base — never patch an existing WIM.
@@ -418,9 +413,21 @@ To skip WDS and build the WIM only:
             }
 
             foreach ($file in (Get-ChildItem -Path $deploySource -File)) {
+                if ($file.Name -eq 'settings.json') {
+                    # Skip — settings.json is written fresh from CustomSettings.json below
+                    # to avoid baking hardcoded placeholder values into the WIM.
+                    continue
+                }
                 Copy-Item -Path $file.FullName -Destination $wimDeployDir -Force
                 Write-Host "  [OK] Copied: $($file.Name)" -ForegroundColor Gray
             }
+
+            # Write settings.json directly from the Deploy section of CustomSettings.json.
+            # This ensures the WIM always contains the correct share/credentials regardless
+            # of what the on-disk source placeholder file contains.
+            $settingsDestPath = Join-Path $wimDeployDir 'settings.json'
+            $settingsObj | ConvertTo-Json | Set-Content -Path $settingsDestPath -Encoding UTF8
+            Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json (from CustomSettings.json)' -ForegroundColor Gray
 
             # Generate StartDeploy.cmd directly into X:\Deploy\ inside the WIM.
             # This is the MDT-equivalent of the F8 debug shell:
