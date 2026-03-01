@@ -591,8 +591,8 @@ function Add-NDTServer {
         OS key from OS.json to deploy.
     .PARAMETER IPAddress
         Static IP in CIDR notation (e.g. 10.0.3.22/24), or 'DHCP'.
-    .PARAMETER AdminPassword
-        Local administrator password.
+    .PARAMETER LocalAdmin
+        Local administrator password (stored as plain text in CustomSettings.json).
     .PARAMETER Sections
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
     .PARAMETER DeploymentSteps
@@ -617,7 +617,7 @@ function Add-NDTServer {
         [Parameter()]
         [string]$IPAddress,
         [Parameter()]
-        [string]$AdminPassword,
+        [string]$LocalAdmin,
         [Parameter()]
         [hashtable]$Sections,
         [Parameter()]
@@ -638,7 +638,7 @@ function Add-NDTServer {
 
     $entry = [ordered]@{ OS = $OS; Computername = $Computername }
     if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
-    if ($PSBoundParameters.ContainsKey('AdminPassword'))   { $entry.AdminPassword   = $AdminPassword }
+    if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
     if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
     if ($PSBoundParameters.ContainsKey('DeploymentSteps')) { $entry.DeploymentSteps = $DeploymentSteps }
     if ($PSBoundParameters.ContainsKey('Properties')) {
@@ -681,7 +681,7 @@ function Set-NDTServer {
         [Parameter()]
         [string]$IPAddress,
         [Parameter()]
-        [string]$AdminPassword,
+        [string]$LocalAdmin,
         [Parameter()]
         [hashtable]$Sections,
         [Parameter()]
@@ -703,7 +703,7 @@ function Set-NDTServer {
         if ($PSBoundParameters.ContainsKey('Computername'))   { $entry.Value.Computername   = $Computername }
         if ($PSBoundParameters.ContainsKey('OS'))             { $entry.Value.OS             = $OS }
         if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
-        if ($PSBoundParameters.ContainsKey('AdminPassword'))  { $entry.Value.AdminPassword  = $AdminPassword }
+        if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { $entry.Value.AdminPassword  = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentSteps')){ $entry.Value.DeploymentSteps = $DeploymentSteps }
         if ($PSBoundParameters.ContainsKey('Properties')) {
