@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NDT — NuGet package specification
+  ──────────────────────────────────────────────────────────────────────────────
+  NOTE: Publish-Module (PowerShellGet) generates a .nuspec automatically from
+  the .psd1 manifest at publish time. This file is kept as a canonical reference
+  and can also be used for direct 'nuget push' workflows.
+
+  Keep the <version>, <description>, <tags>, and <releaseNotes> in sync with
+  the corresponding fields in ndt.psd1 → PrivateData.PSData before releasing.
+-->
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <!-- ── Identity ─────────────────────────────────────────────────────── -->
+    <id>NDT</id>
+    <version>1.0.0</version>
+    <authors>NDT</authors>
+    <owners>NDT</owners>
+
+    <!-- ── Links ────────────────────────────────────────────────────────── -->
+    <projectUrl>https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit</projectUrl>
+    <licenseUrl>https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/blob/main/LICENSE</licenseUrl>
+    <iconUrl></iconUrl>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+
+    <!-- ── Description ──────────────────────────────────────────────────── -->
+    <description>
+NDT (Next Deployment Tool) is a lightweight PowerShell-based replacement for
+Microsoft Deployment Toolkit (MDT). No GUI, no XML wizards — everything is
+driven by PowerShell 5/7 and three JSON control files.
+
+WDS/PXE handles network boot. The deploy share is a standard Windows SMB share.
+
+Exported commands:
+  - Install-NDT          Bootstrap a new NDT deployment share from GitHub
+  - Build-NDTPEImage     Build / refresh the WinPE boot WIM (and optional ISO)
+  - Get/Add/Set/Remove-NDTServer   Manage machine entries in CustomSettings.json
+  - Get/Add/Set/Remove-NDTOs       Manage OS entries in OS.json
+    </description>
+
+    <!-- ── Discoverability ──────────────────────────────────────────────── -->
+    <tags>PSModule NDT Deployment MDT LiteTouch WinPE WDS PXE Windows Provisioning</tags>
+    <summary>Lightweight PowerShell replacement for MDT — JSON-driven, no GUI required.</summary>
+
+    <!-- ── Release notes ────────────────────────────────────────────────── -->
+    <releaseNotes>
+1.0.0 — Initial release.
+  - Install-NDT: bootstraps the deployment share from GitHub.
+  - Build-NDTPEImage: full WinPE build pipeline (ADK packages, WDS update, ISO).
+  - Server management cmdlets: Get/Add/Set/Remove-NDTServer.
+  - OS catalog cmdlets: Get/Add/Set/Remove-NDTOs.
+    </releaseNotes>
+
+    <!-- ── Runtime requirements ─────────────────────────────────────────── -->
+    <!--
+      No explicit NuGet-level dependencies. The module requires Windows PowerShell
+      5.1 or PowerShell 7+. The SmbShare module is built into Windows Server.
+    -->
+    <dependencies>
+      <group targetFramework=".NETFramework4.5" />
+    </dependencies>
+  </metadata>
+</package>

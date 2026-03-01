@@ -138,7 +138,7 @@ Two kinds of top-level keys:
 Used **once** to provision a new NDT server. Import with:
 
 ```powershell
-Import-Module C:\Deploy2026\install\ndt.psd1
+Import-Module C:\Deploy2026\install\NDT\ndt.psd1
 Install-NDT              # all defaults match the corp.dev lab environment
 ```
 

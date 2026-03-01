@@ -14,7 +14,12 @@
     RootModule        = 'ndt.psm1'
 
     # Functions to export
-    FunctionsToExport = @('Install-NDT', 'Build-NDTPEImage')
+    FunctionsToExport = @(
+        'Install-NDT',
+        'Build-NDTPEImage',
+        'Get-NDTServer', 'Add-NDTServer', 'Set-NDTServer', 'Remove-NDTServer',
+        'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs'
+    )
     CmdletsToExport   = @()
     VariablesToExport = @()
     AliasesToExport   = @()
