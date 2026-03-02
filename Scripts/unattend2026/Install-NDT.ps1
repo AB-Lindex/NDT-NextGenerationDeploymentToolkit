@@ -80,8 +80,10 @@ $progressPath = "C:\temp\install-steps.json"
 if (Test-Path $progressPath) {
     $progress = Get-Content -Path $progressPath -Raw | ConvertFrom-Json
     $completedSteps = @($progress.CompletedSteps)
+    $completedStepDetails = if ($progress.StepDetails) { @($progress.StepDetails) } else { @() }
 } else {
     $completedSteps = @()
+    $completedStepDetails = @()
 }
 
 Write-Log "`nExecuting Deployment Steps..." -ForegroundColor Green
@@ -139,7 +141,8 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
 
         # Mark this step as completed so resuming via the shortcut skips past it
         $completedSteps += $uniqueStepId
-        @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+        $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
+        @{ CompletedSteps = $completedSteps; StepDetails = $completedStepDetails; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
             ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
 
         # Exit 3011 — signals install2026.ps1 that deployment is paused (not a reboot).
@@ -196,7 +199,8 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             # Exit 0 (or anything other than 3010): no reboot needed, patching complete.
             Write-Log 'Windows Update complete - no further reboots required' -ForegroundColor Green
             $completedSteps += $uniqueStepId
-            @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+            $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
+            @{ CompletedSteps = $completedSteps; StepDetails = $completedStepDetails; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
                 ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
             continue
         }
@@ -208,9 +212,11 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         
         # Mark this step as completed before rebooting
         $completedSteps += $uniqueStepId
+        $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
         $progressData = @{
             CompletedSteps = $completedSteps
-            LastUpdated = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+            StepDetails    = $completedStepDetails
+            LastUpdated    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
         }
         $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
 
@@ -300,7 +306,8 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
 
         # Mark step completed
         $completedSteps += $uniqueStepId
-        @{ CompletedSteps = $completedSteps; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
+        $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
+        @{ CompletedSteps = $completedSteps; StepDetails = $completedStepDetails; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
             ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
 
         Write-Log 'AutoLogon step completed' -ForegroundColor Green
@@ -370,9 +377,11 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             
             # Add to completed steps (with group name for uniqueness)
             $completedSteps += $uniqueStepId
+            $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
             $progressData = @{
                 CompletedSteps = $completedSteps
-                LastUpdated = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+                StepDetails    = $completedStepDetails
+                LastUpdated    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
             }
             $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
             
