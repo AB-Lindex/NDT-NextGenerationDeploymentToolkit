@@ -37,6 +37,12 @@
       "Reference": "Install App2026"
     }
   },
+  "ForSRV03": {
+    "Step1": {
+      "Description": "Install App2026",
+      "Reference": "Install App2026"
+    }
+  },
   "SQL2025": {
     "Step1": {
       "Description": "ADLogon",
@@ -69,22 +75,14 @@
       "Reference": "InstallNuget"
     },
     "Step2": {
-      "Description": "Pause before Updates",
-      "Reference": "Pause"
-    },
-    "Step3": {
       "Description": "Install Windows updates",
       "Reference": "WindowsUpdate"
     },
-    "Step4": {
-      "Description": "Pause before reference deployment",
-      "Reference": "Pause"
-    },
-    "Step5": {
+    "Step3": {
       "Description": "Cleanup image before sysprep",
       "Reference": "Cleanup Image"
     },
-    "Step6": {
+    "Step4": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
     }
