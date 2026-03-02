@@ -430,35 +430,36 @@ To skip WDS and build the WIM only:
             Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json (from CustomSettings.json)' -ForegroundColor Gray
 
             # Generate StartDeploy.cmd directly into X:\Deploy\ inside the WIM.
-            # winpeshl.exe launches this after honouring the F8 debug-shell prompt
-            # (via DebugShell=Yes in winpeshl.ini — see below).  If the user pressed F8
-            # early in the PE boot, winpeshl.exe will have already opened cmd.exe and
-            # waited for EXIT before arriving here, so StartDeploy.cmd can be a clean
-            # launcher with no choice/countdown logic of its own.
+            #
+            # The MDT pattern: launch the deployment script in a NEW window with
+            # 'start', so this cmd.exe window stays alive as a permanent debug shell.
+            # The user gets two windows from the moment PE boots:
+            #   Window 1 (this cmd) — free debug shell, Z: already mapped
+            #   Window 2            — the running install.ps1
+            # No F8 polling, no HTA, no bddrun.exe needed.
             $startDeployContent = @'
 @echo off
 wpeinit
 wpeutil WaitForNetwork
-powershell.exe -ExecutionPolicy Bypass -NonInteractive -File X:\Deploy\install.ps1
+start "NDT Deploy" powershell.exe -NoLogo -ExecutionPolicy Bypass -File X:\Deploy\install.ps1
+echo.
+echo *** NDT debug shell - deployment is running in the other window ***
+echo Type EXIT to close this window (deployment will continue unaffected)
+cmd.exe /k
 '@
             $startDeployDest = Join-Path $wimDeployDir 'StartDeploy.cmd'
             Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
             Write-Host '  [OK] StartDeploy.cmd generated -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
 
-            # Generate winpeshl.ini — the native WinPE mechanism for F8 debug shells.
+            # Generate winpeshl.ini — controls what winpeshl.exe runs at PE boot.
             #
-            # DebugShell=Yes  instructs winpeshl.exe to monitor for F8 during early
-            # PE boot.  If F8 is pressed, winpeshl opens cmd.exe and waits; typing EXIT
-            # resumes normal flow.  This is the built-in equivalent of MDT's bddrun.exe
-            # — no extra binaries required.
+            # [LaunchApps] lists what to execute.  startnet.cmd is NOT run when
+            # winpeshl.ini is present, so wpeinit must be called from StartDeploy.cmd
+            # (which it is).
             #
-            # [LaunchApps] is executed after the optional F8 debug session.
-            # startnet.cmd is NOT executed when winpeshl.ini is present; wpeinit must
-            # therefore be called from StartDeploy.cmd (which it is).
+            # Note: 'DebugShell=Yes' is MDT-specific (requires bddrun.exe) and is NOT
+            # a standard WinPE winpeshl.ini option — do not add it here.
             $winpeshlContent = @'
-[Options]
-DebugShell=Yes
-
 [LaunchApps]
 %SYSTEMDRIVE%\Deploy\StartDeploy.cmd
 '@
