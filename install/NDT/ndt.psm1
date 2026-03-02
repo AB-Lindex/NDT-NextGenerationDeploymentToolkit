@@ -430,30 +430,14 @@ To skip WDS and build the WIM only:
             Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json (from CustomSettings.json)' -ForegroundColor Gray
 
             # Generate StartDeploy.cmd directly into X:\Deploy\ inside the WIM.
-            # This is the MDT-equivalent of the F8 debug shell:
-            #   - wpeinit runs first (DHCP, PnP — same role as MDT's bddrun.exe)
-            #   - A 5-second countdown prompts the user to press S for a command prompt
-            #   - If S is pressed, cmd.exe /k opens; typing EXIT resumes deployment
-            #   - On timeout (or C) deployment continues straight to install.ps1
-            # MDT achieves this via bddrun.exe intercepting F8; without that binary
-            # a choice/countdown is the correct equivalent in plain WinPE.
+            # winpeshl.exe launches this after honouring the F8 debug-shell prompt
+            # (via DebugShell=Yes in winpeshl.ini — see below).  If the user pressed F8
+            # early in the PE boot, winpeshl.exe will have already opened cmd.exe and
+            # waited for EXIT before arriving here, so StartDeploy.cmd can be a clean
+            # launcher with no choice/countdown logic of its own.
             $startDeployContent = @'
 @echo off
 wpeinit
-echo.
-echo  ===========================================================
-echo    NDT  -  Next Deployment Tool
-echo  ===========================================================
-echo.
-echo   Press S within 5 seconds for a debug command prompt.
-echo   (MDT equivalent: F8 during WinPE startup)
-echo.
-choice /c SC /n /t 5 /d C /m "  S = Debug shell     C = Start deployment (auto)"
-if not errorlevel 2 (
-    echo.
-    echo  Debug shell  --  type EXIT to continue deployment.
-    cmd.exe /k
-)
 wpeutil WaitForNetwork
 powershell.exe -ExecutionPolicy Bypass -NonInteractive -File X:\Deploy\install.ps1
 '@
@@ -461,10 +445,16 @@ powershell.exe -ExecutionPolicy Bypass -NonInteractive -File X:\Deploy\install.p
             Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
             Write-Host '  [OK] StartDeploy.cmd generated -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
 
-            # Generate winpeshl.ini directly — tells winpeshl.exe to run StartDeploy.cmd.
-            # winpeshl.exe reads [LaunchApps] and executes each entry in order.
-            # Having winpeshl.ini present (rather than relying on startnet.cmd) is what
-            # allows the custom launcher (and therefore the S-key debug prompt) to run.
+            # Generate winpeshl.ini — the native WinPE mechanism for F8 debug shells.
+            #
+            # DebugShell=Yes  instructs winpeshl.exe to monitor for F8 during early
+            # PE boot.  If F8 is pressed, winpeshl opens cmd.exe and waits; typing EXIT
+            # resumes normal flow.  This is the built-in equivalent of MDT's bddrun.exe
+            # — no extra binaries required.
+            #
+            # [LaunchApps] is executed after the optional F8 debug session.
+            # startnet.cmd is NOT executed when winpeshl.ini is present; wpeinit must
+            # therefore be called from StartDeploy.cmd (which it is).
             $winpeshlContent = @'
 [Options]
 DebugShell=Yes
