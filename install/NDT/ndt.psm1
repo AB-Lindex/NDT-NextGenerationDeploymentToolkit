@@ -505,15 +505,18 @@ cmd.exe /k
             Write-Host "`nStep 7: Updating WDS..." -ForegroundColor Cyan
 
             if ($PSCmdlet.ShouldProcess('WDSServer', 'Stop service, replace boot image, start service')) {
+                $wdsImageName = 'NDT PE Boot 2026'
+
                 Write-Host '  Stopping WDS service...' -ForegroundColor Gray
                 Stop-Service WDSServer -Force
                 Write-Host '  [OK] WDS stopped' -ForegroundColor Gray
 
                 Write-Host '  Removing old boot image...' -ForegroundColor Gray
-                wdsutil /Remove-Image /Image:"PE Boot 2026" /ImageType:Boot /Architecture:x64 /Filename:"boot2026.wim" 2>&1 | Out-Null
+                wdsutil /Remove-Image /Image:"$wdsImageName" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
+                # Non-zero exit is expected on first run (image not yet registered) — not a failure.
 
                 Write-Host '  Adding new boot image...' -ForegroundColor Gray
-                $result = wdsutil /Verbose /Add-Image /ImageFile:"$wimFile" /ImageType:Boot /Name:"PE Boot 2026" 2>&1
+                $result = wdsutil /Verbose /Add-Image /ImageFile:"$wimFile" /ImageType:Boot /Name:"$wdsImageName" 2>&1
                 if ($LASTEXITCODE -ne 0) { throw "wdsutil Add-Image failed: $result" }
                 Write-Host '  [OK] Boot image updated in WDS' -ForegroundColor Green
 
