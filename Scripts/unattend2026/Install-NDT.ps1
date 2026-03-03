@@ -80,10 +80,10 @@ $progressPath = "C:\temp\install-steps.json"
 if (Test-Path $progressPath) {
     $progress = Get-Content -Path $progressPath -Raw | ConvertFrom-Json
     $completedSteps = @($progress.CompletedSteps)
-    $completedStepDetails = if ($progress.StepDetails) { @($progress.StepDetails) } else { @() }
+    [object[]]$completedStepDetails = if ($progress.StepDetails) { @($progress.StepDetails) } else { @() }
 } else {
     $completedSteps = @()
-    $completedStepDetails = @()
+    [object[]]$completedStepDetails = @()
 }
 
 Write-Log "`nExecuting Deployment Steps..." -ForegroundColor Green
