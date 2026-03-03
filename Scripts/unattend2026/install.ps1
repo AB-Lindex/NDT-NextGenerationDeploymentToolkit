@@ -36,9 +36,22 @@ if ($captureMode) {
     $captureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 
     if (Test-Path $captureScriptPath) {
+        # Remove the capture flag before capturing so it is not baked into the WIM.
+        # If left in place, any future deployment using this image would incorrectly
+        # enter capture mode again.
+        Write-Host "Removing DeployCapture.flag from reference drive..." -ForegroundColor Yellow
+        Remove-Item "${referenceDrive}:\DeployCapture.flag" -Force -ErrorAction SilentlyContinue
+
+        # Clean C:\temp on the reference drive so deployment logs are not appended
+        # when the WIM is applied to a new machine.
+        $tempPath = "${referenceDrive}:\temp"
+        if (Test-Path $tempPath) {
+            Write-Host "Cleaning $tempPath before capture..." -ForegroundColor Yellow
+            Remove-Item -Path "$tempPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
         Write-Host "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"
-        Remove-Item "${referenceDrive}:\DeployCapture.flag" -Force -ErrorAction SilentlyContinue
         Write-Host "Capture complete!" -ForegroundColor Green
     } else {
         Write-Host "ERROR: Capture script not found at: $captureScriptPath" -ForegroundColor Red

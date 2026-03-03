@@ -32,7 +32,7 @@ Write-Output "  Computer Name: $env:COMPUTERNAME"
 Write-Output "  OS Version: $((Get-CimInstance Win32_OperatingSystem).Caption)"
 Write-Output "  Build Number: $((Get-CimInstance Win32_OperatingSystem).BuildNumber)"
 Write-Output ""
-read-host "Press Enter to continue..."
+
 # Confirm before proceeding
 Write-Warning "This script will generalize this system and reboot it into WinPE automatically."
 Write-Warning "WinPE will capture the image unattended. No manual interaction is required."
