@@ -19,7 +19,7 @@
         'Build-NDTPEImage',
         'Get-NDTServer', 'Add-NDTServer', 'Set-NDTServer', 'Remove-NDTServer',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
-        'Copy-NDTReferenceImage'
+        'Move-NDTReferenceImage'
     )
     CmdletsToExport   = @()
     VariablesToExport = @()

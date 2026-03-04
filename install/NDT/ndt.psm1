@@ -981,10 +981,10 @@ function Remove-NDTOs {
 
 #region ── Reference image management ────────────────────────────────────────
 
-function Copy-NDTReferenceImage {
+function Move-NDTReferenceImage {
     <#
     .SYNOPSIS
-        Copies captured reference WIM files from \Reference into \Operating Systems\.
+        Moves captured reference WIM files from \Reference into \Operating Systems\.
 
     .DESCRIPTION
         For every *.wim found directly inside the Reference folder the function:
@@ -993,7 +993,8 @@ function Copy-NDTReferenceImage {
           2. Strips the 'ref-' prefix from the stem to form the destination file name
              (e.g. 'ref-w2025dcg' -> 'w2025dcg.wim').
           3. Creates 'Operating Systems\<stem>\' if it does not exist.
-          4. Copies the WIM to 'Operating Systems\<stem>\<name-without-prefix>.wim'.
+          4. Moves the WIM to 'Operating Systems\<stem>\<name-without-prefix>.wim',
+             removing it from the Reference folder.
 
         Example:
           Reference\ref-w2025dcg.wim
@@ -1006,21 +1007,18 @@ function Copy-NDTReferenceImage {
         Overwrite the destination WIM if it already exists.
 
     .EXAMPLE
-        Copy-NDTReferenceImage
+        Move-NDTReferenceImage
 
     .EXAMPLE
-        Copy-NDTReferenceImage -Force -Verbose
+        Move-NDTReferenceImage -WhatIf
 
     .EXAMPLE
-        Copy-NDTReferenceImage -LocalPath D:\Deploy2026
+        Move-NDTReferenceImage -LocalPath D:\Deploy2026
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
         [Parameter()]
-        [string]$LocalPath = 'C:\Deploy2026',
-
-        [Parameter()]
-        [switch]$Force
+        [string]$LocalPath = 'C:\Deploy2026'
     )
 
     $refDir = Join-Path $LocalPath 'Reference'
@@ -1034,6 +1032,11 @@ function Copy-NDTReferenceImage {
     if (-not $wims) {
         Write-Warning "No WIM files found in: $refDir"
         return
+    } else  {
+        Write-Host "Found $($wims.Count) WIM(s) in Reference folder:" -ForegroundColor Cyan
+        foreach ($wim in $wims) {
+            Write-Host "  $($wim.Name)" -ForegroundColor Gray
+        }
     }
 
     foreach ($wim in $wims) {
@@ -1042,18 +1045,22 @@ function Copy-NDTReferenceImage {
         $destDir   = Join-Path $osDir $stem                 # e.g. Operating Systems\ref-w2025dcg
         $destFile  = Join-Path $destDir "$destName.wim"     # e.g. ...\w2025dcg.wim
 
-        if ((Test-Path $destFile) -and -not $Force) {
-            Write-Verbose "Skipping '$($wim.Name)' — destination already exists (use -Force to overwrite): $destFile"
-            continue
+        $relDest = $destFile.Replace($LocalPath + '\', '')
+        Write-Host "  Source : $($wim.FullName)" -ForegroundColor Gray
+        Write-Host "  Dest   : $relDest" -ForegroundColor Gray
+        if (Test-Path $destFile) {
+            Write-Host "  Status : destination exists — overwriting" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Status : new file" -ForegroundColor Gray
         }
 
-        if ($PSCmdlet.ShouldProcess($destFile, "Copy reference WIM '$($wim.Name)'")) {
+        if ($PSCmdlet.ShouldProcess($destFile, "Move reference WIM '$($wim.Name)'")) {
             if (-not (Test-Path $destDir)) {
                 New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                Write-Verbose "  Created: $destDir"
+                Write-Host "  Created folder: $destDir" -ForegroundColor Gray
             }
-            Copy-Item -Path $wim.FullName -Destination $destFile -Force
-            Write-Host "  Copied: $($wim.Name) -> $($destFile.Replace($LocalPath + '\', ''))" -ForegroundColor Green
+            Move-Item -Path $wim.FullName -Destination $destFile -Force
+            Write-Host "  [OK] $($wim.Name) -> $relDest (moved)" -ForegroundColor Green
         }
     }
 }
