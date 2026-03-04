@@ -86,6 +86,17 @@
             if (-not (Test-Path $LocalPath)) { New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null }
             Copy-Item -Path (Join-Path $repoRoot '*') -Destination $LocalPath -Recurse -Force
             Write-Verbose "  Repository content copied to: $LocalPath"
+
+            # Remove files/folders that belong only in the source repository and
+            # must not exist on a live deployment share.
+            $repoOnlyItems = @('.github', '.vscode', '.gitignore', 'README.md')
+            foreach ($item in $repoOnlyItems) {
+                $itemPath = Join-Path $LocalPath $item
+                if (Test-Path $itemPath) {
+                    Remove-Item -Path $itemPath -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Verbose "  Removed repo-only item: $item"
+                }
+            }
         }
     } finally {
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
