@@ -978,3 +978,84 @@ function Remove-NDTOs {
 }
 
 #endregion
+
+#region ── Reference image management ────────────────────────────────────────
+
+function Copy-NDTReferenceImage {
+    <#
+    .SYNOPSIS
+        Copies captured reference WIM files from \Reference into \Operating Systems\.
+
+    .DESCRIPTION
+        For every *.wim found directly inside the Reference folder the function:
+          1. Derives the destination folder name from the WIM stem
+             (e.g. 'ref-w2025dcg.wim' -> folder 'ref-w2025dcg').
+          2. Strips the 'ref-' prefix from the stem to form the destination file name
+             (e.g. 'ref-w2025dcg' -> 'w2025dcg.wim').
+          3. Creates 'Operating Systems\<stem>\' if it does not exist.
+          4. Copies the WIM to 'Operating Systems\<stem>\<name-without-prefix>.wim'.
+
+        Example:
+          Reference\ref-w2025dcg.wim
+          -> Operating Systems\ref-w2025dcg\w2025dcg.wim
+
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+
+    .PARAMETER Force
+        Overwrite the destination WIM if it already exists.
+
+    .EXAMPLE
+        Copy-NDTReferenceImage
+
+    .EXAMPLE
+        Copy-NDTReferenceImage -Force -Verbose
+
+    .EXAMPLE
+        Copy-NDTReferenceImage -LocalPath D:\Deploy2026
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+
+        [Parameter()]
+        [switch]$Force
+    )
+
+    $refDir = Join-Path $LocalPath 'Reference'
+    $osDir  = Join-Path $LocalPath 'Operating Systems'
+
+    if (-not (Test-Path $refDir)) {
+        throw "Reference folder not found: $refDir"
+    }
+
+    $wims = Get-ChildItem -Path $refDir -Filter '*.wim' -File
+    if (-not $wims) {
+        Write-Warning "No WIM files found in: $refDir"
+        return
+    }
+
+    foreach ($wim in $wims) {
+        $stem      = $wim.BaseName                          # e.g. ref-w2025dcg
+        $destName  = $stem -replace '^ref-', ''             # e.g. w2025dcg
+        $destDir   = Join-Path $osDir $stem                 # e.g. Operating Systems\ref-w2025dcg
+        $destFile  = Join-Path $destDir "$destName.wim"     # e.g. ...\w2025dcg.wim
+
+        if ((Test-Path $destFile) -and -not $Force) {
+            Write-Verbose "Skipping '$($wim.Name)' — destination already exists (use -Force to overwrite): $destFile"
+            continue
+        }
+
+        if ($PSCmdlet.ShouldProcess($destFile, "Copy reference WIM '$($wim.Name)'")) {
+            if (-not (Test-Path $destDir)) {
+                New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+                Write-Verbose "  Created: $destDir"
+            }
+            Copy-Item -Path $wim.FullName -Destination $destFile -Force
+            Write-Host "  Copied: $($wim.Name) -> $($destFile.Replace($LocalPath + '\', ''))" -ForegroundColor Green
+        }
+    }
+}
+
+#endregion
