@@ -148,7 +148,11 @@ Maps OS keys to WIM file paths and image indexes:
 
 ## In progress / planned
 
-- Reference image creation
-- Build script to set up the NDT server
-- Review JSON structure — files are growing, may split them
+- Reference image creation - Done
+- Build script to set up the NDT server - Done
+- Create Pause step, just like MDT - Done
+- Review JSON structure — files are growing, may split them - Done
+- Create an F8 similar solution in PE - Done
+
+- more verbose and helpful in Pause step
 
