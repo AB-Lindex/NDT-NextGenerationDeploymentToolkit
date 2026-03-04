@@ -155,4 +155,5 @@ Maps OS keys to WIM file paths and image indexes:
 - Create an F8 similar solution in PE - Done
 
 - more verbose and helpful in Pause step
+- "double"check that everything works in both core and Gui situations, they differ some!
 
