@@ -63,5 +63,9 @@
   "Cleanup Image": {
     "Script": "\\Applications\\Cleanup Image\\CleanupBeforeSysprep.ps1",
     "Description": "Cleanup reference image"
+  },
+  "InstallNPP": {
+    "Script": "\\Applications\\NPP\\install.ps1",
+    "Description": "Install Notepad++"
   }
 }

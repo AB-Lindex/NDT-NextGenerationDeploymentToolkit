@@ -106,5 +106,11 @@
       "Description": "Make a pause",
       "Reference": "Pause"
     }
+  },
+  "NPP": {
+    "Step1": {
+      "Description": "Install Notepad++",
+      "Reference": "InstallNPP"
+    }
   }
 }

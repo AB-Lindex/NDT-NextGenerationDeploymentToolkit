@@ -23,7 +23,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","SMC","DeploymentGroup3"]
+    "DeploymentSteps": ["General Settings","NPP"]
   },
   "00:15:5D:02:56:16": {
     "OS": "WIN2025DC",
