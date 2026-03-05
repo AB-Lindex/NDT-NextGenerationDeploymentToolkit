@@ -270,6 +270,7 @@ ServiceFabricBackup/
 *.dll
 *.wim
 *.iso
+*.msi
 
 
 # SQL Server files
