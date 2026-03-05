@@ -107,6 +107,20 @@
       "Reference": "Pause"
     }
   },
+  "iPXE": {
+    "Step1": {
+      "Description": "Install WDS role",
+      "Reference": "InstallWDS"
+    },
+    "Step2": {
+      "Description": "Install ADK",
+      "Reference": "ADK"
+    },
+    "Step3": {
+      "Description": "Install Nuget",
+      "Reference": "InstallNuget"
+    }
+  },
   "NPP": {
     "Step1": {
       "Description": "Install Notepad++",

@@ -1,4 +1,16 @@
 {
+  "00:15:5D:03:9D:07": {
+    "OS": "WIN2025DCG",
+    "Computername": "IPXE01",
+    "IPAddress": "10.0.3.38/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["General Settings","iPXE"]
+  },
   "00:15:5D:03:9C:14": {
     "OS": "WIN2025DCG",
     "Computername": "NDT01",
