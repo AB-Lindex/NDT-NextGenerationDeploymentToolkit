@@ -142,8 +142,8 @@ if ($AO) {
 
 if (get-service | Where-Object {$_.name -eq $Instance} ) {
     Write-Log -Value "SQL Server is already installed"
-    $service = Get-WmiObject -Class Win32_Service -Filter "Name='$Instance'"
-    $service.Change($null, $null, $null, $null, $null, $null, $ServiceAccountSQL, $null)
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Instance'"
+    Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{StartName = $ServiceAccountSQL}
     start-service -Name $Instance
     sc.exe config $Instance start= auto
     while ((get-service -Name $Instance).Status -ne 'Running') {
