@@ -271,6 +271,7 @@ ServiceFabricBackup/
 *.wim
 *.iso
 *.msi
+*.pfx
 
 
 # SQL Server files
