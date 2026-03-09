@@ -27,6 +27,10 @@
     "Script": "\\Applications\\App2026\\install01.ps1",
     "Parameters": ["SQLServer", "AlwaysOn"]
   },
+  "Install SQL 2025": {
+    "Script": "\\Applications\\Install SQL 2025\\install.ps1",
+    "Parameters": ["SQLAOListenerName", "AGName", "SQLPFXFile", "PFXPwd", "SAPWD"]
+  },
   "Reboot": {
     "Type": "Reboot",
     "Description": "Restart the computer"

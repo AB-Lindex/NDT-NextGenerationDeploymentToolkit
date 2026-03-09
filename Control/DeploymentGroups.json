@@ -53,8 +53,8 @@
       "Reference": "Reboot"
     },
     "Step3": {
-      "Description": "Install App2026",
-      "Reference": "Install App2026"
+      "Description": "Install SQL 2025",
+      "Reference": "Install SQL 2025"
     }
   },
   "Powershell7": {

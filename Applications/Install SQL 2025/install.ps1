@@ -15,9 +15,9 @@ param (
     [string]$SQLAOListenerName,
     [Parameter()]
     [string]$AGName,
-    [Parameter()]
+    [Parameter(Mandatory)]
     [string]$SQLPFXFile,
-    [Parameter()]
+    [Parameter(Mandatory)]
     [string]$SAPWD,
     [Parameter(Mandatory)]
     [string]$PFXPwd
@@ -69,7 +69,7 @@ Write-Log -Value "Done Installing AD Module for PowerShell"
 
 [string[]]$Nodes
 [bool]$FirstNode
-if ($SQLAONodes -ne "%SQLAONodes%") {
+if ($SQLAONodes) {
     $AO = $true
 } else {
     $AO = $false

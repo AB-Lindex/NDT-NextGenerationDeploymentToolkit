@@ -1,4 +1,19 @@
 {
+  "00:15:5D:03:9C:12": {
+    "OS": "WIN2025DCC",
+    "Computername": "SQL01",
+    "IPAddress": "10.0.3.17/24",
+    "AdminPassword": "Qantas-777",
+    "SAPWD": "Qantas-777",
+    "sqlpfxfile": "\\Applications\\install sql 2025\\sql certificate\\sql01.corp.dev.pfx",
+    "PFXPwd": "1q2w",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["SQL2025"]
+  },
   "00:15:5D:03:9D:07": {
     "OS": "WIN2025DCG",
     "Computername": "IPXE01",
