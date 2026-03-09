@@ -33,6 +33,8 @@ function Write-Log {
     Add-Content -Path $LogFile -PassThru -Force -Value "$Timestamp $Value"
 }
 
+Set-Location $PSScriptRoot
+
 $HostName = $env:ComputerName
 $Domain = $env:USERDNSDOMAIN # corp.dev
 $UserDomain = $env:USERDOMAIN # CORP
@@ -194,9 +196,10 @@ EXEC sp_addserver @server = '$HostName', @local = 'local';
     Write-Log -Value "New server name: $($verify.ServerName)"
 
 } else {
+    Write-Log -Value "SQL Server will be installed"
     Copy-item "$INIFile" -Destination c:\temp\ -Force
     $INIFile = "C:\temp\$(Split-Path $INIFile -Leaf)"
-    $SetupExe = "\applications 2026\SQL 2025\setup.exe"
+    $SetupExe = "\applications2026\SQL 2025\setup.exe"
 
     Write-Log -Value "Modifying INI File: $INIFile"
     Write-Log -Value "Setting Service Account to: $ServiceAccountSQL"
@@ -207,7 +210,6 @@ EXEC sp_addserver @server = '$HostName', @local = 'local';
     
     Write-Log -Value "done Modifying INI File: $INIFile"
     Write-Log -Value "Starting SQL 2025 Installation using INI File: $INIFile and SetupExe: $SetupExe"
-
     Start-Process -FilePath $SetupExe -ArgumentList "/ConfigurationFile=$INIFile /IAcceptSQLServerLicenseTerms" -Wait # Step 4: Install SQL using INI File
 
     Write-Log -Value "Finished SQL 2025 Installation"

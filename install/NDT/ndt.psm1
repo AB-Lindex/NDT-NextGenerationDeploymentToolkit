@@ -222,6 +222,11 @@ function Build-NDTPEImage {
     .PARAMETER SkipISO
         Skip ISO creation (Step 8). Useful when only a WDS-served WIM is needed.
 
+    .PARAMETER RegisterOnly
+        Skip the full PE build (Steps 1–6) and register the existing Boot\boot2026.wim
+        directly in WDS. Implies -SkipISO. Use this when the WIM is already built and
+        only the WDS boot-image registration needs to be refreshed.
+
     .EXAMPLE
         Build-NDTPEImage
 
@@ -230,6 +235,9 @@ function Build-NDTPEImage {
 
     .EXAMPLE
         Build-NDTPEImage -LocalPath D:\Deploy2026 -SkipWDS
+
+    .EXAMPLE
+        Build-NDTPEImage -RegisterOnly
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -246,7 +254,10 @@ function Build-NDTPEImage {
         [switch]$SkipWDS,
 
         [Parameter()]
-        [switch]$SkipISO
+        [switch]$SkipISO,
+
+        [Parameter()]
+        [switch]$RegisterOnly
     )
 
     # ── Verify Administrator ────────────────────────────────────────────────────
@@ -306,28 +317,36 @@ To skip WDS and build the WIM only:
         $adkRoot = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
     }
 
-    $winPERoot = Join-Path $adkRoot 'Windows Preinstallation Environment'
-    $copypeCmd = Join-Path $winPERoot 'copype.cmd'
-    $winPEArch = Join-Path $winPERoot 'amd64'
-    $winPEOCs  = Join-Path $winPERoot 'amd64\WinPE_OCs'
+    if (-not $RegisterOnly) {
+        $winPERoot = Join-Path $adkRoot 'Windows Preinstallation Environment'
+        $copypeCmd = Join-Path $winPERoot 'copype.cmd'
+        $winPEArch = Join-Path $winPERoot 'amd64'
+        $winPEOCs  = Join-Path $winPERoot 'amd64\WinPE_OCs'
 
-    # Set ADK environment variables required by copype / MakeWinPEMedia.
-    # Normally injected by DandISetEnv.bat; must be set manually from a plain PS session.
-    $env:WinPERoot   = $winPERoot
-    $env:OSCDImgRoot = Join-Path $adkRoot 'Deployment Tools\amd64\Oscdimg'
-    $env:DISMRoot    = Join-Path $adkRoot 'Deployment Tools\amd64\DISM'
-    if ($env:PATH -notlike "*$($env:OSCDImgRoot)*") {
-        $env:PATH = $env:OSCDImgRoot + ';' + $env:PATH
-    }
+        # Set ADK environment variables required by copype / MakeWinPEMedia.
+        # Normally injected by DandISetEnv.bat; must be set manually from a plain PS session.
+        $env:WinPERoot   = $winPERoot
+        $env:OSCDImgRoot = Join-Path $adkRoot 'Deployment Tools\amd64\Oscdimg'
+        $env:DISMRoot    = Join-Path $adkRoot 'Deployment Tools\amd64\DISM'
+        if ($env:PATH -notlike "*$($env:OSCDImgRoot)*") {
+            $env:PATH = $env:OSCDImgRoot + ';' + $env:PATH
+        }
 
-    if (-not (Test-Path $copypeCmd)) {
-        throw "copype.cmd not found at: $copypeCmd`nInstall the Windows ADK + WinPE Add-on: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
-    }
-    if (-not (Test-Path $winPEArch)) {
-        throw "WinPE amd64 files not found at: $winPEArch`nThe WinPE Add-on is a separate download from the ADK: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+        if (-not (Test-Path $copypeCmd)) {
+            throw "copype.cmd not found at: $copypeCmd`nInstall the Windows ADK + WinPE Add-on: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+        }
+        if (-not (Test-Path $winPEArch)) {
+            throw "WinPE amd64 files not found at: $winPEArch`nThe WinPE Add-on is a separate download from the ADK: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+        }
+    } else {
+        if (-not (Test-Path $wimFile)) {
+            throw "RegisterOnly: boot WIM not found at: $wimFile — run Build-NDTPEImage first."
+        }
+        Write-Host 'RegisterOnly: skipping build (Steps 1-6), using existing boot2026.wim.' -ForegroundColor Yellow
     }
 
     try {
+        if (-not $RegisterOnly) {
         # ── Step 1: Generate settings.json ─────────────────────────────────────
         Write-Host 'Step 1: Generating settings.json...' -ForegroundColor Cyan
 
@@ -510,6 +529,7 @@ cmd.exe /k
             Copy-Item -Path $stagingBootWim -Destination $wimFile -Force
             Write-Host "  [OK] boot2026.wim updated: $wimFile" -ForegroundColor Green
         }
+        } # end -not RegisterOnly
 
         # ── Step 7: Update WDS ──────────────────────────────────────────────────
         if (-not $SkipWDS) {
@@ -523,8 +543,12 @@ cmd.exe /k
                 Write-Host '  [OK] WDS stopped' -ForegroundColor Gray
 
                 Write-Host '  Removing old boot image...' -ForegroundColor Gray
-                wdsutil /Remove-Image /Image:"$wdsImageName" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
-                # Non-zero exit is expected on first run (image not yet registered) — not a failure.
+                # Try both our custom display name and the default WinPE metadata name.
+                # WDS stores the name from the WIM metadata on first add, not the /Name: argument,
+                # so the registered name may be either. Both failures are safe to ignore.
+                foreach ($nameToRemove in @($wdsImageName, 'Microsoft Windows PE (amd64)')) {
+                    wdsutil /Remove-Image /Image:"$nameToRemove" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
+                }
 
                 Write-Host '  Adding new boot image...' -ForegroundColor Gray
                 $result = wdsutil /Verbose /Add-Image /ImageFile:"$wimFile" /ImageType:Boot /Name:"$wdsImageName" 2>&1
@@ -540,7 +564,7 @@ cmd.exe /k
         }
 
         # ── Step 8: Create bootable ISO ─────────────────────────────────────────
-        if (-not $SkipISO) {
+        if (-not $SkipISO -and -not $RegisterOnly) {
             Write-Host "`nStep 8: Creating bootable ISO..." -ForegroundColor Cyan
 
             if ($PSCmdlet.ShouldProcess($isoFile, 'Build bootable ISO with MakeWinPEMedia')) {
