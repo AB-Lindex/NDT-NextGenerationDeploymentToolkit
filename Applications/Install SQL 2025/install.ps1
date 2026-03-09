@@ -20,7 +20,7 @@ param (
     [Parameter()]
     [string]$SAPWD,
     [Parameter(Mandatory)]
-    [SecureString]$PFXPassword
+    [string]$PFXPwd
 )
 
 function Write-Log {
@@ -55,6 +55,7 @@ Write-Log -Value "SQLPFXFile: $SQLPFXFile"
 Write-Log -Value "INIFile: $INIFile"
 Write-Log -Value "Instance: $Instance"
 Write-Log -Value "SAPWD: $($SAPWD.substring(0,3))****"
+write-log -Value "PFXPassword: $($PFXPwd.substring(0,3))****"
 
 Write-Log -Value "Installing AD Module for PowerShell" # should be already installed from previous step
 $Feature = 'RSAT-AD-PowerShell'
@@ -195,7 +196,7 @@ EXEC sp_addserver @server = '$HostName', @local = 'local';
 } else {
     Copy-item "$INIFile" -Destination c:\temp\ -Force
     $INIFile = "C:\temp\$(Split-Path $INIFile -Leaf)"
-    $SetupExe = "\applications\SQL 2025\setup.exe"
+    $SetupExe = "\applications 2026\SQL 2025\setup.exe"
 
     Write-Log -Value "Modifying INI File: $INIFile"
     Write-Log -Value "Setting Service Account to: $ServiceAccountSQL"
@@ -230,6 +231,7 @@ Write-Log -Value "Done Setting SPNs for SQL Service Account: $ServiceAccountSQL"
 
 Write-Log -Value "Starting SQL Certificate Installation using PFX File: $SQLPFXFile"
 
+$PFXPassword = ConvertTo-SecureString -String $PFXPwd -AsPlainText -Force
 & '.\SQL Certificate\install-cert.ps1' -SQLPFXFile $SQLPFXFile -ServiceAccountSQL $ServiceAccountSQL -listenername $SQLAOListenerName -PFXPassword $PFXPassword # Step 5: Install SQL Certificate
 
 Write-Log -Value "Done SQL Certificate Installation using PFX File: $SQLPFXFile"
