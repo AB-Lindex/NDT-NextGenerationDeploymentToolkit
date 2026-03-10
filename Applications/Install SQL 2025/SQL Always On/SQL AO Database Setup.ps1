@@ -23,10 +23,10 @@ function Write-Log {
 }
 
 write-log -Value "Creating the database on $ENV:Computername"
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'SQL Always On\Database01 - 2025.sql')
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'Database01 - 2025.sql')
 
 write-log -Value "Backing up the database on $ENV:Computername"
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'SQL Always On\DBBackup - 2025.sql')
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'DBBackup - 2025.sql')
 
 for ($i = 1; $i -le $Nodes.Count; $i++) {
     $AGSQL = Get-Content -Path '.\SQL Always On\SetupAG01.sql' -raw
