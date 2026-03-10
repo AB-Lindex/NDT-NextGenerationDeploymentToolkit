@@ -9,6 +9,10 @@ MDT-Scripts/
 Operating Systems/
 Scratch/
 
+# Keep folder placeholders even when parent folder is ignored
+!Operating Systems/.gitkeep
+!Scratch/.gitkeep
+
 # User-specific files
 *.rsuser
 *.suo

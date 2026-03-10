@@ -143,7 +143,7 @@ if ($AO) {
     $ServiceAccountSQL = "$UserDomain\MSA" + $ENV:Computername +"$"
 }
 
-if (get-service | Where-Object {$_.name -eq $Instance} ) {
+if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
     Write-Log -Value "SQL Server is already installed"
     $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Instance'"
     Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{StartName = $ServiceAccountSQL}
@@ -237,7 +237,7 @@ $PFXPassword = ConvertTo-SecureString -String $PFXPwd -AsPlainText -Force
 if ($SQLAOListenerName) {
     $Listener = $SQLAOListenerName
 } else {
-    $Listener = $HostFQDN
+    $Listener = $HostName
 }
 & '.\SQL Certificate\install-cert.ps1' -SQLPFXFile $SQLPFXFile -ServiceAccountSQL $ServiceAccountSQL -listener $Listener -PFXPassword $PFXPassword # Step 5: Install SQL Certificate
 

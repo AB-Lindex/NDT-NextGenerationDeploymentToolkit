@@ -97,6 +97,13 @@
                     Write-Verbose "  Removed repo-only item: $item"
                 }
             }
+
+            # Remove all .gitkeep placeholder files used to preserve empty folders in git
+            Get-ChildItem -Path $LocalPath -Filter '.gitkeep' -Recurse -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+                    Write-Verbose "  Removed .gitkeep: $($_.FullName)"
+                }
         }
     } finally {
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }

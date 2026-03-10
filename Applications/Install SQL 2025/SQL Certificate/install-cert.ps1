@@ -18,21 +18,37 @@ function Write-Log {
     Add-Content -Path $LogFile -PassThru -Force -Value "$Timestamp $Value"
 }
 
-$SQLPFXFile = join-path -Path ".\SQL Certificate" -ChildPath $SQLPFXFile
+$SQLPFXFile = Join-Path -Path $PSScriptRoot -ChildPath $SQLPFXFile
 
 write-log -Value "Starting SQL Certificate Installation using PFX File: $SQLPFXFile"
-
-$Cert = Import-PfxCertificate -Password $PFXPassword -CertStoreLocation Cert:\LocalMachine\My\ -FilePath ".\$SQLPFXFile"
+$Cert = Import-PfxCertificate -Password $PFXPassword -CertStoreLocation Cert:\LocalMachine\My\ -FilePath $SQLPFXFile
 $Thumbprint = $cert.Thumbprint
 
 Write-Log -Value "Setting up permissions on key for $ServiceAccountSQL"
 
-$keyPath = [System.IO.Path]::Combine("$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys", $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName)
+# Resolve private key path — handle both modern CNG and legacy CSP keys
+$privateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
+if ($privateKey -is [System.Security.Cryptography.RSACng]) {
+    # CNG key (modern PFX)
+    $keyPath = Join-Path "$env:ProgramData\Microsoft\Crypto\Keys" $privateKey.Key.UniqueName
+    Write-Log -Value "CNG private key path: $keyPath"
+} else {
+    # Legacy CSP key
+    $keyPath = Join-Path "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys" $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
+    Write-Log -Value "CSP private key path: $keyPath"
+}
+
+if (-not (Test-Path $keyPath)) {
+    Write-Log -Value "ERROR: Private key file not found at: $keyPath"
+    throw "Private key file not found. Cannot grant permissions."
+}
+
 $acl = Get-Acl -Path $keyPath
-$permission = $ServiceAccountSQL, "FullControl", "Allow"
+$permission = $ServiceAccountSQL, "Read", "Allow"
 $accessRule = New-Object System.Security.AccessControl.FileSystemAccessRule $permission
 $acl.SetAccessRule($accessRule)
 $acl | Set-Acl -Path $keyPath
+Write-Log -Value "Granted Read on private key to $ServiceAccountSQL"
 
 $instanceName = "MSSQLSERVER"
 $sqlVersion = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL').$instanceName
@@ -49,3 +65,4 @@ $ServiceResult = Get-Service -name $instanceName | Out-String
 
 Write-Log -Value $ServiceResult
 Write-Log -Value "Done SQL Certificate Installation using PFX File: $SQLPFXFile"
+read-host "Press Enter to continue..."

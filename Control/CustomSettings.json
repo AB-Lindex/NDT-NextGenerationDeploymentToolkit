@@ -5,7 +5,7 @@
     "IPAddress": "10.0.3.17/24",
     "AdminPassword": "Qantas-777",
     "SAPWD": "Qantas-777",
-    "sqlpfxfile": "\\Applications\\install sql 2025\\sql certificate\\sql01.corp.dev.pfx",
+    "sqlpfxfile": "sql01.corp.dev.pfx",
     "PFXPwd": "1q2w",
     "Sections": {
       "Locale": "Sweden",
