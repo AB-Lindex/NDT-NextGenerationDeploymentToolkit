@@ -184,6 +184,29 @@
     Write-Host "  Deploy user: $DeployUsername"
     Write-Host ""
     Write-Host "Edit Control\CustomSettings.json to match your environment before deploying." -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Next steps:" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  1. Build the WinPE boot image (WIM and optionally ISO):" -ForegroundColor White
+    Write-Host "       Build-NDTPEImage" -ForegroundColor Gray
+    Write-Host "     This requires the Windows ADK and WinPE Add-on to be installed." -ForegroundColor Gray
+    Write-Host "     The resulting Boot\boot2026.wim is registered automatically in WDS." -ForegroundColor Gray
+    Write-Host "     Use -SkipISO if you only need a WDS-served WIM (no ISO file)." -ForegroundColor Gray
+    Write-Host "     Use -SkipWDS if WDS is not yet configured on this server." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  2. Import operating system images (WIM files):" -ForegroundColor White
+    Write-Host "       Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\<folder>\install.wim' -Index 1" -ForegroundColor Gray
+    Write-Host "     Place WIM files under $LocalPath\Operating Systems\" -ForegroundColor Gray
+    Write-Host "     Use Get-NDTOs to list registered entries and Set-NDTOs to update them." -ForegroundColor Gray
+    Write-Host "     If you captured a reference image, use Move-NDTReferenceImage to move it" -ForegroundColor Gray
+    Write-Host "     from the Reference\ folder into Operating Systems\ automatically." -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "  NOTE: Certain files are not included in the repository and must be added" -ForegroundColor Yellow
+    Write-Host "        manually to the deployment share after installation. Examples:" -ForegroundColor Yellow
+    Write-Host "          - Certificate files (.pfx, .cer) used by application installers" -ForegroundColor Yellow
+    Write-Host "          - WIM files for operating systems and reference images" -ForegroundColor Yellow
+    Write-Host "          - Licensed or third-party application installers" -ForegroundColor Yellow
+    Write-Host "          - Site-specific content under Applications2026\" -ForegroundColor Yellow
 }
 
 function Build-NDTPEImage {
