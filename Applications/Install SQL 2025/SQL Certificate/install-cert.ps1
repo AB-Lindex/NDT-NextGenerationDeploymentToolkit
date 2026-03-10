@@ -29,9 +29,20 @@ Write-Log -Value "Setting up permissions on key for $ServiceAccountSQL"
 # Resolve private key path — handle both modern CNG and legacy CSP keys
 $privateKey = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($cert)
 if ($privateKey -is [System.Security.Cryptography.RSACng]) {
-    # CNG key (modern PFX)
-    $keyPath = Join-Path "$env:ProgramData\Microsoft\Crypto\Keys" $privateKey.Key.UniqueName
-    Write-Log -Value "CNG private key path: $keyPath"
+    # CNG key — UniqueName may resolve to either the CNG store or the legacy RSA store
+    $keyName = $privateKey.Key.UniqueName
+    $cngPath = Join-Path "$env:ProgramData\Microsoft\Crypto\Keys" $keyName
+    $rsaPath = Join-Path "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys" $keyName
+    if (Test-Path $cngPath) {
+        $keyPath = $cngPath
+        Write-Log -Value "CNG private key path (CNG store): $keyPath"
+    } elseif (Test-Path $rsaPath) {
+        $keyPath = $rsaPath
+        Write-Log -Value "CNG private key path (RSA store): $keyPath"
+    } else {
+        $keyPath = $cngPath  # preserve original path so the missing-file error is descriptive
+        Write-Log -Value "WARNING: CNG key not found in either store; tried: $cngPath and $rsaPath"
+    }
 } else {
     # Legacy CSP key
     $keyPath = Join-Path "$env:ProgramData\Microsoft\Crypto\RSA\MachineKeys" $cert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName
@@ -65,4 +76,3 @@ $ServiceResult = Get-Service -name $instanceName | Out-String
 
 Write-Log -Value $ServiceResult
 Write-Log -Value "Done SQL Certificate Installation using PFX File: $SQLPFXFile"
-read-host "Press Enter to continue..."
