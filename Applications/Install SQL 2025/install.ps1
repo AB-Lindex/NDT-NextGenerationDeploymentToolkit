@@ -234,7 +234,12 @@ Write-Log -Value "Done Setting SPNs for SQL Service Account: $ServiceAccountSQL"
 Write-Log -Value "Starting SQL Certificate Installation using PFX File: $SQLPFXFile"
 
 $PFXPassword = ConvertTo-SecureString -String $PFXPwd -AsPlainText -Force
-& '.\SQL Certificate\install-cert.ps1' -SQLPFXFile $SQLPFXFile -ServiceAccountSQL $ServiceAccountSQL -listenername $SQLAOListenerName -PFXPassword $PFXPassword # Step 5: Install SQL Certificate
+if ($SQLAOListenerName) {
+    $Listener = $SQLAOListenerName
+} else {
+    $Listener = $HostFQDN
+}
+& '.\SQL Certificate\install-cert.ps1' -SQLPFXFile $SQLPFXFile -ServiceAccountSQL $ServiceAccountSQL -listener $Listener -PFXPassword $PFXPassword # Step 5: Install SQL Certificate
 
 Write-Log -Value "Done SQL Certificate Installation using PFX File: $SQLPFXFile"
 Write-Log -Value "setting up firewall rules for SQL Server"

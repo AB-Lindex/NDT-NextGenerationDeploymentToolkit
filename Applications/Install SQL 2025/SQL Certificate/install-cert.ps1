@@ -1,6 +1,6 @@
 param (
     [Parameter(Mandatory)]
-    [string]$listenername,
+    [string]$listener,
     [Parameter(Mandatory)]
     [string]$ServiceAccountSQL,
     [Parameter(Mandatory)]
@@ -38,10 +38,10 @@ $instanceName = "MSSQLSERVER"
 $sqlVersion = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL').$instanceName
 $regPath = "HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\$sqlVersion\MSSQLServer\SuperSocketNetLib"
 
-Write-Log -Value "Setting registry values $Thumbprint $listenername"
+Write-Log -Value "Setting registry values $Thumbprint $listener for SQL Server instance $instanceName"
 
 Set-ItemProperty -Path $regPath -Name "Certificate" -Value $Thumbprint
-Set-ItemProperty -Path $regPath -Name "HostNameInCertificate" -Value "$listenername"
+Set-ItemProperty -Path $regPath -Name "HostNameInCertificate" -Value "$listener"
 Set-ItemProperty -Path $regPath -Name "ForceEncryption" -Value 1 -Type DWord
 
 Restart-Service -Name $instanceName -Force
