@@ -29,7 +29,13 @@
   },
   "Install SQL 2025": {
     "Script": "\\Applications\\Install SQL 2025\\install.ps1",
-    "Parameters": ["SQLAOListenerName", "AGName", "SQLPFXFile", "PFXPwd", "SAPWD"]
+    "Parameters": ["SQLAOListenerName", "AGName", "SQLPFXFile", "PFXPwd", "SAPWD",
+    "SQLAONodes",
+    "SQLAOgMSA",
+    "SQLAOClusterIP",
+    "SQLAOClusterName",
+    "SQLAOClusterShare",
+    "SQLAOListenerIP"]
   },
   "Reboot": {
     "Type": "Reboot",

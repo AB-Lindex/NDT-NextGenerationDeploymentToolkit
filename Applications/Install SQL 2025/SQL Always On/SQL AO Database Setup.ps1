@@ -22,13 +22,11 @@ function Write-Log {
     Add-Content -Path $LogFile -PassThru -Force -Value "$Timestamp $Value"
 }
 
-$CreateDB = Get-Content -Path '.\SQL Always On\Database01 - 2025.sql' -raw  # Create simple Database and do a Full backup
 write-log -Value "Creating the database on $ENV:Computername"
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -Query $CreateDB
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'SQL Always On\Database01 - 2025.sql')
 
 write-log -Value "Backing up the database on $ENV:Computername"
-$BackupDB = Get-Content -Path '.\SQL Always On\DBBackup - 2025.sql' -raw
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -Query $BackupDB
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'SQL Always On\DBBackup - 2025.sql')
 
 for ($i = 1; $i -le $Nodes.Count; $i++) {
     $AGSQL = Get-Content -Path '.\SQL Always On\SetupAG01.sql' -raw

@@ -54,18 +54,18 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 }
 
 # Required variables – edit these before running
-$ServerFQDN        = 'pxe.contoso.local'      # FQDN for IIS HTTPS binding & TLS cert SAN
-$DHCPScopeID       = '192.168.1.0'            # DHCP scope network address
-$DHCPScopeStart    = '192.168.1.100'          # DHCP range start
-$DHCPScopeEnd      = '192.168.1.200'          # DHCP range end
+$ServerFQDN        = 'pxe.corp.dev'      # FQDN for IIS HTTPS binding & TLS cert SAN
+$DHCPScopeID       = '10.0.3.0'            # DHCP scope network address
+$DHCPScopeStart    = '10.0.3.70'          # DHCP range start
+$DHCPScopeEnd      = '10.0.3.79'          # DHCP range end
 $DHCPSubnetMask    = '255.255.255.0'          # Subnet mask
-$DHCPGateway       = '192.168.1.1'            # Default gateway
+$DHCPGateway       = '10.0.3.1'            # Default gateway
 $DHCPScopeName     = 'iPXE Deployment Scope'
-$WDSRemInstPath    = 'D:\RemoteInstall'        # WDS remote install folder (dedicated drive recommended)
+$WDSRemInstPath    = 'C:\RemoteInstall'        # WDS remote install folder (dedicated drive recommended)
 $IISSiteName       = 'iPXE'
-$IISPhysicalPath   = 'D:\iPXE'                # Root folder for boot files served over HTTPS
+$IISPhysicalPath   = 'C:\iPXE'                # Root folder for boot files served over HTTPS
 $IISHttpsPort      = 443
-$CertThumbprint    = ''                        # Fill in after cert is issued (Section 6)
+$CertThumbprint    = 'AF65873FE84F98BE0718CA9D4FE74E1C656EAFF9'
 
 Write-Host "  Variables loaded. Review values at the top of the script before proceeding." -ForegroundColor Yellow
 
@@ -123,7 +123,7 @@ Write-Host "`n[3/13] Configuring DHCP..." -ForegroundColor Cyan
 
 # Authorise DHCP in Active Directory (requires Domain Admin or delegation)
 try {
-    Add-DhcpServerInDC -DnsName $ServerFQDN
+    Add-DhcpServerInDC -DnsName 'corp.dev'
     Write-Host "  DHCP server authorised in AD." -ForegroundColor Green
 } catch {
     Write-Warning "  DHCP authorisation failed (may already be authorised or no AD): $_"
@@ -141,7 +141,7 @@ Add-DhcpServerv4Scope `
 Set-DhcpServerv4OptionValue `
     -ScopeId    $DHCPScopeID `
     -Router     $DHCPGateway `
-    -DnsServer  (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.PrefixOrigin -eq 'Manual' } | Select-Object -First 1 -ExpandProperty IPAddress)
+    -DnsServer  '10.0.3.11'
 
 # Option 66 – TFTP/boot server (point to this server)
 Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 66 -Value $ServerFQDN
@@ -155,6 +155,10 @@ Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 66 -Value $ServerFQD
 # Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 67 -Value 'undionly.kpxe'        # BIOS
 
 # Option 060 – Vendor class (PXEClient marker, required for some firmware)
+# Option 60 is not predefined in Windows DHCP; define it first if absent
+if (-not (Get-DhcpServerv4OptionDefinition -OptionId 60 -ErrorAction SilentlyContinue)) {
+    Add-DhcpServerv4OptionDefinition -OptionId 60 -Name 'VendorClassIdentifier' -Type String
+}
 Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 60 -Value 'PXEClient'
 
 Write-Host "  DHCP scope and options configured." -ForegroundColor Green
@@ -174,7 +178,7 @@ if (-not (Test-Path $WDSRemInstPath)) {
     WDS cannot be fully configured via PowerShell on first run.
     Use the WDS MMC console or run the following from an elevated CMD:
 
-    wdsutil /Initialize-Server /RemInst:"D:\RemoteInstall"
+    wdsutil /Initialize-Server /RemInst:"C:\RemoteInstall"
 
     Post-initialisation:
     - Open WDS console
@@ -284,7 +288,10 @@ if ([string]::IsNullOrWhiteSpace($CertThumbprint)) {
     New-WebBinding -Name $IISSiteName -Protocol 'https' -Port $IISHttpsPort -HostHeader $ServerFQDN
 
     # Bind certificate to the HTTPS binding via http.sys
-    $cert = Get-Item "Cert:\LocalMachine\My\$CertThumbprint"
+    # Validate the cert exists in the store before binding
+    if (-not (Test-Path "Cert:\LocalMachine\My\$CertThumbprint")) {
+        throw "Certificate with thumbprint '$CertThumbprint' not found in LocalMachine\My."
+    }
     $guid = [System.Guid]::NewGuid().ToString('B')
 
     # Use netsh to bind the cert (most reliable cross-version approach)
@@ -359,8 +366,8 @@ Write-Host "`n[7/13] iPXE build notes (internal PKI / HTTPS)..." -ForegroundColo
        make bin/ipxe.pxe             TRUST=internal-ca-chain.pem EMBED=boot.ipxe
 
     8. Copy the built files to $WDSRemInstPath\Boot\:
-       ipxe.efi       → D:\RemoteInstall\Boot\x64\ipxe.efi
-       undionly.kpxe  → D:\RemoteInstall\Boot\x86\undionly.kpxe
+       ipxe.efi       → C:\RemoteInstall\Boot\x64\ipxe.efi
+       undionly.kpxe  → C:\RemoteInstall\Boot\x86\undionly.kpxe
 
     IMPORTANT: The TRUST= flag is the key – it replaces the built-in Mozilla CA
     bundle with ONLY your internal chain. Clients will reject public certs, so

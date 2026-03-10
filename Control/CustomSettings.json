@@ -1,4 +1,46 @@
 {
+  "00:15:5D:03:9C:11": {
+    "OS": "WIN2025DCC",
+    "Computername": "SQL41",
+    "IPAddress": "10.0.3.61/24",
+    "AdminPassword": "Qantas-777",
+    "SAPWD": "Qantas-777",
+    "sqlpfxfile": "sql-listen04.corp.dev.pfx",
+    "PFXPwd": "1q2w",
+    "SQLAONodes": "SQL41,SQL42",
+    "SQLAOgMSA": "gMSAAO04",
+    "SQLAOClusterIP": "10.0.3.64",
+    "SQLAOClusterName": "sql-cluster04",
+    "SQLAOClusterShare": "\\\\dc01.corp.dev\\SQL-Witness",
+    "SQLAOListenerIP": "10.0.3.65",
+    "SQLAOListenerName": "sql-listen04",
+    "AGName": "SQL-AG",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["SQL2025"]
+  },
+  "00:15:5D:03:9D:05": {
+    "OS": "WIN2025DCC",
+    "Computername": "SQL42",
+    "IPAddress": "10.0.3.62/24",
+    "AdminPassword": "Qantas-777",
+    "SAPWD": "Qantas-777",
+    "sqlpfxfile": "sql-listen04.corp.dev.pfx",
+    "PFXPwd": "1q2w",
+    "SQLAONodes": "SQL41,SQL42",
+    "SQLAOgMSA": "gMSAAO04",
+    "SQLAOClusterName": "sql-cluster04",
+    "SQLAOListenerName":"sql-listen04",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": ["SQL2025"]
+  },
   "00:15:5D:03:9C:12": {
     "OS": "WIN2025DCC",
     "Computername": "SQL01",
