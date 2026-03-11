@@ -1,6 +1,6 @@
 {
   "00:15:5D:03:9C:11": {
-    "OS": "WIN2025DCC",
+    "OS": "WIN2025DCCSQL",
     "Computername": "SQL41",
     "IPAddress": "10.0.3.61/24",
     "AdminPassword": "Qantas-777",
@@ -23,7 +23,7 @@
     "DeploymentSteps": ["SQL2025"]
   },
   "00:15:5D:03:9D:05": {
-    "OS": "WIN2025DCC",
+    "OS": "WIN2025DCCSQL",
     "Computername": "SQL42",
     "IPAddress": "10.0.3.62/24",
     "AdminPassword": "Qantas-777",

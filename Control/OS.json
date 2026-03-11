@@ -16,5 +16,8 @@
         "Index": 3},
     "WIN2025DCX": {
         "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim",
-        "Index": 4}
+        "Index": 4},
+    "WIN2025DCCSQL": {
+        "Path": "Operating systems\\ref-w2025dccsql\\w2025dccsql.wim",
+        "Index": 1}
 }

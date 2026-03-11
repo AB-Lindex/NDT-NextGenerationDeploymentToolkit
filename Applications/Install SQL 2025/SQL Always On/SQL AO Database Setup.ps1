@@ -60,7 +60,10 @@ for ($i = 1; $i -le $Nodes.Count; $i++) {
     }
 }
 $AGSQL | Set-Content -Path "c:\temp\SetupAG02.sql" -Force
+
+read-host "press enter #1"
 & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
+read-host "press enter #11"
 
 
 
@@ -72,7 +75,10 @@ $AGSQL = $AGSQL.Replace('<LISTENERNAME>',$SQLAOListenerName)
 $AGSQL = $AGSQL.Replace('<LISTENERIP>',$SQLAOListenerIP)
 
 $AGSQL | Set-Content -Path "c:\temp\SetupAG03.sql" -Force
+read-host "press enter #2"
+
 & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
+read-host "press enter #22"
 
 
 for ($i = 2; $i -le $Nodes.Count; $i++) { # for all nodes but the first
@@ -82,5 +88,7 @@ for ($i = 2; $i -le $Nodes.Count; $i++) { # for all nodes but the first
     $AGSQL = $AGSQL.Replace("<NODEX>", $($Nodes[$i-1]))
 
     $AGSQL | Set-Content -Path "c:\temp\SetupAG04$i.sql" -Force
+read-host "press enter #3"
     & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
+read-host "press enter #33"
 }
