@@ -1,6 +1,8 @@
 Param(
     [parameter(Mandatory = $true)]
-    [string]$SQLListener
+    [string]$SQLListener,
+    [parameter(Mandatory = $true)]
+    [string]$SAPWD
 )
 function Write-Log {
     param(
@@ -21,10 +23,12 @@ Set-DbatoolsConfig -Name Import.EncryptionMessageCheck -Value $false -PassThru |
 Set-DbatoolsConfig -FullName sql.connection.trustcert -Value $true -Register 
 Set-DbatoolsConfig -FullName sql.connection.encrypt -Value $false -Register
 
+$SqlCredential = New-Object System.Management.Automation.PSCredential('sa', (ConvertTo-SecureString $SAPWD -AsPlainText -Force))
+
 [bool]$SQLSuccess = $false
 while (!$SQLSuccess) {
     try {
-        $AG = Get-DbaAgReplica -SqlInstance $SQLListener -WarningAction SilentlyContinue
+        $AG = Get-DbaAgReplica -SqlInstance $SQLListener -SqlCredential $SqlCredential -WarningAction SilentlyContinue
         $AGName = $AG.availabilitygroup[0]
         $SQLSuccess = $true
     }
@@ -41,9 +45,9 @@ $Query2 = "SELECT ar.replica_server_name ,ag.name AS ag_name ,ar.owner_sid ,sp.n
             sys.availability_replicas ar LEFT JOIN sys.server_principals sp ON sp.sid = ar.owner_sid INNER JOIN `
             sys.availability_groups ag ON ag.group_id = ar.group_id WHERE ar.replica_server_name = SERVERPROPERTY('ServerName') "
 
-$db_startname = (Get-DbaService | where-object servicetype -eq 'Engine').StartName
-$db_endpointowner = (Invoke-DbaQuery -SqlInstance $env:computername -Database master -Query $Query1).EndpointOwner
-$db_agowner = (Invoke-DbaQuery -SqlInstance $env:computername -Database master -Query $Query2).Name
+$db_startname = (Get-DbaService | Where-Object servicetype -eq 'Engine').StartName
+$db_endpointowner = (Invoke-DbaQuery -SqlInstance $env:computername -SqlCredential $SqlCredential -Database master -Query $Query1).EndpointOwner
+$db_agowner = (Invoke-DbaQuery -SqlInstance $env:computername -SqlCredential $SqlCredential -Database master -Query $Query2).Name
 
 Write-Log -Value "Service Start Name: $db_startname"
 Write-Log -Value "Endpoint Owner: $db_endpointowner"
@@ -63,7 +67,7 @@ if ($db_agowner -ne $db_startname) {
     [bool]$SQLSuccess = $false
     while (!$SQLSuccess) {
         try {
-            Invoke-DbaQuery -SqlInstance $env:computername -Database master -Query $db_change_sql
+            Invoke-DbaQuery -SqlInstance $env:computername -SqlCredential $SqlCredential -Database master -Query $db_change_sql
             $SQLSuccess = $true
         }
         catch {
@@ -86,7 +90,7 @@ if ($db_endpointowner -ne $db_startname ) {
     [bool]$SQLSuccess = $false
     while (!$SQLSuccess) {
         try {
-            Invoke-DbaQuery -SqlInstance $env:computername -Database master -Query $db_change_sql
+            Invoke-DbaQuery -SqlInstance $env:computername -SqlCredential $SqlCredential -Database master -Query $db_change_sql
             $SQLSuccess = $true
         }
         catch {

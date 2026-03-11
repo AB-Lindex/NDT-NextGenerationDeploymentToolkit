@@ -10,7 +10,9 @@ param (
     [Parameter(Mandatory)]
     [string]$SQLAOListenerIP,
     [Parameter(Mandatory)]
-    [string]$Domain
+    [string]$Domain,
+    [Parameter(Mandatory)]
+    [string]$SAPWD
 )
 function Write-Log {
     param(
@@ -23,10 +25,14 @@ function Write-Log {
 }
 
 write-log -Value "Creating the database on $ENV:Computername"
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'Database01 - 2025.sql')
+$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'Database01 - 2025.sql') -C 2>&1
+$sqlOutput | ForEach-Object { write-log -Value $_ }
+if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE creating database" }
 
 write-log -Value "Backing up the database on $ENV:Computername"
-Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -InputFile (Join-Path $PSScriptRoot 'DBBackup - 2025.sql')
+$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'DBBackup - 2025.sql') -C 2>&1
+$sqlOutput | ForEach-Object { write-log -Value $_ }
+if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE backing up database" }
 
 for ($i = 1; $i -le $Nodes.Count; $i++) {
     $AGSQL = Get-Content -Path '.\SQL Always On\SetupAG01.sql' -raw
@@ -37,7 +43,7 @@ for ($i = 1; $i -le $Nodes.Count; $i++) {
 
     $AGSQL | Set-Content -Path "c:\temp\SetupAG01$i.sql" -Force
     write-log -Value "Connecting to node $($Nodes[$i-1]) and adding gMSA as an endpoint user"
-    & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -Q $AGSQL -C
+    & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
 }
 
 $AGSQL = Get-Content -Path '.\SQL Always On\SetupAG02.sql' -raw
@@ -54,7 +60,7 @@ for ($i = 1; $i -le $Nodes.Count; $i++) {
     }
 }
 $AGSQL | Set-Content -Path "c:\temp\SetupAG02.sql" -Force
-& 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -Q $AGSQL -C
+& 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
 
 
 
@@ -66,7 +72,7 @@ $AGSQL = $AGSQL.Replace('<LISTENERNAME>',$SQLAOListenerName)
 $AGSQL = $AGSQL.Replace('<LISTENERIP>',$SQLAOListenerIP)
 
 $AGSQL | Set-Content -Path "c:\temp\SetupAG03.sql" -Force
-& 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -Q $AGSQL -C
+& 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
 
 
 for ($i = 2; $i -le $Nodes.Count; $i++) { # for all nodes but the first
@@ -76,5 +82,5 @@ for ($i = 2; $i -le $Nodes.Count; $i++) { # for all nodes but the first
     $AGSQL = $AGSQL.Replace("<NODEX>", $($Nodes[$i-1]))
 
     $AGSQL | Set-Content -Path "c:\temp\SetupAG04$i.sql" -Force
-    & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -Q $AGSQL -C
+    & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -Q $AGSQL -C
 }

@@ -300,10 +300,10 @@ if ($AO) {
     Start-Sleep -Seconds 2
 
     if ($FirstNode) {
-        & '.\sql always on\SQL AO Database Setup.ps1' -Nodes $Nodes -AGName $AGName -SQLAOgMSA $SQLAOgMSA -SQLAOListenerName $SQLAOListenerName -SQLAOListenerIP $SQLAOListenerIP -Domain $Domain # Step 10: Setup Always On Availability Group Database
+        & '.\sql always on\SQL AO Database Setup.ps1' -Nodes $Nodes -AGName $AGName -SQLAOgMSA $SQLAOgMSA -SQLAOListenerName $SQLAOListenerName -SQLAOListenerIP $SQLAOListenerIP -Domain $Domain -SAPWD $SAPWD # Step 10: Setup Always On Availability Group Database
         write-log -Value "Done setting up Always On Availability Group: $AGName"
     }
-    & '.\sql always on\Cluster-setup-owner.ps1' -SQLListener $SQLAOListenerName
+    & '.\sql always on\Cluster-setup-owner.ps1' -SQLListener $SQLAOListenerName -SAPWD $SAPWD
  }
 
 Write-Log -Value "SQL 2025 Installation Script Completed"
