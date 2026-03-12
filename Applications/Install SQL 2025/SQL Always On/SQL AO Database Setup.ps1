@@ -25,14 +25,20 @@ function Write-Log {
 }
 
 write-log -Value "Creating the database on $ENV:Computername"
-$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'Database01 - 2025.sql') -C 2>&1
-$sqlOutput | ForEach-Object { write-log -Value $_ }
-if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE creating database" }
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD -InputFile (Join-Path $PSScriptRoot 'Database01 - 2025.sql')
+
+#$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'Database01 - 2025.sql') -C 2>&1
+#$sqlOutput | ForEach-Object { write-log -Value $_ }
+#if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE creating database" }
 
 write-log -Value "Backing up the database on $ENV:Computername"
-$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'DBBackup - 2025.sql') -C 2>&1
-$sqlOutput | ForEach-Object { write-log -Value $_ }
-if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE backing up database" }
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD -InputFile (Join-Path $PSScriptRoot 'DBBackup - 2025.sql')
+
+read-host "press enter to continue now that DB is created and backed up"
+
+#$sqlOutput = & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $SAPWD -i (Join-Path $PSScriptRoot 'DBBackup - 2025.sql') -C 2>&1
+#$sqlOutput | ForEach-Object { write-log -Value $_ }
+#if ($LASTEXITCODE -ne 0) { throw "sqlcmd exited with code $LASTEXITCODE backing up database" }
 
 for ($i = 1; $i -le $Nodes.Count; $i++) {
     $AGSQL = Get-Content -Path '.\SQL Always On\SetupAG01.sql' -raw
