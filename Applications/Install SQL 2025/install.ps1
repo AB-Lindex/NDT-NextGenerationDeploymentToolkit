@@ -145,6 +145,12 @@ if ($AO) {
 
 if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
     Write-Log -Value "SQL Server is already installed"
+
+    # Reset SA password from the reference image password to the deployment SAPWD
+    Write-Log -Value "Resetting SA password to deployment SAPWD"
+    $RefSAPWD = '<refpwd>' temporary solution  # SA password on the reference image; required only when SQL is already installed
+    & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $RefSAPWD -C -Q "ALTER LOGIN [sa] WITH PASSWORD = '$SAPWD', CHECK_POLICY = OFF; ALTER LOGIN [sa] ENABLE;" 2>&1 | ForEach-Object { Write-Log -Value $_ }
+
     $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Instance'"
     Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{StartName = $ServiceAccountSQL}
     start-service -Name $Instance
@@ -157,32 +163,12 @@ if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
     $svc = sc.exe qc mssqlserver | Out-String
     write-log -Value "$svc"
 
-    # Create the login and add to sysadmin role
-    $loginName = "$UserDomain\administrator"
-    $script = @"
-USE [master]
-GO
--- Create the login if it doesn't exist
-IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '$loginName')
-BEGIN
-    CREATE LOGIN [$loginName] FROM WINDOWS WITH DEFAULT_DATABASE=[master]
-END
-
--- Add to sysadmin role
-ALTER SERVER ROLE [sysadmin] ADD MEMBER [$loginName]
-GO
-"@
-
-    # Execute the script
-    Invoke-Sqlcmd -Query $script -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD
-    Write-Log -Value "Successfully added $loginName to sysadmin role"
-
     $script = @"
 EXEC sp_dropserver @@SERVERNAME;
 EXEC sp_addserver @server = '$HostName', @local = 'local';
 "@
 
-    Invoke-Sqlcmd -Query $script -TrustServerCertificate -Username 'sa' -Password $SAPWD
+    Invoke-Sqlcmd -ServerInstance $ENV:Computername -Query $script -Database master -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD
 
     Write-Log -Value "Server name change queued. Restarting SQL Server..."
     Restart-Service -Name $Instance -Force
@@ -192,7 +178,7 @@ EXEC sp_addserver @server = '$HostName', @local = 'local';
         Start-Sleep -Seconds 2
     }
 
-    $verify = Invoke-Sqlcmd -Query "SELECT @@SERVERNAME AS ServerName" -TrustServerCertificate -Username 'sa' -Password $SAPWD
+    $verify = Invoke-Sqlcmd -ServerInstance $ENV:Computername -Query "SELECT @@SERVERNAME AS ServerName" -Database master -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD
     Write-Log -Value "New server name: $($verify.ServerName)"
 
 } else {
@@ -214,6 +200,21 @@ EXEC sp_addserver @server = '$HostName', @local = 'local';
 
     Write-Log -Value "Finished SQL 2025 Installation"
 }
+
+# Add current user and domain admin as sysadmin using SA (runs for both fresh install and already-installed)
+$currentUser = "$UserDomain\$env:USERNAME"
+$loginName = "$UserDomain\administrator"
+Write-Log -Value "Adding $currentUser and $loginName as sysadmin"
+$addLoginScript = @"
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '$currentUser')
+    CREATE LOGIN [$currentUser] FROM WINDOWS WITH DEFAULT_DATABASE=[master];
+ALTER SERVER ROLE [sysadmin] ADD MEMBER [$currentUser];
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = '$loginName')
+    CREATE LOGIN [$loginName] FROM WINDOWS WITH DEFAULT_DATABASE=[master];
+ALTER SERVER ROLE [sysadmin] ADD MEMBER [$loginName];
+"@
+Invoke-Sqlcmd -ServerInstance $ENV:Computername -Query $addLoginScript -Database master -TrustServerCertificate:$true -Username 'sa' -Password $SAPWD
+Write-Log -Value "Successfully added $currentUser and $loginName to sysadmin role"
 
 Write-Log -Value "Setting SPNs for SQL Service Account: $ServiceAccountSQL"
 $HostFQDN = "$HostName.$Domain"
@@ -300,10 +301,10 @@ if ($AO) {
     Start-Sleep -Seconds 2
 
     if ($FirstNode) {
-        & '.\sql always on\SQL AO Database Setup.ps1' -Nodes $Nodes -AGName $AGName -SQLAOgMSA $SQLAOgMSA -SQLAOListenerName $SQLAOListenerName -SQLAOListenerIP $SQLAOListenerIP -Domain $Domain -SAPWD $SAPWD # Step 10: Setup Always On Availability Group Database
+        & '.\sql always on\SQL AO Database Setup.ps1' -Nodes $Nodes -AGName $AGName -SQLAOgMSA $SQLAOgMSA -SQLAOListenerName $SQLAOListenerName -SQLAOListenerIP $SQLAOListenerIP -Domain $Domain # Step 10: Setup Always On Availability Group Database
         write-log -Value "Done setting up Always On Availability Group: $AGName"
     }
-    & '.\sql always on\Cluster-setup-owner.ps1' -SQLListener $SQLAOListenerName -SAPWD $SAPWD
+    & '.\sql always on\Cluster-setup-owner.ps1' -SQLListener $SQLAOListenerName
  }
 
 Write-Log -Value "SQL 2025 Installation Script Completed"
