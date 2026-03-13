@@ -145,6 +145,10 @@ if ($AO) {
 
 if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
     Write-Log -Value "SQL Server is already installed"
+    while ((get-service -Name $Instance).Status -ne 'Running') {
+        Write-Log -Value "Waiting for SQL Service to start"
+        Start-Sleep -Seconds 2
+    }
 
     # Reset SA password from the reference image password to the deployment SAPWD
     Write-Log -Value "Resetting SA password to deployment SAPWD"
