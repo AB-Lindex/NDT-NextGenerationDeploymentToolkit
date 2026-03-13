@@ -148,7 +148,8 @@ if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
 
     # Reset SA password from the reference image password to the deployment SAPWD
     Write-Log -Value "Resetting SA password to deployment SAPWD"
-    $RefSAPWD = '<refpwd>' temporary solution  # SA password on the reference image; required only when SQL is already installed
+    $RefSAPWD = 'P@ssw0rd2026' # SA password on the reference image; required only when SQL is already installed
+    # this will be moved to be a parameter 
     & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $RefSAPWD -C -Q "ALTER LOGIN [sa] WITH PASSWORD = '$SAPWD', CHECK_POLICY = OFF; ALTER LOGIN [sa] ENABLE;" 2>&1 | ForEach-Object { Write-Log -Value $_ }
 
     $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Instance'"
