@@ -5,7 +5,8 @@ The goal is to keep it simple: PowerShell 5 and 7, WDS/PXE for network boot, JSO
 
 > **Status:** PGD — Pretty Good Deployment 🙂  
 > No formal version numbers yet.
-
+See my first video of a deployment here:
+https://www.youtube.com/watch?v=8z-uKonbEoE
 ---
 
 ## How it works
