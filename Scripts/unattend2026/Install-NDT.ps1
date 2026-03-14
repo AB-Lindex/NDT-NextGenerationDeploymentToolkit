@@ -100,20 +100,6 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     
     Write-Log "`nProcessing group: $deploymentGroupName" -ForegroundColor Yellow
 
-    # Detect gaps in step numbering (e.g. Step1, Step2, Step4 — Step3 missing)
-    $stepNumbers = $deploymentGroup.PSObject.Properties.Name |
-        Where-Object { $_ -match '^Step(\d+)$' } |
-        ForEach-Object { [int]$Matches[1] } |
-        Sort-Object
-    if ($stepNumbers.Count -gt 0) {
-        $expectedRange = $stepNumbers[0]..$stepNumbers[-1]
-        foreach ($n in $expectedRange) {
-            if ($n -notin $stepNumbers) {
-                Write-Log "Step$n is missing from group '$deploymentGroupName'" -Level WARN
-            }
-        }
-    }
-
     # Execute each deployment step from the deployment group
     foreach ($stepProperty in $deploymentGroup.PSObject.Properties) {
     $stepName = $stepProperty.Name
