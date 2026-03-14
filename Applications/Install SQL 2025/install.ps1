@@ -20,7 +20,9 @@ param (
     [Parameter(Mandatory)]
     [string]$SAPWD,
     [Parameter(Mandatory)]
-    [string]$PFXPwd
+    [string]$PFXPwd,
+    [Parameter()]
+    [string]$RefSAPWD
 )
 
 function Write-Log {
@@ -142,6 +144,11 @@ if ($AO) {
 
     $ServiceAccountSQL = "$UserDomain\MSA" + $ENV:Computername +"$"
 }
+Write-Log -Value "setting up SQL Server Powershell Modules"
+
+& '.\SQL Server POSH Module\install.ps1' # Step 7: Setup SQL Server Powershell Modules
+
+Write-Log -Value "Done setting up SQL Server Powershell Modules"
 
 if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
     Write-Log -Value "SQL Server is already installed"
@@ -152,8 +159,6 @@ if (Get-Service -Name $Instance -ErrorAction SilentlyContinue) {
 
     # Reset SA password from the reference image password to the deployment SAPWD
     Write-Log -Value "Resetting SA password to deployment SAPWD"
-    $RefSAPWD = 'P@ssw0rd2026' # SA password on the reference image; required only when SQL is already installed
-    # this will be moved to be a parameter 
     & 'C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\180\Tools\Binn\SQLCMD.EXE' -S $ENV:Computername -U sa -P $RefSAPWD -C -Q "ALTER LOGIN [sa] WITH PASSWORD = '$SAPWD', CHECK_POLICY = OFF; ALTER LOGIN [sa] ENABLE;" 2>&1 | ForEach-Object { Write-Log -Value $_ }
 
     $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$Instance'"
@@ -253,11 +258,6 @@ Write-Log -Value "setting up firewall rules for SQL Server"
 & '.\SQL Server Firewall Settings\install-firewall.ps1' # Step 6: Setup Firewall Rules for SQL Server
 
 Write-Log -Value "Done setting up firewall rules for SQL Server"
-Write-Log -Value "setting up SQL Server Powershell Modules"
-
-& '.\SQL Server POSH Module\install.ps1' # Step 7: Setup SQL Server Powershell Modules
-
-Write-Log -Value "Done setting up SQL Server Powershell Modules"
 if ($AO) {
     write-log -Value "Starting setup of Cluster for: $SQLAOClusterName"
     if ($FirstNode) {

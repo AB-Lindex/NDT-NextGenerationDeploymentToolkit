@@ -53,6 +53,10 @@
       "Reference": "Reboot"
     },
     "Step3": {
+      "Description": "Make a pause",
+      "Reference": "Pause"
+    },
+    "Step4": {
       "Description": "Install SQL 2025",
       "Reference": "Install SQL 2025"
     }

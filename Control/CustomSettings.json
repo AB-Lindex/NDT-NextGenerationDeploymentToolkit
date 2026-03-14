@@ -15,6 +15,7 @@
     "SQLAOListenerIP": "10.0.3.65",
     "SQLAOListenerName": "sql-listen04",
     "AGName": "SQL-AG",
+    "RefSAPWD": "P@ssw0rd2026",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
@@ -34,6 +35,7 @@
     "SQLAOgMSA": "gMSAAO04",
     "SQLAOClusterName": "sql-cluster04",
     "SQLAOListenerName":"sql-listen04",
+    "RefSAPWD": "P@ssw0rd2026",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",

@@ -1120,3 +1120,194 @@ function Move-NDTReferenceImage {
 }
 
 #endregion
+
+#region ── Deployment validation ─────────────────────────────────────────────
+
+function Test-NDTDeployment {
+    <#
+    .SYNOPSIS
+        Validates the entire deployment configuration for a given MAC address.
+    .DESCRIPTION
+        Performs a dry-run check of all configuration references for a specific machine:
+          - MAC entry exists in CustomSettings.json
+          - Required fields are present (Computername, OS, DeploymentSteps)
+          - Each referenced section exists as a top-level key in CustomSettings.json
+          - OS key exists in OS.json
+          - WIM file exists on disk
+          - Each DeploymentSteps group exists in DeploymentGroups.json
+          - Each step's Reference key exists in Deployment.json
+          - Each script file referenced in Deployment.json exists on disk
+        No changes are made — this is a read-only validation.
+        Returns \$true if all checks passed, \$false if any check failed.
+    .PARAMETER MAC
+        MAC address of the machine to validate (colon-separated, any case).
+    .PARAMETER LocalPath
+        Root of the NDT deployment share. Default: C:\Deploy2026
+    .EXAMPLE
+        Test-NDTDeployment -MAC '00:15:5D:03:9C:11'
+    .EXAMPLE
+        Test-NDTDeployment -MAC '00:15:5D:03:9C:11' -LocalPath D:\Deploy2026
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$MAC,
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026'
+    )
+
+    $script:checkErrors   = 0
+    $script:checkWarnings = 0
+
+    function Write-Check {
+        param(
+            [string]$Label,
+            [bool]$Pass,
+            [string]$Detail = '',
+            [switch]$IsWarning
+        )
+        if ($Pass) {
+            Write-Host "  [PASS] $Label" -ForegroundColor Green
+            if ($Detail) { Write-Host "         $Detail" -ForegroundColor DarkGreen }
+        } elseif ($IsWarning) {
+            Write-Host "  [WARN] $Label" -ForegroundColor Yellow
+            if ($Detail) { Write-Host "         $Detail" -ForegroundColor Yellow }
+            $script:checkWarnings++
+        } else {
+            Write-Host "  [FAIL] $Label" -ForegroundColor Red
+            if ($Detail) { Write-Host "         $Detail" -ForegroundColor Red }
+            $script:checkErrors++
+        }
+    }
+
+    $normalMAC = $MAC.ToUpper()
+    Write-Host "`nNDT Deployment Validation: $normalMAC" -ForegroundColor Cyan
+    Write-Host ('-' * 60) -ForegroundColor DarkGray
+
+    # ── Control file paths ──────────────────────────────────────────────────────
+    $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
+    $djPath = Join-Path $LocalPath 'Control\Deployment.json'
+    $dgPath = Join-Path $LocalPath 'Control\DeploymentGroups.json'
+    $osPath = Join-Path $LocalPath 'Control\OS.json'
+
+    # ── [1] Control files ───────────────────────────────────────────────────────
+    Write-Host "`n[1] Control files" -ForegroundColor White
+    $csOk = Test-Path $csPath; Write-Check 'CustomSettings.json'   $csOk $csPath
+    $djOk = Test-Path $djPath; Write-Check 'Deployment.json'       $djOk $djPath
+    $dgOk = Test-Path $dgPath; Write-Check 'DeploymentGroups.json' $dgOk $dgPath
+    $osOk = Test-Path $osPath; Write-Check 'OS.json'               $osOk $osPath
+
+    if (-not ($csOk -and $djOk -and $dgOk -and $osOk)) {
+        Write-Host "`n  One or more control files missing — cannot continue." -ForegroundColor Red
+        Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
+        return $false
+    }
+
+    $settings   = Get-Content $csPath -Raw | ConvertFrom-Json
+    $deployment = Get-Content $djPath -Raw | ConvertFrom-Json
+    $groups     = Get-Content $dgPath -Raw | ConvertFrom-Json
+    $osCatalog  = Get-Content $osPath -Raw | ConvertFrom-Json
+
+    # ── [2] MAC entry ───────────────────────────────────────────────────────────
+    Write-Host "`n[2] Machine entry" -ForegroundColor White
+    $machineEntry = $settings.PSObject.Properties[$normalMAC]
+    Write-Check "MAC $normalMAC in CustomSettings.json" ([bool]$machineEntry)
+
+    if (-not $machineEntry) {
+        Write-Host "`n  MAC not found — cannot continue." -ForegroundColor Red
+        Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
+        return $false
+    }
+
+    $machine = $machineEntry.Value
+
+    # ── [3] Required fields ─────────────────────────────────────────────────────
+    Write-Host "`n[3] Required fields" -ForegroundColor White
+    Write-Check 'Computername'    ([bool]$machine.Computername)    $machine.Computername
+    Write-Check 'OS'              ([bool]$machine.OS)               $machine.OS
+    Write-Check 'AdminPassword'   ([bool]$machine.AdminPassword)   '(set)'
+    Write-Check 'DeploymentSteps' ([bool]$machine.DeploymentSteps) ($machine.DeploymentSteps -join ', ')
+
+    # ── [4] Sections ────────────────────────────────────────────────────────────
+    if ($machine.Sections) {
+        Write-Host "`n[4] Sections" -ForegroundColor White
+        foreach ($sectionProp in $machine.Sections.PSObject.Properties) {
+            $sectionName = $sectionProp.Value
+            $exists = [bool]$settings.PSObject.Properties[$sectionName]
+            Write-Check "[$($sectionProp.Name)] '$sectionName'" $exists
+        }
+    }
+
+    # ── [5] Operating system ────────────────────────────────────────────────────
+    Write-Host "`n[5] Operating system" -ForegroundColor White
+    $osKey = $machine.OS
+    if ($osKey) {
+        $osEntry = $osCatalog.PSObject.Properties[$osKey]
+        Write-Check "Key '$osKey' in OS.json" ([bool]$osEntry)
+
+        if ($osEntry) {
+            $wimRelPath = $osEntry.Value.Path
+            $wimIndex   = $osEntry.Value.Index
+            $wimAbsPath = Join-Path $LocalPath $wimRelPath.TrimStart('\')
+            Write-Check 'WIM file exists on disk' (Test-Path $wimAbsPath) "$wimRelPath  (index $wimIndex)"
+        }
+    }
+
+    # ── [6] Deployment groups ───────────────────────────────────────────────────
+    if ($machine.DeploymentSteps) {
+        Write-Host "`n[6] Deployment groups" -ForegroundColor White
+        $resolvedRefs = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($groupName in $machine.DeploymentSteps) {
+            $groupEntry = $groups.PSObject.Properties[$groupName]
+            Write-Check "Group '$groupName'" ([bool]$groupEntry)
+
+            if ($groupEntry) {
+                foreach ($stepProp in $groupEntry.Value.PSObject.Properties) {
+                    $ref = $stepProp.Value.Reference
+                    if ($ref -and -not $resolvedRefs.Contains($ref)) {
+                        $resolvedRefs.Add($ref)
+                    }
+                }
+            }
+        }
+
+        # ── [7] Action references ───────────────────────────────────────────────
+        Write-Host "`n[7] Deployment action references" -ForegroundColor White
+        foreach ($ref in $resolvedRefs) {
+            $actionEntry = $deployment.PSObject.Properties[$ref]
+            Write-Check "'$ref'" ([bool]$actionEntry)
+        }
+
+        # ── [8] Script files ────────────────────────────────────────────────────
+        Write-Host "`n[8] Script files" -ForegroundColor White
+        $anyScripts = $false
+        foreach ($ref in $resolvedRefs) {
+            $action = $deployment.PSObject.Properties[$ref]
+            if (-not $action) { continue }
+            $scriptRel = $action.Value.Script
+            if (-not $scriptRel) { continue }
+            $anyScripts = $true
+            $scriptAbs  = Join-Path $LocalPath $scriptRel.TrimStart('\')
+            Write-Check "'$ref'" (Test-Path $scriptAbs) $scriptRel
+        }
+        if (-not $anyScripts) {
+            Write-Host '  (no Script actions in this machine-s steps)' -ForegroundColor DarkGray
+        }
+    }
+
+    # ── Summary ─────────────────────────────────────────────────────────────────
+    Write-Host "`n$('-' * 60)" -ForegroundColor DarkGray
+    if ($script:checkErrors -eq 0 -and $script:checkWarnings -eq 0) {
+        Write-Host 'Result: ALL CHECKS PASSED' -ForegroundColor Green
+    } elseif ($script:checkErrors -eq 0) {
+        Write-Host "Result: PASSED with $($script:checkWarnings) warning(s)" -ForegroundColor Yellow
+    } else {
+        Write-Host "Result: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)" -ForegroundColor Red
+    }
+    Write-Host ''
+
+    return ($script:checkErrors -eq 0)
+}
+
+#endregion

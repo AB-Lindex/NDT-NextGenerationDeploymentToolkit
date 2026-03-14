@@ -11,13 +11,10 @@ function Write-Log {
     $Timestamp = Get-Date -Format "HH:mm:ss"
     Add-Content -Path $LogFile -PassThru -Force -Value "$Timestamp $Value"
 }
+#read-host "pause before starting cluster owner change script"
+$Query1 = "SELECT e.name as EndpointName, SUSER_NAME(e.principal_id) AS EndpointOwner FROM sys.endpoints e Where e.name = 'Hadr_endpoint'"
 
-$Query1 = "SELECT e.name as EndpointName,sp.name AS EndpointOwner FROM sys.endpoints e INNER JOIN
-           sys.server_principals sp ON e.principal_id = sp.principal_id  Where e.name = 'Hadr_endpoint'"
-
-$Query2 = "SELECT ar.replica_server_name ,ag.name AS ag_name ,ar.owner_sid ,sp.name FROM
-            sys.availability_replicas ar LEFT JOIN sys.server_principals sp ON sp.sid = ar.owner_sid INNER JOIN
-            sys.availability_groups ag ON ag.group_id = ar.group_id WHERE ar.replica_server_name = SERVERPROPERTY('ServerName')"
+$Query2 = "SELECT ar.replica_server_name, ag.name AS ag_name, ar.owner_sid, SUSER_SNAME(ar.owner_sid) AS name FROM sys.availability_replicas ar INNER JOIN sys.availability_groups ag ON ag.group_id = ar.group_id WHERE ar.replica_server_name = SERVERPROPERTY('ServerName')"
 
 $Query3 = "SELECT ag.name FROM sys.availability_groups ag
             INNER JOIN sys.availability_replicas ar ON ag.group_id = ar.group_id
@@ -37,8 +34,8 @@ while (!$SQLSuccess) {
 }
 
 $db_startname = (Get-CimInstance -ClassName Win32_Service -Filter "Name='MSSQLSERVER'").StartName
-$db_endpointowner = (Invoke-Sqlcmd -ServerInstance $env:computername -Database master -TrustServerCertificate:$true -Query $Query1).EndpointOwner
-$db_agowner = (Invoke-Sqlcmd -ServerInstance $env:computername -Database master -TrustServerCertificate:$true -Query $Query2).name
+$db_endpointowner = (Invoke-Sqlcmd -ServerInstance localhost -Database master -TrustServerCertificate:$true -Query $Query1).EndpointOwner
+$db_agowner = (Invoke-Sqlcmd -ServerInstance localhost -Database master -TrustServerCertificate:$true -Query $Query2).name
 
 Write-Log -Value "Service Start Name: $db_startname"
 Write-Log -Value "Endpoint Owner: $db_endpointowner"
@@ -58,7 +55,7 @@ if ($db_agowner -ne $db_startname) {
     [bool]$SQLSuccess = $false
     while (!$SQLSuccess) {
         try {
-            Invoke-Sqlcmd -ServerInstance $env:computername -Database master -TrustServerCertificate:$true -Query $db_change_sql -ErrorAction Stop
+            Invoke-Sqlcmd -ServerInstance localhost -Database master -TrustServerCertificate:$true -Query $db_change_sql -ErrorAction Stop
             $SQLSuccess = $true
         }
         catch {
@@ -81,7 +78,7 @@ if ($db_endpointowner -ne $db_startname) {
     [bool]$SQLSuccess = $false
     while (!$SQLSuccess) {
         try {
-            Invoke-Sqlcmd -ServerInstance $env:computername -Database master -TrustServerCertificate:$true -Query $db_change_sql -ErrorAction Stop
+            Invoke-Sqlcmd -ServerInstance localhost -Database master -TrustServerCertificate:$true -Query $db_change_sql -ErrorAction Stop
             $SQLSuccess = $true
         }
         catch {
