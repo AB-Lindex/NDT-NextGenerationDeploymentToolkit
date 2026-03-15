@@ -57,6 +57,29 @@ if (-not $machineConfig.DeploymentSteps) {
     exit 0
 }
 
+# Build a flat effective-settings hashtable: direct machine properties first,
+# then any properties from referenced Sections (machine-level values take precedence).
+# This allows script Parameters to be resolved from shared sections (e.g. SQLAO).
+$effectiveSettings = @{}
+foreach ($prop in $machineConfig.PSObject.Properties) {
+    if ($prop.Name -notin @('Sections', 'DeploymentSteps', 'DeploymentSteps_legacy')) {
+        $effectiveSettings[$prop.Name] = $prop.Value
+    }
+}
+if ($machineConfig.Sections) {
+    foreach ($sectionProp in $machineConfig.Sections.PSObject.Properties) {
+        $sectionData = $customSettings.($sectionProp.Value)
+        if ($sectionData) {
+            foreach ($p in $sectionData.PSObject.Properties) {
+                if (-not $effectiveSettings.ContainsKey($p.Name)) {
+                    $effectiveSettings[$p.Name] = $p.Value
+                }
+            }
+        }
+    }
+}
+Write-Log "Effective settings keys: $($effectiveSettings.Keys -join ', ')" -ForegroundColor Gray
+
 # Get the deployment group reference(s) - can be string or array
 $deploymentGroupRefs = $machineConfig.DeploymentSteps
 if ($deploymentGroupRefs -is [string]) {
@@ -329,17 +352,19 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     Write-Log "Script: $scriptPath" -ForegroundColor Gray
     Write-Log "PowerShell: $psVersion" -ForegroundColor Gray
     
-    # Build script parameters if defined in Deployment.json
+    # Build script parameters if defined in Deployment.json.
+    # Look up each parameter from $effectiveSettings, which merges the machine's
+    # direct properties with all values from its referenced Sections blocks.
     $scriptParams = @{}
     if ($stepSection.Parameters) {
         Write-Log 'Parameters:' -ForegroundColor Gray
         foreach ($paramName in $stepSection.Parameters) {
-            if ($machineConfig.PSObject.Properties.Name -contains $paramName) {
-                $paramValue = $machineConfig.$paramName
+            if ($effectiveSettings.ContainsKey($paramName)) {
+                $paramValue = $effectiveSettings[$paramName]
                 $scriptParams[$paramName] = $paramValue
                 Write-Log "  $paramName = $paramValue" -ForegroundColor Gray
             } else {
-                Write-Log "Parameter '$paramName' not found in machine configuration" -Level WARN
+                Write-Log "Parameter '$paramName' not found in machine configuration or any referenced section" -Level WARN
             }
         }
     }

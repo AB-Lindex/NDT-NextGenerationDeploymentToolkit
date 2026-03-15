@@ -27,6 +27,18 @@
     },
     "DeploymentSteps": ["SQL2025"]
   },
+  "00:15:5D:02:59:13": {
+    "Computername": "SQL43",
+    "IPAddress": "10.0.3.63/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp",
+      "SQLAO": "SQLAO"
+    },
+    "DeploymentSteps": ["SQL2025"]
+  },
   "00:15:5D:03:9C:12": {
     "OS": "WIN2025DCC",
     "Computername": "SQL01",
@@ -128,7 +140,7 @@
     "SAPWD": "Qantas-777",
     "sqlpfxfile": "sql-listen04.corp.dev.pfx",
     "PFXPwd": "1q2w",
-    "SQLAONodes": "SQL41,SQL42",
+    "SQLAONodes": "SQL41,SQL42.SQL43",
     "SQLAOgMSA": "gMSAAO04",
     "SQLAOClusterName": "sql-cluster04",
     "SQLAOListenerName": "sql-listen04",

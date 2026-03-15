@@ -87,17 +87,6 @@ if (-not $customSettings.$macAddress) {
 }
 
 $machineConfig = $customSettings.$macAddress
-if (-not $machineConfig.OS) {
-    Write-Host "ERROR: OS field not found in configuration for MAC address: $macAddress" -ForegroundColor Red
-    Write-Host "Machine configuration:" -ForegroundColor Yellow
-    $machineConfig | ConvertTo-Json | Write-Host -ForegroundColor Gray
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
-Write-Host "  OS          : $($machineConfig.OS)" -ForegroundColor Cyan
-Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
 
 # ------------------------------------------------------------------
 # STEP 2 - Resolve and validate OS / WIM
@@ -105,18 +94,23 @@ Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cya
 $osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
 
 if (-not $osInfo -or -not $osInfo.Path -or -not $osInfo.Index) {
-    Write-Host "ERROR: Get-OS.ps1 returned no result for OS key '$($machineConfig.OS)'" -ForegroundColor Red
-    Write-Host "Check that '$($machineConfig.OS)' exists in Z:\Control\OS.json" -ForegroundColor Yellow
+    Write-Host "ERROR: Could not resolve OS for MAC address: $macAddress" -ForegroundColor Red
+    Write-Host "Ensure an OS key is set in the MAC block or a referenced section, and exists in OS.json" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
 
 $wimPath  = $osInfo.Path
 $wimIndex = $osInfo.Index
+$osKey    = $osInfo.OsKey
+
+Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
+Write-Host "  OS          : $osKey" -ForegroundColor Cyan
+Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
 
 if (-not (Test-Path $wimPath)) {
     Write-Host "ERROR: WIM file not found at: $wimPath" -ForegroundColor Red
-    Write-Host "  OS key   : $($machineConfig.OS)" -ForegroundColor Yellow
+    Write-Host "  OS key   : $osKey" -ForegroundColor Yellow
     Write-Host "  Path     : $wimPath" -ForegroundColor Yellow
     Write-Host "  Index    : $wimIndex" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"

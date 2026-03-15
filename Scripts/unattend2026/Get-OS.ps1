@@ -20,10 +20,20 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# Get OS reference
+# Get OS reference — check MAC block first, then fall back to referenced sections
 $osName = $machineConfig.OS
+if (-not $osName -and $machineConfig.Sections) {
+    foreach ($sectionRef in $machineConfig.Sections.PSObject.Properties.Value) {
+        $sectionData = $customSettings.$sectionRef
+        if ($sectionData -and $sectionData.OS) {
+            $osName = $sectionData.OS
+            Write-Host "OS resolved from section '$sectionRef': $osName" -ForegroundColor Cyan
+            break
+        }
+    }
+}
 if (-not $osName) {
-    Write-Error "No OS specified in configuration for MAC address: $macAddress"
+    Write-Error "No OS specified in configuration for MAC address: $MACAddress"
     exit 1
 }
 
@@ -51,8 +61,9 @@ $fullPath = "Z:\$wimPath"
 Write-Host "WIM Path: $fullPath" -ForegroundColor Green
 Write-Host "WIM Index: $wimIndex" -ForegroundColor Green
 
-# Return path and index as object
+# Return path, index, and resolved OS key as object
 return [PSCustomObject]@{
+    OsKey = $osName
     Path  = $fullPath
     Index = $wimIndex
 }
