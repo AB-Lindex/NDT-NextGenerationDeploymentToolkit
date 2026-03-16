@@ -1,132 +1,128 @@
 {
   "General Settings": {
-    "Step1": {
+    "Step10": {
       "Description": "Admin password never expires",
       "Reference": "Admin password never expires"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Disable WAC popup",
       "Reference": "DisableWACPopup"
     },
-    "Step3": {
+    "Step30": {
       "Description": "IE security off",
       "Reference": "IESecurityOff"
     },
-    "Step4": {
+    "Step40": {
       "Description": "IE skip settings",
       "Reference": "IESkipSettings"
     }
   },
   "SMC": {
-    "Step1": {
+    "Step10": {
       "Description": "Install SMC",
       "Reference": "Install SMC"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Start SMC",
       "Reference": "Start SMC"
     }
   },
   "Reboot and App2026": {
-    "Step1": {
+    "Step10": {
       "Description": "Reboot server",
       "Reference": "Reboot"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Install App2026",
       "Reference": "Install App2026"
     }
   },
   "ForSRV03": {
-    "Step1": {
+    "Step10": {
       "Description": "Install App2026",
       "Reference": "Install App2026"
     }
   },
   "SQL2025": {
-    "Step1": {
+    "Step10": {
       "Description": "ADLogon",
       "Reference": "ADLogon"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Reboot server",
       "Reference": "Reboot"
     },
-    "Step3": {
-      "Description": "Make a pause",
-      "Reference": "Pause"
-    },
-    "Step4": {
+    "Step40": {
       "Description": "Install SQL 2025",
       "Reference": "Install SQL 2025"
     }
   },
   "Powershell7": {
-    "Step1": {
+    "Step10": {
       "Description": "Install Powershell 7",
       "Reference": "Install PowerShell 7"
     }
   },
   "RebootMachine": {
-    "Step1": {
+    "Step10": {
       "Description": "Reboot server",
       "Reference": "Reboot"
     }
   },
   "CreateReferenceImage": {
-    "Step1": {
+    "Step10": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Install Windows updates",
       "Reference": "WindowsUpdate"
     },
-    "Step3": {
+    "Step30": {
       "Description": "Cleanup image before sysprep",
       "Reference": "Cleanup Image"
     },
-    "Step4": {
+    "Step40": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
     }
   },
   "Deployment": {
-    "Step1": {
+    "Step10": {
       "Description": "Install WDS role",
       "Reference": "InstallWDS"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Install ADK",
       "Reference": "ADK"
     },
-    "Step3": {
+    "Step30": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
     }
   },
   "MakePause": {
-    "Step1": {
+    "Step10": {
       "Description": "Make a pause",
       "Reference": "Pause"
     }
   },
   "iPXE": {
-    "Step1": {
+    "Step10": {
       "Description": "Install WDS role",
       "Reference": "InstallWDS"
     },
-    "Step2": {
+    "Step20": {
       "Description": "Install ADK",
       "Reference": "ADK"
     },
-    "Step3": {
+    "Step30": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
     }
   },
   "NPP": {
-    "Step1": {
+    "Step10": {
       "Description": "Install Notepad++",
       "Reference": "InstallNPP"
     }
