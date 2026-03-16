@@ -140,7 +140,7 @@
     "SAPWD": "Qantas-777",
     "sqlpfxfile": "sql-listen04.corp.dev.pfx",
     "PFXPwd": "1q2w",
-    "SQLAONodes": "SQL41,SQL42.SQL43",
+    "SQLAONodes": "SQL41,SQL42,SQL43",
     "SQLAOgMSA": "gMSAAO04",
     "SQLAOClusterName": "sql-cluster04",
     "SQLAOListenerName": "sql-listen04",
