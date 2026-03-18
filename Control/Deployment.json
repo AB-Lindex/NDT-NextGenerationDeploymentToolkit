@@ -62,6 +62,10 @@
     "Script": "\\Applications\\Nuget\\install.ps1",
     "Description": "Install Nuget provider for PowerShell"
   },
+  "Install NDT": {
+    "Script": "\\Applications\\NDT Setup\\install.ps1",
+    "Description": "Install NDT deployment toolkit"
+  },
   "Pause": {
     "Type": "Pause",
     "Description": "Pause deployment — creates a desktop shortcut to resume"

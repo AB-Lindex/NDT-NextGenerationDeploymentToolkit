@@ -99,6 +99,10 @@
     "Step30": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
+    },
+    "Step40": {
+      "Description": "Install NDT",
+      "Reference": "Install NDT"
     }
   },
   "MakePause": {
