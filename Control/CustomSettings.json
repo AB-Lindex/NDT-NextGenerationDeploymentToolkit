@@ -113,9 +113,7 @@
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
-    },
-    "DeploymentSteps_legacy": ["General Settings","MakePause","SQL2025"],
-    "DeploymentSteps": ["ForSRV03"]
+    }
   },
   "Sweden": {
     "InputLocale": "sv-SE",
