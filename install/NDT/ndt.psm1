@@ -104,6 +104,16 @@
                     Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
                     Write-Verbose "  Removed .gitkeep: $($_.FullName)"
                 }
+
+            # Ensure mandatory share folders exist (git does not track empty directories)
+            $mandatoryFolders = @('Operating Systems', 'Reference', 'Scratch')
+            foreach ($folder in $mandatoryFolders) {
+                $folderPath = Join-Path $LocalPath $folder
+                if (-not (Test-Path $folderPath)) {
+                    New-Item -ItemType Directory -Path $folderPath -Force | Out-Null
+                    Write-Verbose "  Created mandatory folder: $folder"
+                }
+            }
         }
     } finally {
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
@@ -395,20 +405,20 @@ To skip WDS and build the WIM only:
         $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
         if (-not $customSettings.$DeploySection) { throw "Deploy section '$DeploySection' not found in CustomSettings.json." }
 
-        $deploySection = $customSettings.$DeploySection
-        Write-Verbose "  Using deploy section: '$DeploySection'"
-        $settingsObj   = [ordered]@{
-            Share    = $deploySection.Share
-            Username = $deploySection.Username
-            Password = $deploySection.Password
+        $deployCfg = $customSettings.$DeploySection
+        $settingsObj = [ordered]@{
+            Share    = $deployCfg.Share
+            Username = $deployCfg.Username
+            Password = $deployCfg.Password
         }
 
         # settings.json is injected directly into the WIM in Step 5 — the source-folder
         # copy (Scripts\unattend2026\WindowsPE\Deploy\settings.json) is intentionally
         # NOT modified so it stays as a safe placeholder in source control.
         Write-Host '  [OK] settings.json prepared (will be written into WIM in Step 5)' -ForegroundColor Green
-        Write-Verbose "  Share   : $($settingsObj.Share)"
-        Write-Verbose "  Username: $($settingsObj.Username)"
+        Write-Host "  Deploy section : $DeploySection" -ForegroundColor Gray
+        Write-Host "  Share          : $($settingsObj.Share)" -ForegroundColor Gray
+        Write-Host "  Username       : $($settingsObj.Username)" -ForegroundColor Gray
 
         # ── Step 2: Create fresh WinPE staging tree with copype ─────────────────
         # Always build from the clean ADK base — never patch an existing WIM.
@@ -576,17 +586,45 @@ cmd.exe /k
 
             if ($PSCmdlet.ShouldProcess('WDSServer', 'Stop service, replace boot image, start service')) {
                 $wdsImageName = 'NDT PE Boot 2026'
+                $wimLeaf      = Split-Path $wimFile -Leaf
+
+                # ── Find existing image name via wdsutil output (service must be running) ──
+                # Get-WdsBootImage is unreliable for FileName matching; parse wdsutil text
+                # output instead to get the exact registered display name.
+                Write-Host '  Checking for existing boot image...' -ForegroundColor Gray
+                $existingImageName = $null
+                $wdsRawOutput = (wdsutil /Get-AllImages /ImageType:Boot 2>&1) -join "`n"
+                # Each image block starts with "    Image Name:"; split on that boundary.
+                foreach ($block in ($wdsRawOutput -split '(?m)(?=^ {4}Image Name:)')) {
+                    if ($block -match '(?m)^ {4,}File Name:\s*(\S+)' -and $Matches[1].Trim() -eq $wimLeaf) {
+                        if ($block -match '(?m)^ {4}Image Name:\s*(.+)') {
+                            $existingImageName = $Matches[1].Trim()
+                        }
+                    }
+                }
+
+                if ($existingImageName) {
+                    Write-Host "  Found existing boot image: '$existingImageName' - removing database entry..." -ForegroundColor Gray
+                    wdsutil /Remove-Image /Image:"$existingImageName" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
+                } else {
+                    Write-Host '  No existing database entry found for this WIM.' -ForegroundColor Gray
+                }
 
                 Write-Host '  Stopping WDS service...' -ForegroundColor Gray
                 Stop-Service WDSServer -Force
                 Write-Host '  [OK] WDS stopped' -ForegroundColor Gray
 
-                Write-Host '  Removing old boot image...' -ForegroundColor Gray
-                # Try both our custom display name and the default WinPE metadata name.
-                # WDS stores the name from the WIM metadata on first add, not the /Name: argument,
-                # so the registered name may be either. Both failures are safe to ignore.
-                foreach ($nameToRemove in @($wdsImageName, 'Microsoft Windows PE (amd64)')) {
-                    wdsutil /Remove-Image /Image:"$nameToRemove" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
+                # ── Delete physical WIM from WDS image store ──────────────────────────
+                # wdsutil /Add-Image copies the WIM to RemoteInstall\Boot\x64\Images\.
+                # If that file already exists (even after a Remove-Image) it fails 0x50.
+                # Read the RemoteInstall path from the registry; fall back to the default.
+                $wdsRoot = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Parameters' `
+                    -Name RootDirectory -ErrorAction SilentlyContinue).RootDirectory
+                if (-not $wdsRoot) { $wdsRoot = 'C:\RemoteInstall' }
+                $physicalWim = Join-Path $wdsRoot "Boot\x64\Images\$wimLeaf"
+                if (Test-Path $physicalWim) {
+                    Remove-Item $physicalWim -Force
+                    Write-Host "  Deleted physical WIM from store: $physicalWim" -ForegroundColor Gray
                 }
 
                 Write-Host '  Adding new boot image...' -ForegroundColor Gray
