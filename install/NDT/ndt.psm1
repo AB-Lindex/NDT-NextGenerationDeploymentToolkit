@@ -257,6 +257,11 @@ function Build-NDTPEImage {
         directly in WDS. Implies -SkipISO. Use this when the WIM is already built and
         only the WDS boot-image registration needs to be refreshed.
 
+    .PARAMETER DeploySection
+        Name of the top-level key in CustomSettings.json to read share credentials from.
+        Default: Deploy. Use this when the NDT server being built uses an alternate
+        deploy section (e.g. DeployDC01).
+
     .EXAMPLE
         Build-NDTPEImage
 
@@ -287,7 +292,10 @@ function Build-NDTPEImage {
         [switch]$SkipISO,
 
         [Parameter()]
-        [switch]$RegisterOnly
+        [switch]$RegisterOnly,
+
+        [Parameter()]
+        [string]$DeploySection = 'Deploy'
     )
 
     # ── Verify Administrator ────────────────────────────────────────────────────
@@ -385,9 +393,10 @@ To skip WDS and build the WIM only:
         }
 
         $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
-        if (-not $customSettings.Deploy) { throw 'Deploy section not found in CustomSettings.json.' }
+        if (-not $customSettings.$DeploySection) { throw "Deploy section '$DeploySection' not found in CustomSettings.json." }
 
-        $deploySection = $customSettings.Deploy
+        $deploySection = $customSettings.$DeploySection
+        Write-Verbose "  Using deploy section: '$DeploySection'"
         $settingsObj   = [ordered]@{
             Share    = $deploySection.Share
             Username = $deploySection.Username

@@ -71,6 +71,7 @@
     "Computername": "NDT01",
     "IPAddress": "10.0.3.16/24",
     "AdminPassword": "Qantas-777",
+    "Deploy": "DeployDC01",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
@@ -163,6 +164,11 @@
   },
     "ADLogon": {
     "Username": "Corp\\ADLogon",
+    "Password": "P@ssw0rd2026"
+  },
+  "DeployDC01": {
+    "Share": "\\\\dc01.corp.dev\\Deploy2026",
+    "Username": "Corp\\Deploy2026",
     "Password": "P@ssw0rd2026"
   }
 }

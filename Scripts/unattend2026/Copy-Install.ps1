@@ -6,7 +6,6 @@ $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 # Get Deploy settings
 $customSettingsPath = "Z:\Control\CustomSettings.json"
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
-$deploySettings = $customSettings.Deploy
 
 # Get machine configuration by MAC address for AutoLogon password
 $machineConfig = $customSettings.$macAddress
@@ -14,6 +13,11 @@ if (-not $machineConfig) {
     Write-Error "No configuration found for MAC address: $macAddress"
     exit 1
 }
+
+# If the machine block specifies a Deploy section name, use that; otherwise fall back to the global Deploy section.
+$deploySectionName = if ($machineConfig.Deploy) { $machineConfig.Deploy } else { 'Deploy' }
+$deploySettings = $customSettings.$deploySectionName
+Write-Host "Using deploy section: '$deploySectionName'" -ForegroundColor Gray
 
 # Ensure C:\temp exists
 New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
