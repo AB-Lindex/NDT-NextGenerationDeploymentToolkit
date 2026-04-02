@@ -1,5 +1,5 @@
 {
-  "00:15:5D:03:9C:11": {
+  "00:15:5D:02:40:1F": {
     "Computername": "SQL41",
     "IPAddress": "10.0.3.61/24",
     "AdminPassword": "Qantas-777",
@@ -15,7 +15,7 @@
     },
     "DeploymentSteps": ["SQL2025"]
   },
-  "00:15:5D:03:9D:05": {
+  "00:15:5D:02:40:23": {
     "Computername": "SQL42",
     "IPAddress": "10.0.3.62/24",
     "AdminPassword": "Qantas-777",
@@ -27,7 +27,7 @@
     },
     "DeploymentSteps": ["SQL2025"]
   },
-  "00:15:5D:02:59:13": {
+  "00:15:5D:02:40:19": {
     "Computername": "SQL43",
     "IPAddress": "10.0.3.63/24",
     "AdminPassword": "Qantas-777",
@@ -79,7 +79,7 @@
     },
     "DeploymentSteps": ["General Settings","SMC", "Deployment"]
   },
-  "00:15:5D:02:56:01": {
+  "00:15:5D:02:40:0D": {
     "OS": "WIN2025DCG",
     "Computername": "srv02",
     "IPAddress": "10.0.3.22/24",
