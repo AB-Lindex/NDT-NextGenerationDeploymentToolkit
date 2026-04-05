@@ -93,10 +93,50 @@
   },
   "Install PSPKI": {
     "Script": "\\Applications\\PKI\\PSPKI\\Install.ps1",
-    "Description": "Install PSPKI module"
+    "Description": "Install PSPKI module",
+    "Powershell": "powershell5"
   },
   "Copy Root Cert to DC": {
     "Script": "\\Applications\\PKI\\RootCA\\CopyRootCertToDC.ps1",
     "Description": "Copy Root CA certificate to domain controller"
+  },
+  "Install ADDS": {
+    "Script": "\\Applications\\PKI\\ADDS\\InstallRolesFeatures.ps1",
+    "Description": "Install Active Directory Domain Services role"
+  },
+  "Configure ADDS": {
+    "Script": "\\Applications\\ADDS\\Configure.ps1",
+    "Description": "Configure Active Directory Domain Services"
+  },
+  "DNSSettings": {
+    "Script": "\\Applications\\PKI\\ADDS\\DNSSettings.ps1",
+    "Description": "Configure DNS settings"
+  },
+  "DHCPServer": {
+    "Script": "\\Applications\\PKI\\ADDS\\DHCPSettings.ps1",
+    "Description": "Configure DHCP Server",
+    "Parameters": [
+      "Computername",
+      "DomainDNSName",
+      "DHCPServerIP",
+      "BootServerIp",
+      "DHCPScopes0Name",
+      "DHCPScopes0StartIP",
+      "DHCPScopes0EndIP",
+      "DHCPScopes0SubnetMask",
+      "DHCPScopes0IP",
+      "DHCPScopes0OptionDNSDomainName",
+      "DHCPScopes0OptionDNSServer",
+      "DHCPScopes0OptionLease",
+      "DHCPScopes0OptionRouter"
+    ]
+  },
+  "ADDSFinished": {
+    "script": "\\Applications\\ADDSFinished\\ADDSFinished.ps1",
+    "Description": "Active Directory Domain Services configuration completed"
+  },
+  "RootCertInstall": {
+    "Script": "\\Applications\\PKI\\ADDS\\InstallRootCert.ps1",
+    "Description": "Install Root Certificate in Trusted Root Certification Authorities store"
   }
 }

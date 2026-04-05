@@ -152,5 +152,41 @@
       "Description": "Reboot server",
       "Reference": "Reboot"
     }
+  },
+  "ADDS": {
+    "Step10": {
+      "Description": "Install ADDS role",
+      "Reference": "Install ADDS"
+    },
+    "Step20": {
+      "Description": "Configure ADDS",
+      "Reference": "Configure ADDS"
+    },
+      "Step30": {
+        "Description": "Reboot server",
+        "Reference": "Reboot"
+      }
+  },
+  "DHCPServer": {
+    "Step10": {
+      "Description": "Configure DHCP",
+      "Reference": "Configure DHCP"
+    }
+  },
+  "DNSSettings": {
+    "Step10": {
+      "Description": "Configure DNS and forwarders",
+      "Reference": "ConfigureDNS"
+    }
+  },
+  "CertSetup": {
+    "Step10": {
+      "Description": "Configure DCCA settings",
+      "Reference": "Configure DCCA Settings"
+    },
+      "Step20": {
+      "Description": "Install PKI Module",
+      "Reference": "Install PSPKI"
+    }
   }
 }
