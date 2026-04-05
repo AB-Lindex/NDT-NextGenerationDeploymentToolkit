@@ -116,6 +116,21 @@
       "ADSettings": "ADJoinCorp"
     }
   },
+  "00:15:5D:02:40:17": {
+      "OS": "WIN2025DCG",
+      "Computername": "RootCA01",
+      "IPAddress": "10.0.1.101/24",
+      "AdminPassword": "Qantas-707",
+      "DefaultGateway": "10.0.1.1",
+      "DNSServers": "10.0.1.100",
+      "JoinDomain": "WORKGROUP",
+      "Locale": "Sweden",
+      "DeploymentSteps": ["General Settings","RootCA"],
+      "NDTName": "ndt01.corp.dev",
+      "NDTIP": "10.0.3.16"
+  },
+
+
   "Sweden": {
     "InputLocale": "sv-SE",
     "SystemLocale": "sv-SE",

@@ -130,5 +130,27 @@
       "Description": "Install Notepad++",
       "Reference": "InstallNPP"
     }
+  },
+  "RootCA": {
+    "Step20": {
+      "Description": "Install Root CA Roles and Features",
+      "Reference": "Root CA Roles and Features"
+    },
+    "Step30": {
+      "Description": "Configure Root CA",
+      "Reference": "Configure Root CA"
+    },
+    "Step40": {
+      "Description": "Install PKI Module",
+      "Reference": "Install PSPKI"
+    },
+    "Step50": {
+      "Description": "Copy Root Cert to DC",
+      "Reference": "Copy Root Cert to DC"
+    },
+    "Step60": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
   }
 }

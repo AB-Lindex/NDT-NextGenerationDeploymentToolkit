@@ -82,5 +82,21 @@
   "InstallNPP": {
     "Script": "\\Applications\\NPP\\install.ps1",
     "Description": "Install Notepad++"
+  },
+  "Root CA Roles and Features": {
+    "Script": "\\Applications\\PKI\\RootCA\\InstallRolesFeatures.ps1",
+    "Description": "Install Root CA roles and features"
+  },
+  "Configure Root CA": {
+    "Script": "\\Applications\\PKI\\RootCA\\ConfigureRootCA.ps1",
+    "Description": "Configure Root CA"
+  },
+  "Install PSPKI": {
+    "Script": "\\Applications\\PKI\\PSPKI\\Install.ps1",
+    "Description": "Install PSPKI module"
+  },
+  "Copy Root Cert to DC": {
+    "Script": "\\Applications\\PKI\\RootCA\\CopyRootCertToDC.ps1",
+    "Description": "Copy Root CA certificate to domain controller"
   }
 }
