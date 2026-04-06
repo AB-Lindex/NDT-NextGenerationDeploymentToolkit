@@ -4,7 +4,7 @@ $Features = @(
     'DNS',
     'GPMC',
     'RSAT-AD-PowerShell',
-    'RSAT-ADUC',
+    'RSAT-AD-AdminCenter',
     'RSAT-ADDS-Tools',
     'RSAT-DHCP',
     'RSAT-DNS-Server'

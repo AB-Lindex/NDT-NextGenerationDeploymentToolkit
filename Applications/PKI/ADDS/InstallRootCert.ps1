@@ -3,7 +3,7 @@ New-SmbShare -Name CertEnroll$ -Path C:\CertEnroll -FullAccess everyone
 
 while (!(Test-Path -Path C:\CertEnroll\*root*.crt)) {
    "waiting"
-   Start-Sleep 2
+   Start-Sleep -Seconds 10
 }
 
 foreach ($cert in Get-ChildItem -Path C:\CertEnroll\*root*.crt) {

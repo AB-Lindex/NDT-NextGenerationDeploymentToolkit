@@ -29,7 +29,7 @@ param (
 
 Add-DhcpServerInDC -Dnsname "$Computername.$DomainDNSName" -IpAddress $DHCPServerIP
 Add-DhcpServerSecurityGroup
-Set-ItemProperty �Path registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\ServerManager\Roles\12 �Name ConfigurationState �Value 2
+Set-ItemProperty -Path registry::HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\ServerManager\Roles\12 -Name ConfigurationState -Value 2
 
 Add-DhcpServerv4OptionDefinition -Name PXECLient -OptionId 60 -Type String
 

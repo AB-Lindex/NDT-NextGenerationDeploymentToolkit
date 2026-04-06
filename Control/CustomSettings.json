@@ -139,7 +139,7 @@
       "DNSServers": "127.0.0.1",
       "JoinDomain": "WORKGROUP",
       "Locale": "Sweden",
-      "DeploymentSteps": ["General Settings","ADDS","DHCPServer","ADDSFinished","DNSSettings","CertSetup"],
+      "DeploymentSteps": ["General Settings","ADDS","DHCPServer","ADDSFinished","DNSSettings","ADCS Management Tools","Install Root Cert"],
       "DomainDNSName": "ad01.corp",
       "DomainNetBiosName": "AD01",
       "sitename": "site1",

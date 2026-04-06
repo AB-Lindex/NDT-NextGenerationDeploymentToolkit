@@ -162,10 +162,10 @@
       "Description": "Configure ADDS",
       "Reference": "Configure ADDS"
     },
-      "Step30": {
-        "Description": "Reboot server",
-        "Reference": "Reboot"
-      }
+    "Step30": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
   },
   "DHCPServer": {
     "Step10": {
@@ -173,20 +173,32 @@
       "Reference": "Configure DHCP"
     }
   },
+  "ADDSFinished": {
+    "Step10": {
+      "Description": "Marks ADDS as finished",
+      "Reference": "ADDSFinished"
+    }
+  },
   "DNSSettings": {
     "Step10": {
       "Description": "Configure DNS and forwarders",
-      "Reference": "ConfigureDNS"
+      "Reference": "Configure DNS"
     }
   },
-  "CertSetup": {
+  "ADCS Management Tools": {
     "Step10": {
-      "Description": "Configure DCCA settings",
-      "Reference": "Configure DCCA Settings"
+      "Description": "Install Active Directory Certificate Services management tools",
+      "Reference": "ADCS Management Tools"
     },
       "Step20": {
       "Description": "Install PKI Module",
       "Reference": "Install PSPKI"
     }
-  }
+  },
+  "Install Root Cert": {
+    "Step10": {
+      "Description": "Install Root Certificate in Trusted Root Certification Authorities store",
+      "Reference": "RootCertInstall"
+    }
+   }
 }

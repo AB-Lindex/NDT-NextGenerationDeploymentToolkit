@@ -105,14 +105,21 @@
     "Description": "Install Active Directory Domain Services role"
   },
   "Configure ADDS": {
-    "Script": "\\Applications\\ADDS\\Configure.ps1",
-    "Description": "Configure Active Directory Domain Services"
+    "Script": "\\Applications\\PKI\\ADDS\\ADDSConfigure.ps1",
+    "Description": "Configure Active Directory Domain Services",
+    "Parameters": [
+      "DomainDNSName",
+      "DomainNetBiosName",
+      "DomainLevel",
+      "ForestLevel",
+      "AdminPassword"
+    ]
   },
-  "DNSSettings": {
+  "Configure DNS": {
     "Script": "\\Applications\\PKI\\ADDS\\DNSSettings.ps1",
     "Description": "Configure DNS settings"
   },
-  "DHCPServer": {
+  "Configure DHCP": {
     "Script": "\\Applications\\PKI\\ADDS\\DHCPSettings.ps1",
     "Description": "Configure DHCP Server",
     "Parameters": [
@@ -132,8 +139,12 @@
     ]
   },
   "ADDSFinished": {
-    "script": "\\Applications\\ADDSFinished\\ADDSFinished.ps1",
+    "Script": "\\Applications\\ADDSFinished\\ADDSFinished.ps1",
     "Description": "Active Directory Domain Services configuration completed"
+  },
+  "ADCS Management tools": {
+    "Script": "\\Applications\\PKI\\ADDS\\ADCS-mgmt.ps1",
+    "Description": "Install Active Directory Certificate Services management tools"
   },
   "RootCertInstall": {
     "Script": "\\Applications\\PKI\\ADDS\\InstallRootCert.ps1",
