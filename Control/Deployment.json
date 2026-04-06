@@ -149,5 +149,13 @@
   "RootCertInstall": {
     "Script": "\\Applications\\PKI\\ADDS\\InstallRootCert.ps1",
     "Description": "Install Root Certificate in Trusted Root Certification Authorities store"
+  },
+  "ADCS Enterprise Roles and Features": {
+    "Script": "\\Applications\\PKI\\Enterprise CA\\install Roles and Features.ps1",
+    "Description": "Install Active Directory Certificate Services Enterprise roles and features"
+  },
+  "Join AD": {
+    "Script": "\\Applications\\PKI\\Enterprise CA\\Join-AD.ps1",
+    "Description": "Join machine to Active Directory domain"
   }
 }

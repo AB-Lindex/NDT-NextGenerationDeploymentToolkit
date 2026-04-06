@@ -200,5 +200,25 @@
       "Description": "Install Root Certificate in Trusted Root Certification Authorities store",
       "Reference": "RootCertInstall"
     }
+   },
+   "ADCS Enterprise Roles and Features": {
+    "Step10": {
+      "Description": "Install ADCS Enterprise Roles and Features",
+      "Reference": "ADCS Enterprise Roles and Features"
+    }
+   },
+   "AD Join": {
+    "Step10": {
+      "Description": "Join machine to AD domain",
+      "Reference": "Join-AD"
+    },
+    "Step20": {
+      "Description": "Configure AD Logon",
+      "Reference": "ADLogon.ps1"
+    },
+    "Step30": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
    }
 }
