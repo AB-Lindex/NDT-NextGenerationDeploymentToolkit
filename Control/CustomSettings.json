@@ -13,7 +13,9 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": ["SQL2025"]
+    "DeploymentSteps": [
+      "SQL2025"
+    ]
   },
   "00:15:5D:02:40:23": {
     "Computername": "SQL42",
@@ -25,7 +27,9 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": ["SQL2025"]
+    "DeploymentSteps": [
+      "SQL2025"
+    ]
   },
   "00:15:5D:02:40:19": {
     "Computername": "SQL43",
@@ -37,7 +41,9 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": ["SQL2025"]
+    "DeploymentSteps": [
+      "SQL2025"
+    ]
   },
   "00:15:5D:03:9C:12": {
     "OS": "WIN2025DCC",
@@ -52,7 +58,9 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["SQL2025"]
+    "DeploymentSteps": [
+      "SQL2025"
+    ]
   },
   "00:15:5D:03:9D:07": {
     "OS": "WIN2025DCG",
@@ -64,7 +72,10 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","iPXE"]
+    "DeploymentSteps": [
+      "General Settings",
+      "iPXE"
+    ]
   },
   "00:15:5D:03:9C:14": {
     "OS": "WIN2025DCG",
@@ -77,7 +88,11 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","SMC", "Deployment"]
+    "DeploymentSteps": [
+      "General Settings",
+      "SMC",
+      "Deployment"
+    ]
   },
   "00:15:5D:02:40:0D": {
     "OS": "WIN2025DCG",
@@ -91,7 +106,10 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": ["General Settings","NPP"]
+    "DeploymentSteps": [
+      "General Settings",
+      "NPP"
+    ]
   },
   "00:15:5D:02:56:16": {
     "OS": "WIN2025DC",
@@ -101,7 +119,9 @@
       "Locale": "Sweden",
       "RefSettings": "RefSettings"
     },
-    "DeploymentSteps": ["CreateReferenceImage"]
+    "DeploymentSteps": [
+      "CreateReferenceImage"
+    ]
   },
   "00:15:5D:02:59:16": {
     "OS": "WIN2025DCC",
@@ -125,7 +145,10 @@
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
-    "DeploymentSteps": ["General Settings","RootCA"],
+    "DeploymentSteps": [
+      "General Settings",
+      "RootCA"
+    ],
     "NDTName": "ndt01.corp.dev",
     "NDTIP": "10.0.3.16",
     "DCPWD": "Qantas-717"
@@ -139,7 +162,15 @@
     "DNSServers": "127.0.0.1",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
-    "DeploymentSteps": ["General Settings","ADDS","DHCPServer","ADDSFinished","DNSSettings","ADCS Management Tools","Install Root Cert"],
+    "DeploymentSteps": [
+      "General Settings",
+      "ADDS",
+      "DHCPServer",
+      "ADDSFinished",
+      "DNSSettings",
+      "ADCS Management Tools",
+      "Install Root Cert"
+    ],
     "DomainDNSName": "ad01.corp",
     "DomainNetBiosName": "AD01",
     "sitename": "site1",
@@ -169,7 +200,15 @@
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
-    "DeploymentSteps": ["General Settings","ADCS Enterprise Roles and Features","AD Join","Setup IIS and Share","PKI Enterprise Setup","PSPKI Module","Create Certificate Templates"],
+    "DeploymentSteps": [
+      "General Settings",
+      "ADCS Enterprise Roles and Features",
+      "AD Join",
+      "Setup IIS and Share",
+      "PKI Enterprise Setup",
+      "PSPKI Module",
+      "Create Certificate Templates"
+    ],
     "CRLPath": "\\\\eca01.ad01.corp\\CertEnroll$"
   },
   "Sweden": {
@@ -218,7 +257,7 @@
     "Username": "Corp\\Deploy2026",
     "Password": "P@ssw0rd2026"
   },
-    "ADLogon": {
+  "ADLogon": {
     "Username": "Corp\\ADLogon",
     "Password": "P@ssw0rd2026"
   },
