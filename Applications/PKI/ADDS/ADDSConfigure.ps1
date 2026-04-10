@@ -3,10 +3,10 @@ param(
     [string]$DomainNetBiosName,
     [int]$DomainLevel,
     [int]$ForestLevel,
-    [string]$AdminPassword
+    [string]$SafeNodeAdminPwd
 )
 
-$SafeModePassword = ConvertTo-SecureString $AdminPassword -AsPlainText -Force
+$SafeModePassword = ConvertTo-SecureString $SafeNodeAdminPwd -AsPlainText -Force
 
 Install-ADDSForest `
     -DomainName                    $DomainDNSName `

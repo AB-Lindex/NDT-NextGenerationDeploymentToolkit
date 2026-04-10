@@ -183,6 +183,7 @@ Also exported by the module (see `ndt.psd1`):
 - `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.
+- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections, OS.json key, WIM file existence, DeploymentGroups.json groups, Deployment.json references, and script file paths. Returns `$true` / `$false`.
 
 ---
 

@@ -19,12 +19,14 @@ The machine PXE-boots from WDS and loads `Boot/boot2026.wim`.
 `Scripts/unattend2026/install.ps1` runs and performs:
 
 1. Checks for a capture-mode flag — if present it runs reference image capture instead of a normal deployment.
-2. Detects firmware type (BIOS/Gen1 or UEFI/Gen2) and partitions the disk with diskpart accordingly.
-3. Looks up the machine by MAC address in `Control/CustomSettings.json`.
-4. Resolves the OS image path and index from `Control/OS.json` and applies it with DISM.
-5. Copies `install2026.ps1` and a `settings.json` (deploy share credentials + local admin password) to `C:\temp`.
-6. Generates `unattend.xml` from the template, replacing placeholders with values from `CustomSettings.json`.
-7. Applies `unattend.xml` to the offline image and runs BCDBoot.
+2. Detects firmware type (BIOS/Gen1 or UEFI/Gen2) — recorded early but disk is not touched until all validations pass.
+3. Looks up the machine by MAC address in `Control/CustomSettings.json`; aborts if not found.
+4. Resolves and validates the OS image path and index from `Control/OS.json`; aborts if WIM file not found.
+5. All pre-flight checks passed — partitions disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
+6. Applies the OS image to `C:\` with DISM.
+7. Copies `install2026.ps1` and a `settings.json` (deploy share credentials + local admin password) to `C:\temp`.
+8. Generates `unattend.xml` from the template, replacing placeholders with values from `CustomSettings.json`.
+9. Applies `unattend.xml` to the offline image and runs BCDBoot.
 
 ### Phase 2 — First boot and post-deployment steps
 
@@ -45,12 +47,14 @@ The machine PXE-boots from WDS and loads `Boot/boot2026.wim`.
 `Install-NDT.ps1` runs under PowerShell 7 and drives all post-deployment work:
 
 1. Reads the machine's deployment groups from `CustomSettings.json` (matched by MAC address).
-2. Loads the ordered steps for each group from `Deployment.json`.
+2. Loads the ordered steps for each group from `DeploymentGroups.json`; resolves each step's action from `Deployment.json`.
 3. Tracks completed steps in `C:\temp\install-steps.json` so deployment can resume after a reboot exactly where it left off.
-4. Supports three step types:
+4. Supports five step types:
    - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe.
-   - **Reboot** — saves progress, writes AutoLogon credentials to the registry, calls `shutdown /r`, and exits with code `3010` so the parent script knows to write `reboot.flag` and skip cleanup.
+   - **Reboot** — saves progress, writes AutoLogon credentials to the registry, calls `shutdown /r /t 10`, and exits with code `3010` so the parent script knows to write `reboot.flag` and skip cleanup.
    - **AutoLogon** — switches the AutoAdminLogon account (e.g. to a domain account) mid-deployment, useful for operations that must run as an AD user (gMSA creation, cluster setup, SQL Always On, etc.).
+   - **WindowsUpdate** — runs the Windows Update script; if it exits `3010` the step is not marked complete and the engine exits `3010` (iterates until no reboot is needed); if it exits `0` the step is marked complete.
+   - **Pause** — creates a "Continue Deployment" shortcut on `C:\Users\Public\Desktop`, marks the step complete, and exits `3011` so the parent script removes RunOnce (a reboot while paused does not auto-resume).
 
 When all steps are done with no pending reboot, `install2026.ps1`:
 - Unmounts the deployment share.
@@ -68,7 +72,8 @@ Deploy2026/
 │   └── boot2026.wim              # WinPE boot image served by WDS
 ├── Control/
 │   ├── CustomSettings.json       # Per-machine config (keyed by MAC) + shared sections
-│   ├── Deployment.json           # Deployment groups and step definitions
+│   ├── DeploymentGroups.json     # Named groups of ordered steps referencing Deployment.json keys
+│   ├── Deployment.json           # Action definitions: scripts, Reboot, AutoLogon, etc.
 │   └── OS.json                   # OS image catalog (WIM path + index per OS key)
 ├── Operating Systems/            # WIM files for each OS
 ├── Applications/                 # General application installers
@@ -116,26 +121,28 @@ The central configuration file. Has two types of entries:
 "Deploy": { "Share": "\\\\server\\Deploy2026", "Username": "...", "Password": "..." }
 ```
 
-### Deployment.json
+### DeploymentGroups.json
 
-Defines named deployment groups, each containing ordered steps that reference action entries:
-
+Named groups of ordered steps. Each step has a `Reference` key into `Deployment.json`:
 ```json
-"SQL2025": {
-  "Step1": { "Description": "ADLogon",         "Reference": "ADLogon" },
-  "Step2": { "Description": "Reboot server",   "Reference": "Reboot" },
-  "Step3": { "Description": "Install App2026", "Reference": "Install App2026" }
+"General Settings": {
+  "Step1": { "Description": "Admin password never expires", "Reference": "Admin password never expires" },
+  "Step2": { "Description": "Disable WAC popup",           "Reference": "DisableWACPopup" }
 }
 ```
 
-Action entries define what to run:
+### Deployment.json
+
+Action definitions — what to run:
 ```json
 "Install App2026": {
   "Script": "\\Applications\\App2026\\install01.ps1",
   "Parameters": ["SQLServer", "AlwaysOn"]
 },
-"Reboot": { "Type": "Reboot" },
-"ADLogon": { "Type": "AutoLogon" }
+"Reboot":  { "Type": "Reboot" },
+"ADLogon": { "Type": "AutoLogon" },
+"WindowsUpdate": { "Type": "WindowsUpdate", "Script": "\\Applications\\WindowsUpdate\\install.ps1" },
+"Pause":   { "Type": "Pause", "Description": "Pause deployment for manual intervention" }
 ```
 
 ### OS.json

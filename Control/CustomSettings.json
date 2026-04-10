@@ -145,6 +145,7 @@
     "sitename": "site1",
     "DomainLevel": 10,
     "ForestLevel": 10,
+    "SafeNodeAdminPwd": "Qantas-717",
     "DHCPScopes0Name": "sc01",
     "DHCPScopes0StartIP": "10.0.1.40",
     "DHCPScopes0EndIP": "10.0.1.60",
