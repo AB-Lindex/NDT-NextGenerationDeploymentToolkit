@@ -5,11 +5,13 @@ param(
 )
 
 $jsonPath = "Z:\Control\CustomSettings.json"
+$sectionsPath = "Z:\Control\Sections.json"
 $templatePath = "Z:\Scripts\unattend2026\unattend.xml"
 $outputPath = "c:\temp\unattend.xml"
 
 # Load JSON content
 $config = Get-Content -Path $jsonPath -Raw | ConvertFrom-Json
+$sectionsCatalog = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 
 Write-Host "Using MAC Address: $MACAddress" -ForegroundColor Yellow
 
@@ -26,7 +28,7 @@ if ($machineConfig.Sections) {
     foreach ($sectionProperty in $machineConfig.Sections.PSObject.Properties) {
         $sectionName = $sectionProperty.Name
         $sectionReference = $sectionProperty.Value
-        $sectionData = $config.$sectionReference
+        $sectionData = $sectionsCatalog.$sectionReference
         
         if ($sectionData) {
             $sections[$sectionName] = $sectionData

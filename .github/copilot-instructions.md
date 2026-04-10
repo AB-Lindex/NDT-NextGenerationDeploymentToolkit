@@ -1,7 +1,7 @@
 # NDT — Copilot Context
 
 NDT (Next Deployment Tool) is a lightweight PowerShell-based replacement for MDT (EOL).
-No GUI. No XML wizards. Everything is driven by PowerShell 5/7 and three JSON files.
+No GUI. No XML wizards. Everything is driven by PowerShell 5/7 and four JSON files.
 WDS/PXE handles network boot. The deploy share is a standard Windows SMB share.
 
 ---
@@ -12,7 +12,8 @@ WDS/PXE handles network boot. The deploy share is a standard Windows SMB share.
 Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\Deploy2026)
 ├── Boot/boot2026.wim              ← WinPE image served by WDS
 ├── Control/
-│   ├── CustomSettings.json        ← per-machine config keyed by MAC + shared sections
+│   ├── CustomSettings.json        ← per-machine config keyed by MAC address only
+│   ├── Sections.json              ← shared named sections (locale, network, AD, deploy credentials)
 │   ├── DeploymentGroups.json      ← named groups: ordered steps referencing Deployment.json keys
 │   ├── Deployment.json            ← action definitions: scripts, Reboot, AutoLogon
 │   └── OS.json                    ← OS catalog: key → WIM path + index
@@ -95,9 +96,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 
 ### CustomSettings.json
 
-Two kinds of top-level keys:
-
-**MAC address block** — one per machine:
+MAC address blocks only — one per machine:
 ```jsonc
 "00:15:5D:02:56:01": {
   "OS": "WIN2025DCG",          // key into OS.json
@@ -107,7 +106,7 @@ Two kinds of top-level keys:
   "SQLServer": "SQL2025",       // arbitrary extra keys passed as script parameters
   "AlwaysOn": "AO2025",
   "Sections": {
-    "Locale": "Sweden",         // merged into the machine's effective settings
+    "Locale": "Sweden",         // reference keys into Sections.json
     "NetworkSettings": "NicAuto",
     "ADSettings": "ADJoinCorp"
   },
@@ -115,7 +114,9 @@ Two kinds of top-level keys:
 }
 ```
 
-**Named section block** — shared, referenced by name:
+### Sections.json
+
+Shared named sections, referenced by name from MAC blocks. Merged into effective settings at deploy time:
 ```jsonc
 "Sweden":      { "InputLocale": "sv-SE", "SystemLocale": "sv-SE", "UILanguage": "sv-SE", "UserLocale": "sv-SE", "TimeZone": "W. Europe Standard Time" },
 "NicAuto":     { "DefaultGateway": "10.0.3.1", "DNSServers": "10.0.3.11" },
@@ -176,14 +177,14 @@ Parameters:
 | `DeployPassword` | **mandatory** | *(SecureString — prompted if omitted)* |
 | `RepoZipUrl` | optional | GitHub main-branch ZIP of this repo |
 
-Downloads the repository ZIP from GitHub → extracts into `LocalPath` → removes repo-only artefacts (`.github`, `.vscode`, `.gitignore`, `README.md`) that must not exist on a live deployment share → stamps the `Deploy` section of `Control\CustomSettings.json` with the supplied parameters → creates SMB share → grants deploy account Full Access → revokes Everyone access.
+Downloads the repository ZIP from GitHub → extracts into `LocalPath` → removes repo-only artefacts (`.github`, `.vscode`, `.gitignore`, `README.md`) that must not exist on a live deployment share → stamps the `Deploy` section of `Control\Sections.json` with the supplied parameters → creates SMB share → grants deploy account Full Access → revokes Everyone access.
 
 Also exported by the module (see `ndt.psd1`):
 - `Build-NDTPEImage` — builds the WinPE WIM + optional ISO; updates WDS boot image.
 - `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.
-- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections, OS.json key, WIM file existence, DeploymentGroups.json groups, Deployment.json references, and script file paths. Returns `$true` / `$false`.
+- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentGroups.json groups, Deployment.json references, and script file paths. Returns `$true` / `$false`.
 
 ---
 
@@ -191,6 +192,7 @@ Also exported by the module (see `ndt.psd1`):
 
 - All paths inside JSON files use **backslash**, rooted at the deploy share root (e.g. `\Applications\App2026\install01.ps1`).
 - MAC addresses in `CustomSettings.json` are **colon-separated, uppercase**.
+- Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` contains MAC address blocks only.
 - `install2026.ps1` runs as **PS 5** (RunOnce/FirstLogonCommands constraint); anything needing PS 7 runs inside `Install-NDT.ps1`.
 - Step progress is persisted to `C:\temp\install-steps.json` — never delete this during a deployment.
 - `C:\temp\settings.json` contains plaintext credentials and is deleted at the end of deployment.

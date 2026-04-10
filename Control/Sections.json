@@ -1,0 +1,57 @@
+{
+  "Sweden": {
+    "InputLocale": "sv-SE",
+    "SystemLocale": "sv-SE",
+    "UILanguage": "sv-SE",
+    "UserLocale": "sv-SE",
+    "TimeZone": "W. Europe Standard Time"
+  },
+  "NicAuto": {
+    "DefaultGateway": "10.0.3.1",
+    "DNSServers": "10.0.3.11"
+  },
+  "ADJoinCorp": {
+    "JoinDomain": "corp.dev",
+    "Domain": "corp",
+    "OU": "ou=Servers,dc=corp,dc=dev",
+    "User": "ADJoin2026",
+    "Password": "P@ssw0rd2026"
+  },
+  "SQLAO": {
+    "OS": "WIN2025DCCSQL",
+    "SAPWD": "Qantas-777",
+    "sqlpfxfile": "sql-listen04.corp.dev.pfx",
+    "PFXPwd": "1q2w",
+    "SQLAONodes": "SQL41,SQL42,SQL43",
+    "SQLAOgMSA": "gMSAAO04",
+    "SQLAOClusterName": "sql-cluster04",
+    "SQLAOListenerName": "sql-listen04",
+    "RefSAPWD": "P@ssw0rd2026"
+  },
+  "RefSettings": {
+    "Sysprep": "Generalize",
+    "Shutdown": "Shutdown",
+    "IPAddress": "DHCP",
+    "DefaultGateway": "",
+    "DNSServers": "",
+    "JoinDomain": "WORKGROUP",
+    "Domain": "",
+    "OU": "",
+    "User": "",
+    "Password": ""
+  },
+  "Deploy": {
+    "Share": "\\\\ndt01.corp.dev\\Deploy2026",
+    "Username": "Corp\\Deploy2026",
+    "Password": "P@ssw0rd2026"
+  },
+  "ADLogon": {
+    "Username": "Corp\\ADLogon",
+    "Password": "P@ssw0rd2026"
+  },
+  "DeployDC01": {
+    "Share": "\\\\dc01.corp.dev\\Deploy2026",
+    "Username": "Corp\\Deploy2026",
+    "Password": "P@ssw0rd2026"
+  }
+}

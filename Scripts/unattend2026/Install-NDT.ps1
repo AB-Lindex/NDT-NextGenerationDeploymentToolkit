@@ -36,6 +36,10 @@ $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 $customSettingsPath = "Z:\Control\CustomSettings.json"
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 
+# Load Sections.json (shared named sections)
+$sectionsPath = "Z:\Control\Sections.json"
+$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
+
 # Load DeploymentGroups.json (groups → ordered steps with References)
 $deploymentGroupsPath = "Z:\Control\DeploymentGroups.json"
 $deploymentGroups = Get-Content -Path $deploymentGroupsPath -Raw | ConvertFrom-Json
@@ -68,7 +72,7 @@ foreach ($prop in $machineConfig.PSObject.Properties) {
 }
 if ($machineConfig.Sections) {
     foreach ($sectionProp in $machineConfig.Sections.PSObject.Properties) {
-        $sectionData = $customSettings.($sectionProp.Value)
+        $sectionData = $sections.($sectionProp.Value)
         if ($sectionData) {
             foreach ($p in $sectionData.PSObject.Properties) {
                 if (-not $effectiveSettings.ContainsKey($p.Name)) {
@@ -277,10 +281,10 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     if ($stepSection.Type -eq "AutoLogon") {
         Write-Log 'Configuring new AutoLogon credentials...' -ForegroundColor Yellow
 
-        # Look up credentials from CustomSettings.json using the step reference as the key
-        $autoLogonConfig = $customSettings.$stepReference
+        # Look up credentials from Sections.json using the step reference as the key
+        $autoLogonConfig = $sections.$stepReference
         if (-not $autoLogonConfig) {
-            Write-Log "AutoLogon section '$stepReference' not found in CustomSettings.json - skipping" -Level WARN
+            Write-Log "AutoLogon section '$stepReference' not found in Sections.json - skipping" -Level WARN
             continue
         }
 

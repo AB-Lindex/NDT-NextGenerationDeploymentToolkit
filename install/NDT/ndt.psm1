@@ -121,26 +121,26 @@
     }
     #endregion
 
-    #region ── Stamp Deploy section of CustomSettings.json with parameters ────────
-    $controlDir           = Join-Path $LocalPath 'Control'
-    $customSettingsDest   = Join-Path $controlDir 'CustomSettings.json'
+    #region ── Stamp Deploy section of Sections.json with parameters ─────────────
+    $controlDir   = Join-Path $LocalPath 'Control'
+    $sectionsDest = Join-Path $controlDir 'Sections.json'
 
-    if (-not (Test-Path $customSettingsDest)) {
-        Write-Warning "CustomSettings.json not found at '$customSettingsDest' - skipping stamp."
+    if (-not (Test-Path $sectionsDest)) {
+        Write-Warning "Sections.json not found at '$sectionsDest' - skipping stamp."
     } else {
-        if ($PSCmdlet.ShouldProcess($customSettingsDest, 'Stamp Deploy section')) {
+        if ($PSCmdlet.ShouldProcess($sectionsDest, 'Stamp Deploy section')) {
             # Decode the SecureString to plain text only long enough to write the file.
             $bstr          = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($DeployPassword)
             $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 
-            $settings = Get-Content $customSettingsDest -Raw | ConvertFrom-Json
+            $settings = Get-Content $sectionsDest -Raw | ConvertFrom-Json
             $settings.Deploy.Share    = $ShareUNC
             $settings.Deploy.Username = $DeployUsername
             $settings.Deploy.Password = $plainPassword
 
-            $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $customSettingsDest -Encoding UTF8
-            Write-Verbose 'Deploy section stamped in CustomSettings.json.'
+            $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $sectionsDest -Encoding UTF8
+            Write-Verbose 'Deploy section stamped in Sections.json.'
 
             $plainPassword = $null
         }
@@ -268,7 +268,7 @@ function Build-NDTPEImage {
         only the WDS boot-image registration needs to be refreshed.
 
     .PARAMETER DeploySection
-        Name of the top-level key in CustomSettings.json to read share credentials from.
+        Name of the top-level key in Sections.json to read share credentials from.
         Default: Deploy. Use this when the NDT server being built uses an alternate
         deploy section (e.g. DeployDC01).
 
@@ -347,10 +347,10 @@ To skip WDS and build the WIM only:
     }
 
     # ── Resolve paths ───────────────────────────────────────────────────────────
-    $wimFile            = Join-Path $LocalPath 'Boot\boot2026.wim'
-    $isoFile            = Join-Path $LocalPath 'Boot\boot2026.iso'
-    $customSettingsPath = Join-Path $LocalPath 'Control\CustomSettings.json'
-    $winPEScriptDir     = Join-Path $LocalPath 'Scripts\unattend2026\WindowsPE'
+    $wimFile        = Join-Path $LocalPath 'Boot\boot2026.wim'
+    $isoFile        = Join-Path $LocalPath 'Boot\boot2026.iso'
+    $sectionsPath   = Join-Path $LocalPath 'Control\Sections.json'
+    $winPEScriptDir = Join-Path $LocalPath 'Scripts\unattend2026\WindowsPE'
     $deploySource       = Join-Path $winPEScriptDir 'Deploy'
     $unattendSource     = Join-Path $winPEScriptDir 'Unattend.xml'
 
@@ -398,14 +398,14 @@ To skip WDS and build the WIM only:
         # ── Step 1: Generate settings.json ─────────────────────────────────────
         Write-Host 'Step 1: Generating settings.json...' -ForegroundColor Cyan
 
-        if (-not (Test-Path $customSettingsPath)) {
-            throw "CustomSettings.json not found at: $customSettingsPath"
+        if (-not (Test-Path $sectionsPath)) {
+            throw "Sections.json not found at: $sectionsPath"
         }
 
-        $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
-        if (-not $customSettings.$DeploySection) { throw "Deploy section '$DeploySection' not found in CustomSettings.json." }
+        $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
+        if (-not $sections.$DeploySection) { throw "Deploy section '$DeploySection' not found in Sections.json." }
 
-        $deployCfg = $customSettings.$DeploySection
+        $deployCfg = $sections.$DeploySection
         $settingsObj = [ordered]@{
             Share    = $deployCfg.Share
             Username = $deployCfg.Username
@@ -1233,6 +1233,7 @@ function Test-NDTDeployment {
 
     # ── Control file paths ──────────────────────────────────────────────────────
     $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
+    $snPath = Join-Path $LocalPath 'Control\Sections.json'
     $djPath = Join-Path $LocalPath 'Control\Deployment.json'
     $dgPath = Join-Path $LocalPath 'Control\DeploymentGroups.json'
     $osPath = Join-Path $LocalPath 'Control\OS.json'
@@ -1240,20 +1241,22 @@ function Test-NDTDeployment {
     # ── [1] Control files ───────────────────────────────────────────────────────
     Write-Host "`n[1] Control files" -ForegroundColor White
     $csOk = Test-Path $csPath; Write-Check 'CustomSettings.json'   $csOk $csPath
+    $snOk = Test-Path $snPath; Write-Check 'Sections.json'         $snOk $snPath
     $djOk = Test-Path $djPath; Write-Check 'Deployment.json'       $djOk $djPath
     $dgOk = Test-Path $dgPath; Write-Check 'DeploymentGroups.json' $dgOk $dgPath
     $osOk = Test-Path $osPath; Write-Check 'OS.json'               $osOk $osPath
 
-    if (-not ($csOk -and $djOk -and $dgOk -and $osOk)) {
+    if (-not ($csOk -and $snOk -and $djOk -and $dgOk -and $osOk)) {
         Write-Host "`n  One or more control files missing — cannot continue." -ForegroundColor Red
         Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
         return $false
     }
 
-    $settings   = Get-Content $csPath -Raw | ConvertFrom-Json
-    $deployment = Get-Content $djPath -Raw | ConvertFrom-Json
-    $groups     = Get-Content $dgPath -Raw | ConvertFrom-Json
-    $osCatalog  = Get-Content $osPath -Raw | ConvertFrom-Json
+    $settings        = Get-Content $csPath -Raw | ConvertFrom-Json
+    $sectionsCatalog = Get-Content $snPath -Raw | ConvertFrom-Json
+    $deployment      = Get-Content $djPath -Raw | ConvertFrom-Json
+    $groups          = Get-Content $dgPath -Raw | ConvertFrom-Json
+    $osCatalog       = Get-Content $osPath -Raw | ConvertFrom-Json
 
     # ── [2] MAC entry ───────────────────────────────────────────────────────────
     Write-Host "`n[2] Machine entry" -ForegroundColor White
@@ -1280,7 +1283,7 @@ function Test-NDTDeployment {
         Write-Host "`n[4] Sections" -ForegroundColor White
         foreach ($sectionProp in $machine.Sections.PSObject.Properties) {
             $sectionName = $sectionProp.Value
-            $exists = [bool]$settings.PSObject.Properties[$sectionName]
+            $exists = [bool]$sectionsCatalog.PSObject.Properties[$sectionName]
             Write-Check "[$($sectionProp.Name)] '$sectionName'" $exists
         }
     }

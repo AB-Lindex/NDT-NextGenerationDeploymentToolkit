@@ -5,10 +5,12 @@ param(
 )
 
 $customSettingsPath = "Z:\Control\CustomSettings.json"
+$sectionsPath = "Z:\Control\Sections.json"
 $osJsonPath = "Z:\Control\OS.json"
 
 # Load JSON files
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 $osConfig = Get-Content -Path $osJsonPath -Raw | ConvertFrom-Json
 
 Write-Host "Using MAC Address: $MACAddress" -ForegroundColor Yellow
@@ -24,7 +26,7 @@ if (-not $machineConfig) {
 $osName = $machineConfig.OS
 if (-not $osName -and $machineConfig.Sections) {
     foreach ($sectionRef in $machineConfig.Sections.PSObject.Properties.Value) {
-        $sectionData = $customSettings.$sectionRef
+        $sectionData = $sections.$sectionRef
         if ($sectionData -and $sectionData.OS) {
             $osName = $sectionData.OS
             Write-Host "OS resolved from section '$sectionRef': $osName" -ForegroundColor Cyan

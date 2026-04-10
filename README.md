@@ -71,7 +71,8 @@ Deploy2026/
 ├── Boot/
 │   └── boot2026.wim              # WinPE boot image served by WDS
 ├── Control/
-│   ├── CustomSettings.json       # Per-machine config (keyed by MAC) + shared sections
+│   ├── CustomSettings.json       # Per-machine config (keyed by MAC address only)
+│   ├── Sections.json             # Shared named sections (locale, network, AD, deploy creds)
 │   ├── DeploymentGroups.json     # Named groups of ordered steps referencing Deployment.json keys
 │   ├── Deployment.json           # Action definitions: scripts, Reboot, AutoLogon, etc.
 │   └── OS.json                   # OS image catalog (WIM path + index per OS key)
@@ -96,9 +97,7 @@ Deploy2026/
 
 ### CustomSettings.json
 
-The central configuration file. Has two types of entries:
-
-**Per-machine block** (keyed by MAC address):
+The central configuration file. Contains one entry per machine, keyed by MAC address:
 ```json
 "00:15:5D:02:56:01": {
   "OS": "WIN2025DCG",
@@ -114,7 +113,9 @@ The central configuration file. Has two types of entries:
 }
 ```
 
-**Shared section blocks** (referenced by name from `Sections` or step `Reference`):
+### Sections.json
+
+Shared named sections referenced from MAC blocks. Merged into a machine's effective settings at deploy time:
 ```json
 "Sweden": { "InputLocale": "sv-SE", "UILanguage": "sv-SE", ... },
 "ADJoinCorp": { "JoinDomain": "corp.dev", "Domain": "corp", ... },
