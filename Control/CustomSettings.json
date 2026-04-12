@@ -145,6 +145,7 @@
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
+    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentSteps": [
       "General Settings",
       "RootCA"
@@ -162,6 +163,7 @@
     "DNSServers": "127.0.0.1",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
+    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentSteps": [
       "General Settings",
       "ADDS",
@@ -200,6 +202,7 @@
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
+    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentSteps": [
       "General Settings",
       "ADCS Enterprise Roles and Features",

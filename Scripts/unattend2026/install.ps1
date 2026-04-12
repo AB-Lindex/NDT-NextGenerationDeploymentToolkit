@@ -184,6 +184,20 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# ------------------------------------------------------------------
+# STEP 4b - Run optional PostPEScript (PS5) after image apply
+# ------------------------------------------------------------------
+if ($machineConfig.PostPEScript) {
+    $postScript = "Z:$($machineConfig.PostPEScript)"
+    if (Test-Path $postScript) {
+        Write-Host "Running PostPEScript: $postScript" -ForegroundColor Cyan
+        powershell.exe -ExecutionPolicy Bypass -File $postScript
+        Write-Host "PostPEScript completed with exit code $LASTEXITCODE" -ForegroundColor Cyan
+    } else {
+        Write-Host "WARNING: PostPEScript not found: $postScript" -ForegroundColor Yellow
+    }
+}
+
 # Copy and prepare install2026.ps1 with deployment share mapping
 & "Z:\Scripts\Unattend2026\Copy-Install.ps1"
 
