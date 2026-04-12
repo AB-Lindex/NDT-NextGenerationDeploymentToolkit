@@ -85,7 +85,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 4. Execute steps by type:
    - **Script** — run `.ps1` (default: pwsh/PS 7), `.ps1` with `"PowerShell": "powershell5"` (PS 5.1), or `.cmd`/`.bat` (cmd.exe). Optional `Parameters` array names keys to pull from `CustomSettings.json`.
    - **Reboot** — mark step complete, write AutoLogon to registry, `shutdown /r /t 10`, exit 3010.
-   - **AutoLogon** — switch the AutoAdminLogon account mid-deployment (used for AD/SQL operations); also updates `settings.json` so subsequent Reboot steps use the new credentials.
+   - **AutoLogon** — switch the AutoAdminLogon account mid-deployment (used for AD/SQL operations); also updates `settings.json` so subsequent Reboot steps use the new credentials. Credentials are resolved by looking up the step's `Reference` name as a key in `Sections.json` (`Username` + `Password`). Multiple named entries (e.g. `ADLogon-AD01`, `ADLogon-AD02`) allow logging on to different Active Directories from the same step engine.
    - **WindowsUpdate** — runs the WU script; if it exits 3010 the step is **not** marked complete and the engine exits 3010 (iterates until no reboot is needed); if it exits 0 the step is marked complete.
    - **Pause** — creates a "Continue Deployment" shortcut on `C:\Users\Public\Desktop`, marks step complete, exits 3011.
 5. On completion: engine exits 0. `install2026.ps1` then unmaps share, removes RunOnce + AutoLogon, writes `deploy-complete.flag`.
@@ -122,8 +122,10 @@ Shared named sections, referenced by name from MAC blocks. Merged into effective
 "NicAuto":     { "DefaultGateway": "10.0.3.1", "DNSServers": "10.0.3.11" },
 "ADJoinCorp":  { "JoinDomain": "corp.dev", "Domain": "corp", "OU": "ou=Servers,dc=corp,dc=dev", "User": "ADJoin2026", "Password": "..." },
 "RefSettings": { "Sysprep": "Generalize", "Shutdown": "Shutdown", "IPAddress": "DHCP", "JoinDomain": "WORKGROUP", ... },
-"Deploy":      { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "..." },
-"ADLogon":     { "Username": "Corp\\ADLogon", "Password": "..." }
+"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "..." },
+"ADLogon-AD01": { "Username": "Corp\\ADLogon",   "Password": "..." },
+"ADLogon-AD02": { "Username": "Dev\\ADLogon",    "Password": "..." }
+// The key name must match the "Reference" value used in DeploymentGroups.json.
 ```
 
 ### DeploymentGroups.json
@@ -143,7 +145,9 @@ Action definitions only — what to run (three forms):
 "Install App2026": { "Script": "\\Applications\\App2026\\install01.ps1", "Parameters": ["SQLServer", "AlwaysOn"] },
 "Install App PS5":  { "Script": "\\Applications\\App2026\\install01.ps1", "PowerShell": "powershell5" },
 "Reboot":           { "Type": "Reboot",         "Description": "Restart the computer" },
-"ADLogon":          { "Type": "AutoLogon",       "Description": "Configure automatic logon" },
+"ADLogon-AD01":     { "Type": "AutoLogon",       "Description": "Log on as Corp AD account" },
+"ADLogon-AD02":     { "Type": "AutoLogon",       "Description": "Log on as Dev AD account" },
+// Reference name must match a key in Sections.json — that entry supplies Username + Password.
 "WindowsUpdate":    { "Type": "WindowsUpdate",   "Script": "\\Applications\\WindowsUpdate\\install.ps1" },
 "Pause":            { "Type": "Pause",           "Description": "Pause deployment for manual intervention" }
 ```

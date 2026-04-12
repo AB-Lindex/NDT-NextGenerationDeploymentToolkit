@@ -204,10 +204,7 @@
       "General Settings",
       "ADCS Enterprise Roles and Features",
       "AD Join",
-      "Setup IIS and Share",
-      "PKI Enterprise Setup",
-      "PSPKI Module",
-      "Create Certificate Templates"
+      "ECA Setup"
     ],
     "CRLPath": "\\\\eca01.ad01.corp\\CertEnroll$"
   }

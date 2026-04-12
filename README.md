@@ -52,7 +52,7 @@ The machine PXE-boots from WDS and loads `Boot/boot2026.wim`.
 4. Supports five step types:
    - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe.
    - **Reboot** — saves progress, writes AutoLogon credentials to the registry, calls `shutdown /r /t 10`, and exits with code `3010` so the parent script knows to write `reboot.flag` and skip cleanup.
-   - **AutoLogon** — switches the AutoAdminLogon account (e.g. to a domain account) mid-deployment, useful for operations that must run as an AD user (gMSA creation, cluster setup, SQL Always On, etc.).
+   - **AutoLogon** — switches the AutoAdminLogon account mid-deployment, useful for operations that must run as an AD user (gMSA creation, cluster setup, SQL Always On, etc.). Credentials are resolved by looking up the step's `Reference` name as a key in `Sections.json` (`Username` + `Password`). Multiple named entries (e.g. `ADLogon-AD01`, `ADLogon-AD02`) allow logging on to different Active Directories without any code changes.
    - **WindowsUpdate** — runs the Windows Update script; if it exits `3010` the step is not marked complete and the engine exits `3010` (iterates until no reboot is needed); if it exits `0` the step is marked complete.
    - **Pause** — creates a "Continue Deployment" shortcut on `C:\Users\Public\Desktop`, marks the step complete, and exits `3011` so the parent script removes RunOnce (a reboot while paused does not auto-resume).
 
@@ -140,8 +140,9 @@ Action definitions — what to run:
   "Script": "\\Applications\\App2026\\install01.ps1",
   "Parameters": ["SQLServer", "AlwaysOn"]
 },
-"Reboot":  { "Type": "Reboot" },
-"ADLogon": { "Type": "AutoLogon" },
+"Reboot":           { "Type": "Reboot" },
+"ADLogon-AD01":     { "Type": "AutoLogon" },  // Reference name must match a key in Sections.json
+"ADLogon-AD02":     { "Type": "AutoLogon" },
 "WindowsUpdate": { "Type": "WindowsUpdate", "Script": "\\Applications\\WindowsUpdate\\install.ps1" },
 "Pause":   { "Type": "Pause", "Description": "Pause deployment for manual intervention" }
 ```

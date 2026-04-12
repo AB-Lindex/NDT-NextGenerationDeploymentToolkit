@@ -49,6 +49,10 @@
     "Username": "Corp\\ADLogon",
     "Password": "P@ssw0rd2026"
   },
+  "ADLogon-AD01": {
+    "Username": "AD01\\Administrator",
+    "Password": "Qantas-717"
+  },
   "DeployDC01": {
     "Share": "\\\\dc01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",

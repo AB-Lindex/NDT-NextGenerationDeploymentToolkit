@@ -210,15 +210,33 @@
    "AD Join": {
     "Step10": {
       "Description": "Join machine to AD domain",
-      "Reference": "Join-AD"
+      "Reference": "Join AD"
     },
     "Step20": {
       "Description": "Configure AD Logon",
-      "Reference": "ADLogon.ps1"
+      "Reference": "ADLogon-AD01"
     },
     "Step30": {
       "Description": "Reboot server",
       "Reference": "Reboot"
     }
+   },
+   "ECA Setup": {
+      "Step10": {
+        "Description": "Setup IIS and Share",
+        "Reference": "Setup PKI IIS and Share"
+      },
+      "Step20": {
+        "Description": "PKI Enterprise Setup",
+        "Reference": "PKI Enterprise Setup"
+      },
+      "Step30": {
+        "Description": "Install PSPKI Module",
+        "Reference": "Install PSPKI"
+      },
+      "Step40": {
+        "Description": "Create Certificate Templates",
+        "Reference": "Create Certificate Templates"
+      }
    }
 }

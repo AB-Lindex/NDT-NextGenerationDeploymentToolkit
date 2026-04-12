@@ -157,5 +157,22 @@
   "Join AD": {
     "Script": "\\Applications\\PKI\\Enterprise CA\\Join-AD.ps1",
     "Description": "Join machine to Active Directory domain"
-  }
+  },
+  "ADLogon-AD01": {
+    "Type": "AutoLogon",
+    "Description": "Configure automatic logon"
+  },
+  "Setup PKI IIS and Share": {
+    "Script": "\\Applications\\PKI\\Enterprise CA\\install IIS and CRL.ps1",
+    "Description": "Setup IIS and file share for PKI Enterprise CA",
+    "powershell": "powershell5"
+  },
+  "PKI Enterprise Setup": {
+    "Script": "\\Applications\\PKI\\Enterprise CA\\Install-ECA.ps1",
+    "Description": "Configure PKI Enterprise CA",
+    "powershell": "powershell5",
+    "parameters": [
+      "CRLPath"
+    ]
+   }
 }

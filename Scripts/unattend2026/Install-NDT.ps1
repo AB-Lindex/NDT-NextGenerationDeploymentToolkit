@@ -218,9 +218,9 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             }
             Write-Log "AutoLogon set for user: $($autoLogonSettings.Username)" -ForegroundColor Green
 
-            Write-Log 'Shutdown initiated - system will restart in 10 seconds' -ForegroundColor Red
+            Write-Log 'Shutdown initiated - system will restart in 10 seconds' -ForegroundColor yellow
             shutdown.exe /r /t 10 /c "Windows Update requires restart"
-            Write-Log 'Exiting with code 3010 (WU reboot pending)' -ForegroundColor Red
+            Write-Log 'Exiting with code 3010 (WU reboot pending)' -ForegroundColor yellow
             exit 3010
         } else {
             # Exit 0 (or anything other than 3010): no reboot needed, patching complete.
