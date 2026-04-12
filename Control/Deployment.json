@@ -60,7 +60,8 @@
   },
   "InstallNuget": {
     "Script": "\\Applications\\Nuget\\install.ps1",
-    "Description": "Install Nuget provider for PowerShell"
+    "Description": "Install Nuget provider for PowerShell",
+    "Powershell": "powershell5"
   },
   "Install NDT": {
     "Script": "\\Applications\\NDT Setup\\install.ps1",
