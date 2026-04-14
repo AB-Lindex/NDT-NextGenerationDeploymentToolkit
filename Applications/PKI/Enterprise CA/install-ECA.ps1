@@ -1,6 +1,7 @@
 Param(
     [parameter(Mandatory=$true)]
-    [string]$CRLPath
+    [string]$CRLPath,
+    [string]$RootCAAdminPwd
 )
 
 Import-Certificate -FilePath $CRLPath\ROOTCA01_ROOTCA01-CA.crt -CertStoreLocation Cert:\LocalMachine\AuthRoot
@@ -22,7 +23,7 @@ Write-Output "CRLPath: $CRLPath"
 $EncodedReq = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes((Get-Content -Path "C:\$ENV:ComputerName.req" -Encoding UTF8 -Raw)))
 
 set-item wsman:\localhost\Client\TrustedHosts -value 10.0.1.101 -force:$TRUE
-$Password = ConvertTo-SecureString -string "Qantas-707" -AsPlainText -force
+$Password = ConvertTo-SecureString -string $RootCAAdminPwd -AsPlainText -force
 $cred = New-Object System.Management.Automation.PSCredential ("rootca01\administrator", $Password)
 
 $Certificate = Invoke-Command -ComputerName 10.0.1.101 -Credential $cred -ScriptBlock {

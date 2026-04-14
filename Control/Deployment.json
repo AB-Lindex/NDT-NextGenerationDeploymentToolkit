@@ -161,7 +161,8 @@
   },
   "Join AD": {
     "Script": "\\Applications\\PKI\\Enterprise CA\\Join-AD.ps1",
-    "Description": "Join machine to Active Directory domain"
+    "Description": "Join machine to Active Directory domain",
+    "Parameters": ["DCAdminPwd"]
   },
   "ADLogon-AD01": {
     "Type": "AutoLogon",
@@ -177,7 +178,8 @@
     "Description": "Configure PKI Enterprise CA",
     "powershell": "powershell5",
     "parameters": [
-      "CRLPath"
+      "CRLPath",
+      "RootCAAdminPwd"
     ]
    }
 }

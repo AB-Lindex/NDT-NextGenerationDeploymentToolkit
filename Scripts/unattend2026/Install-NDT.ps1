@@ -82,6 +82,20 @@ if ($machineConfig.Sections) {
         }
     }
 }
+# Resolve @-prefixed cross-references (e.g. "SafeNodeAdminPwd": "@AdminPassword")
+foreach ($key in @($effectiveSettings.Keys)) {
+    $val = $effectiveSettings[$key]
+    if ($val -is [string] -and $val.StartsWith('@')) {
+        $refKey = $val.Substring(1)
+        if ($effectiveSettings.ContainsKey($refKey)) {
+            $effectiveSettings[$key] = $effectiveSettings[$refKey]
+            Write-Log "Resolved reference: $key -> $refKey" -ForegroundColor Gray
+        } else {
+            Write-Log "Unresolved reference '@$refKey' for key '$key'" -Level WARN
+        }
+    }
+}
+
 Write-Log "Effective settings keys: $($effectiveSettings.Keys -join ', ')" -ForegroundColor Gray
 
 # Get the deployment group reference(s) - can be string or array

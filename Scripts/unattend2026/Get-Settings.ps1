@@ -39,62 +39,54 @@ if ($machineConfig.Sections) {
     }
 }
 
+# Build merged effective settings (machine config takes precedence over sections)
+$effectiveSettings = @{}
+foreach ($property in $machineConfig.PSObject.Properties) {
+    if ($property.Name -notin @('Sections', 'DeploymentSteps')) {
+        $effectiveSettings[$property.Name] = $property.Value
+    }
+}
+foreach ($section in $sections.GetEnumerator()) {
+    foreach ($property in $section.Value.PSObject.Properties) {
+        if (-not $effectiveSettings.ContainsKey($property.Name)) {
+            $effectiveSettings[$property.Name] = $property.Value
+        }
+    }
+}
+
+# Resolve @-prefixed cross-references (e.g. "SafeNodeAdminPwd": "@AdminPassword")
+foreach ($key in @($effectiveSettings.Keys)) {
+    $val = $effectiveSettings[$key]
+    if ($val -is [string] -and $val.StartsWith('@')) {
+        $refKey = $val.Substring(1)
+        if ($effectiveSettings.ContainsKey($refKey)) {
+            $effectiveSettings[$key] = $effectiveSettings[$refKey]
+            Write-Host "Resolved reference: $key -> $refKey" -ForegroundColor Gray
+        } else {
+            Write-Warning "Unresolved reference '@$refKey' for key '$key'"
+        }
+    }
+}
+
 # Read the template
 $unattendContent = Get-Content -Path $templatePath -Raw
 
-# Replace placeholders from machine config
-foreach ($property in $machineConfig.PSObject.Properties) {
-    # Skip the Sections property
-    if ($property.Name -eq 'Sections') {
-        continue
-    }
-    
-    $propertyName = $property.Name.ToUpper()
-    $propertyValue = $property.Value
+# Replace placeholders from effective settings
+foreach ($entry in $effectiveSettings.GetEnumerator()) {
+    $propertyName = $entry.Key.ToUpper()
+    $propertyValue = $entry.Value
     $placeholder = "!$propertyName!"
-    
-    # Check if this placeholder exists in the template
+
     if ($unattendContent -match [regex]::Escape($placeholder)) {
         $unattendContent = $unattendContent -replace [regex]::Escape($placeholder), $propertyValue
-        
-        # Mask password in display output
-        $displayValue = if ($property.Name -match 'Password') {
+
+        $displayValue = if ($entry.Key -match 'Password') {
             $visibleChars = [Math]::Min(3, $propertyValue.Length)
             $propertyValue.Substring(0, $visibleChars) + ('*' * [Math]::Max(0, $propertyValue.Length - $visibleChars))
         } else {
             $propertyValue
         }
-        
         Write-Host "Replaced $placeholder with $displayValue" -ForegroundColor Gray
-    }
-}
-
-# Dynamically replace placeholders from all sections
-foreach ($section in $sections.GetEnumerator()) {
-    $sectionName = $section.Key
-    $sectionData = $section.Value
-    
-    Write-Host "Processing section: $sectionName" -ForegroundColor Cyan
-    
-    foreach ($property in $sectionData.PSObject.Properties) {
-        $propertyName = $property.Name.ToUpper()
-        $propertyValue = $property.Value
-        $placeholder = "!$propertyName!"
-        
-        # Check if this placeholder exists in the template
-        if ($unattendContent -match [regex]::Escape($placeholder)) {
-            $unattendContent = $unattendContent -replace [regex]::Escape($placeholder), $propertyValue
-            
-            # Mask password in display output
-            $displayValue = if ($property.Name -match 'Password') {
-                $visibleChars = [Math]::Min(3, $propertyValue.Length)
-                $propertyValue.Substring(0, $visibleChars) + ('*' * [Math]::Max(0, $propertyValue.Length - $visibleChars))
-            } else {
-                $propertyValue
-            }
-            
-            Write-Host "  Replaced $placeholder with $displayValue" -ForegroundColor Gray
-        }
     }
 }
 
