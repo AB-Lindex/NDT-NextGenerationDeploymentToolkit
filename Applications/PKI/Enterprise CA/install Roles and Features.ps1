@@ -2,7 +2,7 @@
 
 Install-WindowsFeature -Name Web-Server
 
-$Features = @('ADCS-Cert-Authority', 'ADCS-Online-Cert', 'RSAT-ADCS-Mgmt', 'RSAT-Online-Responder', `
+$Features = @('ADCS-Cert-Authority', 'RSAT-ADCS-Mgmt', `
 'Web-Http-Redirect', 'Web-ISAPI-Ext', 'Web-Log-Libraries', `
 'Web-Request-Monitor', 'Web-Http-Tracing', 'Web-Mgmt-Console', 'Web-Metabase')
 
