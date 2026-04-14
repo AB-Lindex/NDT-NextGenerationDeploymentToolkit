@@ -103,6 +103,10 @@
     "Step40": {
       "Description": "Install NDT",
       "Reference": "Install NDT"
+    },
+    "Step50": {
+      "Description": "Setup copy of Reference images",
+      "Reference": "CopyRef"
     }
   },
   "MakePause": {
@@ -140,13 +144,13 @@
       "Description": "Configure Root CA",
       "Reference": "Configure Root CA"
     },
-    "Step40": {
-      "Description": "Install PKI Module",
-      "Reference": "Install PSPKI"
-    },
     "Step50": {
       "Description": "Copy Root Cert to DC",
       "Reference": "Copy Root Cert to DC"
+    },
+    "Step55": {
+      "Description": "Install PKI Module",
+      "Reference": "Install PSPKI"
     },
     "Step60": {
       "Description": "Reboot server",

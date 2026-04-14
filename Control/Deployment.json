@@ -67,6 +67,10 @@
     "Script": "\\Applications\\NDT Setup\\install.ps1",
     "Description": "Install NDT deployment toolkit"
   },
+  "CopyRef": {
+    "Script": "\\Applications2026\\Copy Ref\\install.ps1",
+    "Description": "Copy reference images"
+  },
   "Pause": {
     "Type": "Pause",
     "Description": "Pause deployment — creates a desktop shortcut to resume"
@@ -113,7 +117,7 @@
       "DomainNetBiosName",
       "DomainLevel",
       "ForestLevel",
-      "AdminPassword"
+      "SafeNodeAdminPwd"
     ]
   },
   "Configure DNS": {

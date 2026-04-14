@@ -6,7 +6,7 @@ param(
     [string]$SafeNodeAdminPwd
 )
 
-$SafeModePassword = ConvertTo-SecureString $SafeNodeAdminPwd -AsPlainText -Force
+$SafeModePassword = ConvertTo-SecureString -String $SafeNodeAdminPwd -AsPlainText -Force
 
 Install-ADDSForest `
     -DomainName                    $DomainDNSName `
