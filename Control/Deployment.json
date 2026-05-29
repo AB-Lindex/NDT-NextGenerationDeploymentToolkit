@@ -50,6 +50,10 @@
     "Script": "\\Applications\\PowerShell7\\Install.ps1",
     "Description": "Install PowerShell 7"
   },
+  "Install IIS": {
+    "Script": "\\Applications\\IIS 2025\\IIS - RolesAndFeatures.ps1",
+    "Description": "Install IIS roles and features"
+  },
   "InstallWDS": {
     "Script": "\\Applications\\WDS\\Install.ps1",
     "Description": "Install Windows Deployment Services role"

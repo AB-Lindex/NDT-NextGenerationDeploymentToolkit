@@ -135,6 +135,12 @@
       "Reference": "InstallNPP"
     }
   },
+  "IIS": {
+    "Step10": {
+      "Description": "Install IIS roles and features",
+      "Reference": "Install IIS"
+    }
+  },
   "RootCA": {
     "Step20": {
       "Description": "Install Root CA Roles and Features",
