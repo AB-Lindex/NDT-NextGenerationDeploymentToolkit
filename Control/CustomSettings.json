@@ -118,6 +118,8 @@
     "AdminPassword": "Qantas-777",
     "Hostname": "psgallery.corp.dev",
     "CertificateSubject": "psgallery.corp.dev",
+    "CertificateFileName": "psgallery.corp.dev.pfx",
+    "CertificatePwd": "1q2w3e4r",
     "ApiKey": "Api-Qantas-787",
     "Sections": {
       "Locale": "Sweden",

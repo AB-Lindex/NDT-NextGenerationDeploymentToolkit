@@ -188,7 +188,11 @@
   },
   "InstallPSGalleryCertificate": {
   "Script": "\\Applications\\PSGallery\\install-certificate.ps1",
-  "Description": "Install PowerShell Gallery SSL certificate"
+  "Description": "Install PowerShell Gallery SSL certificate",
+  "Parameters": [
+    "CertificateFileName",
+    "CertificatePwd"
+  ]
   },
   "InstallPSGallery": {
     "Script": "\\Applications\\PSGallery\\install.ps1",
