@@ -39,11 +39,18 @@
     Subject pattern to match against certificates in Cert:\LocalMachine\My.
     The script selects the matching cert with the furthest expiry.
     Example: *.corp.dev
+
+.PARAMETER ApiKey
+    NuGet API key required to publish packages to this feed.
+    Set this to any non-empty string (the server validates it on push).
+    Example: MySecretKey2026
 #>
 
 param (
-    [string]$Hostname           = 'psgallery.corp.dev',
-    [string]$CertificateSubject = '*.corp.dev',
+    [Parameter(Mandatory)]
+    [string]$Hostname,
+    [Parameter(Mandatory)]
+    [string]$CertificateSubject,
     [Parameter(Mandatory)]
     [string]$ApiKey
 )
