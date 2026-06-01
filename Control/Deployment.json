@@ -193,6 +193,7 @@
   "InstallPSGallery": {
     "Script": "\\Applications\\PSGallery\\install.ps1",
     "Description": "Install PowerShell Gallery",
+    "powershell": "powershell5",
     "Parameters": [
       "Hostname",
       "CertificateSubject",
