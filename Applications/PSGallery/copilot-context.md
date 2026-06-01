@@ -37,8 +37,15 @@ Exits `3010` if a restart is required (NDT reboot step).
 - Locates `nuget.exe` in `$PSScriptRoot` (pre-staged); downloads from dist.nuget.org if absent.
 - Runs `nuget install NuGet.Server -ExcludeVersion -NonInteractive -NoHttpCache` into a temp folder.
 - Copies `NuGet.Server\Content\*` to `C:\inetpub\PSGallery2026\`.
-- **Critical**: collects all `lib\net4*\*.dll` from every installed dependency package into `bin\`.
+  Detects a framework-targeted subfolder (`net4*` under Content) and uses it if present.
+- If no `web.config` exists, promotes `Web.config.transform` to `web.config`; removes leftover `.transform`/`.xdt` files.
+- **Critical**: collects all `lib\net*\*.dll` (excluding `\Content\`) from every installed dependency package into `bin\`.
   Without this step ASP.NET cannot load NuGet.Server and IIS returns 404 for all routes.
+- Generates route registration code for dynamic compilation:
+  - `App_Code\NuGetODataConfig.cs` — calls `NuGetV2WebApiEnabler.UseNuGetV2WebApiFeed`.
+  - `Global.asax` — invokes `NuGetODataConfig.Start()` on `Application_Start`.
+  - Adds `System.Net.Http` assembly reference to `web.config` `<compilation><assemblies>` (required for App_Code compilation).
+  - Removes the shipped `.cs.pp` template (`App_Start` folder).
 
 ### Section 3 — File-system permissions
 - Creates the app pool first (so the `IIS AppPool\PSGallery2026` virtual account exists in Windows).
@@ -72,6 +79,9 @@ Exits `3010` if a restart is required (NDT reboot step).
 | `icacls` "No mapping between account names and security IDs" | App pool doesn't exist yet when permissions are set | Create app pool in Section 3 before running `icacls` |
 | `icacls /grant` adds duplicate ACEs on re-run | `/grant` appends; `/grant:r` replaces | Use `/grant:r` |
 | `nuget -NoCache` deprecation warning | Renamed in newer nuget.exe | Use `-NoHttpCache` |
+| NuGet.Server ships `.cs.pp` template instead of compiled routes | `nuget install` doesn't run NuGet package transforms | Generate `App_Code\NuGetODataConfig.cs` + `Global.asax` for dynamic compilation |
+| NuGet.Server content in framework subfolder (`net4*`) | Newer packages nest content under `Content\net46\` | Detect and use subfolder as actual content source |
+| No `web.config` after content copy | Package ships `Web.config.transform` / `.xdt` only | Promote `Web.config.transform` to `web.config` |
 
 ---
 

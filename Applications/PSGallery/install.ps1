@@ -1,4 +1,4 @@
-#Requires -RunAsAdministrator
+﻿#Requires -RunAsAdministrator
 #Requires -Version 5.1
 
 <#
@@ -30,7 +30,23 @@
         Register-PSRepository -Name PSGallery2026 -SourceLocation https://<server>/nuget `
             -PublishLocation https://<server>/nuget -InstallationPolicy Trusted
         Publish-Module -Name <YourModule> -Repository PSGallery2026 -NuGetApiKey 'any-string'
+
+.PARAMETER Hostname
+    FQDN for the HTTPS binding host header and PSRepository URL.
+    Example: psgallery.corp.dev
+
+.PARAMETER CertificateSubject
+    Subject pattern to match against certificates in Cert:\LocalMachine\My.
+    The script selects the matching cert with the furthest expiry.
+    Example: *.corp.dev
 #>
+
+param (
+    [string]$Hostname           = 'psgallery.corp.dev',
+    [string]$CertificateSubject = '*.corp.dev',
+    [Parameter(Mandatory)]
+    [string]$ApiKey
+)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -38,7 +54,6 @@ $SiteName     = 'PSGallery2026'
 $SitePath     = 'C:\inetpub\PSGallery2026'
 $PackagesPath = "$SitePath\Packages"
 $AppPool      = 'PSGallery2026'
-$Hostname     = [System.Net.Dns]::GetHostEntry('').HostName   # FQDN used for HTTPS binding header
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1 – IIS WINDOWS FEATURES
@@ -56,7 +71,7 @@ $features = @(
     'Web-Static-Content',   # Static files (Packages download)
     'Web-Http-Errors',      # Friendly HTTP error pages
 
-    # ASP.NET / ISAPI — required for NuGet.Server (ASP.NET 4.x)
+    # ASP.NET / ISAPI - required for NuGet.Server (ASP.NET 4.x)
     'Web-Net-Ext45',        # .NET Extensibility 4.5
     'Web-Asp-Net45',        # ASP.NET 4.5
     'Web-ISAPI-Ext',        # ISAPI Extensions
@@ -119,11 +134,36 @@ try {
         throw "NuGet.Server content not found at expected path: $webSource"
     }
 
+    # Newer NuGet.Server packages place content under a framework subfolder (e.g. net46\).
+    # Detect and use that subfolder as the actual content source.
+    $fwSubfolder = Get-ChildItem -Path $webSource -Directory -Filter 'net4*' | Select-Object -First 1
+    if ($fwSubfolder) {
+        $webSource = $fwSubfolder.FullName
+        Write-Host "  Using framework-targeted content folder: $($fwSubfolder.Name)" -ForegroundColor DarkGray
+    }
+
     # ── Copy web app content to site path ────────────────────────────────────
     if (-not (Test-Path $SitePath)) {
         New-Item -ItemType Directory -Path $SitePath | Out-Null
     }
     Copy-Item -Path "$webSource\*" -Destination $SitePath -Recurse -Force
+
+    # NuGet.Server ships Web.config.transform / .xdt instead of a real web.config
+    # when installed via 'nuget install'. Use the transform as the actual web.config.
+    $webConfig = "$SitePath\web.config"
+    if (-not (Test-Path $webConfig)) {
+        $transform = "$SitePath\Web.config.transform"
+        if (Test-Path $transform) {
+            Move-Item -Path $transform -Destination $webConfig -Force
+            Write-Host '  Created web.config from Web.config.transform.' -ForegroundColor DarkGray
+        } else {
+            throw "No web.config or Web.config.transform found - NuGet.Server cannot start."
+        }
+    }
+    # Clean up transform/xdt files that are not needed at runtime
+    Remove-Item "$SitePath\web.config.install.xdt" -ErrorAction SilentlyContinue
+    Remove-Item "$SitePath\Web.config.transform" -ErrorAction SilentlyContinue
+
     Write-Host '  Web application content deployed.' -ForegroundColor Green
 
     # ── Collect all dependency DLLs into bin\ ────────────────────────────────
@@ -139,6 +179,97 @@ try {
             $dllCount++
         }
     Write-Host "  Copied $dllCount dependency DLL(s) to bin\." -ForegroundColor Green
+
+    # ── Create route registration code (App_Code) ────────────────────────────
+    # NuGet.Server ships NuGetODataConfig.cs.pp (a preprocessor template) that is
+    # never compiled during a raw 'nuget install'. We generate the actual .cs file
+    # in App_Code so ASP.NET dynamically compiles it, then call it from Global.asax.
+    $appCodePath = "$SitePath\App_Code"
+    if (-not (Test-Path $appCodePath)) { New-Item -ItemType Directory -Path $appCodePath | Out-Null }
+
+    $configCs = @'
+using System.Net.Http;
+using System.Web.Http;
+using System.Web.Http.ExceptionHandling;
+using System.Web.Http.Routing;
+using NuGet.Server;
+using NuGet.Server.Infrastructure;
+using NuGet.Server.V2;
+
+namespace PSGallery2026.App_Start
+{
+    public static class NuGetODataConfig
+    {
+        public static void Start()
+        {
+            ServiceResolver.SetServiceResolver(new DefaultServiceResolver());
+            var config = GlobalConfiguration.Configuration;
+            NuGetV2WebApiEnabler.UseNuGetV2WebApiFeed(
+                config, "NuGetDefault", "nuget", "PackagesOData", enableLegacyPushRoute: true);
+            config.Services.Replace(typeof(IExceptionLogger), new TraceExceptionLogger());
+            config.Routes.MapHttpRoute(
+                name: "NuGetDefault_ClearCache",
+                routeTemplate: "nuget/clear-cache",
+                defaults: new { controller = "PackagesOData", action = "ClearCache" },
+                constraints: new { httpMethod = new HttpMethodConstraint(HttpMethod.Get) });
+        }
+    }
+}
+'@
+    Set-Content -Path "$appCodePath\NuGetODataConfig.cs" -Value $configCs -Force
+
+    # ── Create Global.asax to invoke route registration at app start ─────────
+    $globalAsax = @'
+<%@ Application Language="C#" %>
+<script runat="server">
+    void Application_Start(object sender, EventArgs e)
+    {
+        PSGallery2026.App_Start.NuGetODataConfig.Start();
+    }
+</script>
+'@
+    Set-Content -Path "$SitePath\Global.asax" -Value $globalAsax -Force
+
+    # ── Add System.Net.Http assembly reference for dynamic compilation ───────
+    # App_Code compilation needs this reference; it's not in the default set.
+    [xml]$webXml = Get-Content "$SitePath\web.config"
+    $compilation = $webXml.configuration.'system.web'.compilation
+    $assemblies = $compilation.SelectSingleNode('assemblies')
+    if (-not $assemblies) {
+        $assemblies = $webXml.CreateElement('assemblies')
+        $compilation.AppendChild($assemblies) | Out-Null
+    }
+    $sysNetHttp = 'System.Net.Http, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a'
+    if (-not $assemblies.SelectSingleNode("add[@assembly='$sysNetHttp']")) {
+        $add = $webXml.CreateElement('add')
+        $add.SetAttribute('assembly', $sysNetHttp)
+        $assemblies.AppendChild($add) | Out-Null
+        $webXml.Save("$SitePath\web.config")
+    }
+
+    # ── Set API key in appSettings ───────────────────────────────────────────
+    # Re-read in case Save() above updated the file on disk.
+    [xml]$webXml = Get-Content "$SitePath\web.config"
+    $appSettings = $webXml.configuration.appSettings
+    if (-not $appSettings) {
+        $appSettings = $webXml.CreateElement('appSettings')
+        $webXml.configuration.AppendChild($appSettings) | Out-Null
+    }
+    $apiKeyNode = $appSettings.SelectSingleNode("add[@key='apiKey']")
+    if ($apiKeyNode) {
+        $apiKeyNode.SetAttribute('value', $ApiKey)
+    } else {
+        $addKey = $webXml.CreateElement('add')
+        $addKey.SetAttribute('key',   'apiKey')
+        $addKey.SetAttribute('value', $ApiKey)
+        $appSettings.AppendChild($addKey) | Out-Null
+    }
+    $webXml.Save("$SitePath\web.config")
+
+    # Remove the .cs.pp template - no longer needed
+    Remove-Item "$SitePath\App_Start" -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-Host '  Route registration (App_Code + Global.asax) configured.' -ForegroundColor Green
 
     # ── Ensure Packages folder exists ────────────────────────────────────────
     if (-not (Test-Path $PackagesPath)) {
@@ -175,23 +306,23 @@ Write-Host '  Permissions set.' -ForegroundColor Green
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4 – IIS APPLICATION POOL AND WEBSITE
 # Application pool runs under .NET v4.0 Integrated pipeline.
-# HTTPS/443 only — certificate *.corp.dev must exist in LocalMachine\My.
+# HTTPS/443 only - certificate *.corp.dev must exist in LocalMachine\My.
 # ─────────────────────────────────────────────────────────────────────────────
 
 Write-Host "`n[4/5] Configuring IIS..." -ForegroundColor Cyan
 
 # ── Locate *.corp.dev certificate ───────────────────────────────────────────
 $cert = Get-ChildItem -Path 'Cert:\LocalMachine\My' |
-    Where-Object { $_.Subject -match '\*\.corp\.dev' -and $_.HasPrivateKey } |
+    Where-Object { $_.Subject -match [regex]::Escape($CertificateSubject) -and $_.HasPrivateKey } |
     Sort-Object NotAfter -Descending |
     Select-Object -First 1
 
 if (-not $cert) {
-    throw "Certificate '*.corp.dev' with private key not found in Cert:\LocalMachine\My."
+    throw "Certificate '$CertificateSubject' with private key not found in Cert:\LocalMachine\My."
 }
 Write-Host "  Using certificate: $($cert.Subject) [$($cert.Thumbprint)]" -ForegroundColor DarkGray
 
-# ── Application pool (idempotent — may already exist from Section 3) ─────────
+# ── Application pool (idempotent - may already exist from Section 3) ─────────
 if (-not (Get-WebConfiguration -Filter "system.applicationHost/applicationPools/add[@name='$AppPool']")) {
     New-WebAppPool -Name $AppPool | Out-Null
     Write-Host "  Created application pool: $AppPool" -ForegroundColor DarkGray
@@ -250,7 +381,7 @@ if (-not (Get-NetFirewallRule -DisplayName $fwName -ErrorAction SilentlyContinue
     Write-Host '  Firewall rule created for port 443.' -ForegroundColor DarkGray
 }
 
-# Ensure NuGet package provider is present — Register-PSRepository throws
+# Ensure NuGet package provider is present - Register-PSRepository throws
 # "invalid Web Uri" if it is missing, before even attempting a connection.
 if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
     Install-PackageProvider -Name NuGet -Force -Scope AllUsers | Out-Null
@@ -259,7 +390,7 @@ if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
 
 $feedUrl = "https://$Hostname/nuget"
 
-# Probe the feed URL before registering — Register-PSRepository gives a
+# Probe the feed URL before registering - Register-PSRepository gives a
 # confusing "invalid Web Uri" error when the URL returns anything other
 # than a valid NuGet v2 OData response.
 try {
