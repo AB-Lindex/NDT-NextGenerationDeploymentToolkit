@@ -116,13 +116,17 @@
     "Computername": "psg01",
     "IPAddress": "10.0.3.4/24",
     "AdminPassword": "Qantas-777",
+    "Hostname": "psgallery.corp.dev",
+    "CertificateSubject": "psgallery.corp.dev",
+    "ApiKey": "Api-Qantas-787",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
     "DeploymentSteps": [
-      "General Settings"    
+      "General Settings",
+      "PSGallery"
     ]
   },
   "00:15:5D:02:56:16": {

@@ -185,5 +185,18 @@
       "CRLPath",
       "RootCAAdminPwd"
     ]
-   }
+  },
+  "InstallPSGalleryCertificate": {
+  "Script": "\\Applications\\PSGallery\\install-certificate.ps1",
+  "Description": "Install PowerShell Gallery SSL certificate"
+  },
+  "InstallPSGallery": {
+    "Script": "\\Applications\\PSGallery\\install.ps1",
+    "Description": "Install PowerShell Gallery",
+    "Parameters": [
+      "Hostname",
+      "CertificateSubject",
+      "ApiKey"
+    ]
+  }
 }

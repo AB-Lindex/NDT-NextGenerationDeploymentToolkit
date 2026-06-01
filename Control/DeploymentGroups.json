@@ -135,6 +135,16 @@
       "Reference": "InstallNPP"
     }
   },
+  "PSGallery": {
+    "Step10": {
+      "Description": "Install PowerShell Gallery Certificate",
+      "Reference": "InstallPSGalleryCertificate"
+    },
+    "Step20": {
+      "Description": "Install PowerShell Gallery",
+      "Reference": "InstallPSGallery"
+    }
+  },
   "IIS": {
     "Step10": {
       "Description": "Install IIS roles and features",
