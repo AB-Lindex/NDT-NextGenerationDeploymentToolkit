@@ -112,7 +112,7 @@
     ]
   },
   "00:15:5D:02:40:42": {
-    "OS": "WIN2025DCG",
+    "OS": "WIN2025DCC",
     "Computername": "psg01",
     "IPAddress": "10.0.3.4/24",
     "AdminPassword": "Qantas-777",
