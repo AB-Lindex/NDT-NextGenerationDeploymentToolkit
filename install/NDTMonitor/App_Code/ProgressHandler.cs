@@ -53,8 +53,11 @@ namespace NDTMonitor
             }
             catch (Exception ex)
             {
+                // Do not leak internal details (paths, stack) to the client.
+                // Log server-side for diagnostics; return a generic error body.
+                try { System.Diagnostics.Trace.TraceError("NDT Monitor error: " + ex); } catch { }
                 ctx.Response.StatusCode = 500;
-                ctx.Response.Write("{\"error\":\"" + JsEscape(ex.Message) + "\"}");
+                ctx.Response.Write("{\"error\":\"internal error\"}");
             }
         }
 
@@ -123,12 +126,6 @@ namespace NDTMonitor
             foreach (char c in Path.GetInvalidFileNameChars())
                 s = s.Replace(c.ToString(), "");
             return s;
-        }
-
-        private static string JsEscape(string s)
-        {
-            return s.Replace("\\", "\\\\").Replace("\"", "\\\"")
-                    .Replace("\r", " ").Replace("\n", " ");
         }
     }
 }
