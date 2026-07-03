@@ -80,8 +80,13 @@ namespace NDTMonitor
 
             string stateFile = Path.Combine(LogRoot, SafeMac(mac) + ".json");
             File.WriteAllText(stateFile, normalized, Encoding.UTF8);
-            File.AppendAllText(Path.Combine(LogRoot, "audit.jsonl"),
-                normalized + Environment.NewLine, Encoding.UTF8);
+
+            // Append to a per-day audit log (audit-yyyy-MM-dd.jsonl) so the trail
+            // rolls over automatically each day. Files are retained indefinitely;
+            // housekeeping/retention is handled separately.
+            string auditFile = Path.Combine(LogRoot,
+                "audit-" + DateTime.Now.ToString("yyyy-MM-dd") + ".jsonl");
+            AppendAudit(auditFile, normalized);
 
             ctx.Response.Write("{\"ok\":true}");
         }
@@ -126,6 +131,32 @@ namespace NDTMonitor
             foreach (char c in Path.GetInvalidFileNameChars())
                 s = s.Replace(c.ToString(), "");
             return s;
+        }
+
+        // Append one line to the audit log, retrying briefly if another concurrent
+        // request holds the file. Prevents lost audit records when many machines
+        // report at the same instant (the append is not otherwise serialized).
+        private static void AppendAudit(string path, string line)
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes(line + Environment.NewLine);
+            const int maxAttempts = 10;
+            for (int attempt = 1; ; attempt++)
+            {
+                try
+                {
+                    // FileShare.Read lets readers tail the file while we hold the write lock.
+                    using (var fs = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read))
+                    {
+                        fs.Write(bytes, 0, bytes.Length);
+                    }
+                    return;
+                }
+                catch (IOException)
+                {
+                    if (attempt >= maxAttempts) throw;
+                    System.Threading.Thread.Sleep(20);
+                }
+            }
         }
     }
 }
