@@ -43,7 +43,8 @@
   "Deploy": {
     "Share": "\\\\ndt01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",
-    "Password": "P@ssw0rd2026"
+    "Password": "P@ssw0rd2026",
+    "MonitorUrl": "http://ndt01.corp.dev:9999"
   },
   "ADLogon": {
     "Username": "Corp\\ADLogon",

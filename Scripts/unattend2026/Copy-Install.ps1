@@ -42,6 +42,11 @@ if ($deploySettings) {
         }
     }
     
+    # Pass optional MonitorUrl through to settings.json so Install-NDT.ps1 can reach the monitor
+    if ($deploySettings.MonitorUrl) {
+        $settings.Deploy['MonitorUrl'] = $deploySettings.MonitorUrl
+    }
+
     $settings | ConvertTo-Json -Depth 3 | Set-Content -Path "C:\temp\settings.json" -Encoding UTF8
     Write-Host "Created settings.json with deployment and autologon credentials" -ForegroundColor Green
     

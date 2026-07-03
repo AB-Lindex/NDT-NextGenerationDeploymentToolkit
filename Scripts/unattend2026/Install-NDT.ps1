@@ -19,6 +19,39 @@ function Write-Log {
     }
 }
 
+# Send a progress update to the NDT Monitor HTTP service.
+# Silently ignored if the monitor is unavailable — never blocks deployment.
+function Send-NDTProgress {
+    param(
+        [string]$Status,
+        [string]$Description = '',
+        [string]$Group       = '',
+        [string]$StepId      = '',
+        [int]   $Completed   = 0,
+        [int]   $Total       = 0
+    )
+    if (-not $script:MonitorUrl) { return }
+    $pct  = if ($Total -gt 0) { [int][Math]::Round(($Completed / $Total) * 100) } else { 0 }
+    $body = [ordered]@{
+        Computername = $env:COMPUTERNAME
+        MAC          = $macAddress
+        Status       = $Status
+        Description  = $Description
+        Group        = $Group
+        StepId       = $StepId
+        Completed    = $Completed
+        Total        = $Total
+        Percent      = $pct
+        Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    } | ConvertTo-Json -Compress
+    try {
+        $null = Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post `
+            -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop
+    } catch {
+        # Non-critical — never block deployment
+    }
+}
+
 try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
 Write-Log 'Install-NDT.ps1 started' -ForegroundColor Cyan
 Write-Log '-----------------------------------' -ForegroundColor Cyan
@@ -116,6 +149,13 @@ if (Test-Path $settingsPath) {
     $autoLogonSettings = $null
 }
 
+# Resolve NDT Monitor URL from settings.json (populated by Copy-Install.ps1 from Deploy section)
+$script:MonitorUrl = $null
+if ($settings -and $settings.Deploy -and $settings.Deploy.MonitorUrl) {
+    $script:MonitorUrl = $settings.Deploy.MonitorUrl.TrimEnd('/')
+    Write-Log "NDT Monitor : $script:MonitorUrl" -ForegroundColor Gray
+}
+
 # Load or create install progress tracker
 $progressPath = "C:\temp\install-steps.json"
 if (Test-Path $progressPath) {
@@ -126,6 +166,15 @@ if (Test-Path $progressPath) {
     $completedSteps = @()
     [object[]]$completedStepDetails = @()
 }
+
+# Count total steps across all groups for percent-complete tracking
+$totalStepCount = 0
+foreach ($g in $deploymentGroupRefs) {
+    $grp = $deploymentGroups.$g
+    if ($grp) { $totalStepCount += ($grp.PSObject.Properties | Measure-Object).Count }
+}
+Write-Log "Total deployment steps: $totalStepCount  |  Already completed: $($completedSteps.Count)" -ForegroundColor Gray
+Send-NDTProgress -Status 'Starting' -Completed $completedSteps.Count -Total $totalStepCount
 
 Write-Log "`nExecuting Deployment Steps..." -ForegroundColor Green
 Write-Log '=============================' -ForegroundColor Green
@@ -160,6 +209,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     }
     
     Write-Log "`n[$stepName] $description" -ForegroundColor Cyan
+    Send-NDTProgress -Status 'Running' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
     
     # Get the referenced section from Deployment.json
     $stepSection = $deployment.$stepReference
@@ -191,6 +241,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         # does NOT auto-resume deployment.  The operator must double-click the desktop
         # shortcut to continue; that shortcut re-runs install2026.ps1 which re-registers
         # RunOnce and then continues from the next pending step.
+        Send-NDTProgress -Status 'Paused' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
         Write-Log 'Exiting with code 3011 (deployment paused - RunOnce will be removed)' -ForegroundColor Yellow
         exit 3011
     }
@@ -234,6 +285,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
 
             Write-Log 'Shutdown initiated - system will restart in 10 seconds' -ForegroundColor yellow
             shutdown.exe /r /t 10 /c "Windows Update requires restart"
+            Send-NDTProgress -Status 'Rebooting' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
             Write-Log 'Exiting with code 3010 (WU reboot pending)' -ForegroundColor yellow
             exit 3010
         } else {
@@ -243,6 +295,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
             $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
             @{ CompletedSteps = $completedSteps; StepDetails = $completedStepDetails; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
                 ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+            Send-NDTProgress -Status 'Completed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
             continue
         }
     }
@@ -287,6 +340,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         # parent powershell.exe is set to 3010.
         Write-Log 'Shutdown initiated - system will restart in 120 seconds' -ForegroundColor Red
         shutdown.exe /r /t 10 /c "Deployment step requires restart"
+        Send-NDTProgress -Status 'Rebooting' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
         Write-Log 'Exiting with code 3010 (reboot pending)' -ForegroundColor Red
         exit 3010
     }
@@ -351,6 +405,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         @{ CompletedSteps = $completedSteps; StepDetails = $completedStepDetails; LastUpdated = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss') } |
             ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
 
+        Send-NDTProgress -Status 'Completed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
         Write-Log 'AutoLogon step completed' -ForegroundColor Green
         continue
     }
@@ -427,9 +482,11 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
                 LastUpdated    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
             }
             $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+            Send-NDTProgress -Status 'Completed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
             
         } catch {
             Write-Log "Failed to execute: $_" -Level ERROR
+            Send-NDTProgress -Status 'Failed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
         }
     } else {
         Write-Log "Script not found: $fullScriptPath" -Level WARN
@@ -439,6 +496,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
 
 Write-Log "`n=============================" -ForegroundColor Green
 Write-Log 'All deployment steps completed' -ForegroundColor Green
+Send-NDTProgress -Status 'Done' -Completed $totalStepCount -Total $totalStepCount
 
 # Clean up AutoLogon and RunOnce registry entries
 Write-Log "`nCleaning up deployment registry entries..." -ForegroundColor Cyan
