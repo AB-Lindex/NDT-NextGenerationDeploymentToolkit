@@ -150,6 +150,7 @@
     "AdminPassword": "Qantas-777",
     "SQLServer": "SQL2025",
     "AlwaysOn": "AO2025",
+    "Deploy": "yes",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",

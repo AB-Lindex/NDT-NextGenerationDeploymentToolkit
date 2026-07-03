@@ -89,6 +89,17 @@ if (-not $customSettings.$macAddress) {
 $machineConfig = $customSettings.$macAddress
 
 # ------------------------------------------------------------------
+# SAFETY CHECK - Deploy:NO prevents accidental disk wipe
+# ------------------------------------------------------------------
+if ($machineConfig.Deploy -eq "NO") {
+    Write-Host "Deploy is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
+    Write-Host "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 10
+    wpeutil Reboot
+    exit 0
+}
+
+# ------------------------------------------------------------------
 # STEP 2 - Resolve and validate OS / WIM
 # ------------------------------------------------------------------
 $osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
