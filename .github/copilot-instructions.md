@@ -184,7 +184,7 @@ Parameters:
 Downloads the repository ZIP from GitHub → extracts into `LocalPath` → removes repo-only artefacts (`.github`, `.vscode`, `.gitignore`, `README.md`) that must not exist on a live deployment share → stamps the `Deploy` section of `Control\Sections.json` with the supplied parameters → creates SMB share → grants deploy account Full Access → revokes Everyone access.
 
 Also exported by the module (see `ndt.psd1`):
-- `Build-NDTPEImage` — builds the WinPE WIM + optional ISO; updates WDS boot image.
+- `New-NDTPEImage` (alias `Build-NDTPEImage`) — builds the WinPE WIM + optional ISO; updates WDS boot image.
 - `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.

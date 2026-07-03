@@ -1,6 +1,6 @@
 @{
     # Module identity
-    ModuleVersion     = '1.0.36'
+    ModuleVersion     = '1.0.37'
     GUID              = 'a3f2c841-7d5e-4b1a-9e3f-0c2d8f6a1b4e'
     Author            = 'NDT'
     CompanyName       = 'NDT'
@@ -17,7 +17,7 @@
     FunctionsToExport = @(
         'Install-NDT',
         'Install-NDTMonitor',
-        'Build-NDTPEImage',
+        'New-NDTPEImage',
         'Get-NDTServer', 'Add-NDTServer', 'Set-NDTServer', 'Remove-NDTServer',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
         'Move-NDTReferenceImage',
@@ -25,7 +25,7 @@
     )
     CmdletsToExport   = @()
     VariablesToExport = @()
-    AliasesToExport   = @()
+    AliasesToExport   = @('Build-NDTPEImage')
 
     # Required modules (SmbShare is a built-in Windows module)
     RequiredModules   = @()

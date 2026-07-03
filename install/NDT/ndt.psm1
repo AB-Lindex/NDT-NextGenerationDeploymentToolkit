@@ -224,7 +224,7 @@
     Write-Host "Next steps:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  1. Build the WinPE boot image (WIM and optionally ISO):" -ForegroundColor White
-    Write-Host "       Build-NDTPEImage" -ForegroundColor Gray
+    Write-Host "       New-NDTPEImage" -ForegroundColor Gray
     Write-Host "     This requires the Windows ADK and WinPE Add-on to be installed." -ForegroundColor Gray
     Write-Host "     The resulting Boot\boot2026.wim is registered automatically in WDS." -ForegroundColor Gray
     Write-Host "     Use -SkipISO if you only need a WDS-served WIM (no ISO file)." -ForegroundColor Gray
@@ -320,6 +320,26 @@ function Install-NDTMonitor {
     # ── Verify Administrator ────────────────────────────────────────────────────
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) { throw 'Install-NDTMonitor must be run as Administrator.' }
+
+    # ── Ensure Windows PowerShell 5.1 ───────────────────────────────────────────
+    # The WebAdministration IIS: PSDrive provider does not work under PowerShell 7+.
+    # When invoked from PS7 (e.g. by Install-NDT running in pwsh), relaunch this
+    # command in Windows PowerShell 5.1 and return.
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        Write-Host 'Install-NDTMonitor requires Windows PowerShell 5.1 (IIS provider) - relaunching under powershell.exe...' -ForegroundColor Yellow
+        $ps5 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path $ps5)) { throw 'Windows PowerShell 5.1 (powershell.exe) not found - cannot install the IIS monitor.' }
+        $manifest = Join-Path $LocalPath 'install\NDT\ndt.psd1'
+        if (-not (Test-Path $manifest)) { throw "NDT module manifest not found at: $manifest" }
+
+        $inner = "Import-Module '$manifest' -Force; Install-NDTMonitor -LocalPath '$LocalPath' -Port $Port -SitePath '$SitePath' -SiteName '$SiteName' -AppPoolName '$AppPoolName'"
+        if ($PSBoundParameters.ContainsKey('LogRoot') -and $LogRoot) { $inner += " -LogRoot '$LogRoot'" }
+        if ($VerbosePreference -eq 'Continue') { $inner += ' -Verbose' }
+
+        & $ps5 -NoProfile -ExecutionPolicy Bypass -Command $inner
+        if ($LASTEXITCODE -ne 0) { Write-Warning "Windows PowerShell 5.1 monitor install exited with code $LASTEXITCODE." }
+        return
+    }
 
     if (-not $LogRoot) { $LogRoot = Join-Path $LocalPath 'Logs\progress' }
     $sourceDir = Join-Path $LocalPath 'install\NDTMonitor'
@@ -464,7 +484,7 @@ function Install-NDTMonitor {
     Write-Host "  Log folder: $LogRoot" -ForegroundColor Gray
 }
 
-function Build-NDTPEImage {
+function New-NDTPEImage {
     <#
     .SYNOPSIS
         Builds the NDT WinPE boot WIM and optionally a bootable ISO.
@@ -518,16 +538,16 @@ function Build-NDTPEImage {
         deploy section (e.g. DeployDC01).
 
     .EXAMPLE
-        Build-NDTPEImage
+        New-NDTPEImage
 
     .EXAMPLE
-        Build-NDTPEImage -SkipISO -Verbose
+        New-NDTPEImage -SkipISO -Verbose
 
     .EXAMPLE
-        Build-NDTPEImage -LocalPath D:\Deploy2026 -SkipWDS
+        New-NDTPEImage -LocalPath D:\Deploy2026 -SkipWDS
 
     .EXAMPLE
-        Build-NDTPEImage -RegisterOnly
+        New-NDTPEImage -RegisterOnly
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -555,7 +575,7 @@ function Build-NDTPEImage {
 
     # ── Verify Administrator ────────────────────────────────────────────────────
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    if (-not $isAdmin) { throw 'Build-NDTPEImage must be run as Administrator.' }
+    if (-not $isAdmin) { throw 'New-NDTPEImage must be run as Administrator.' }
 
     # ── Pre-flight: verify WDS is configured (skip if -SkipWDS) ────────────────
     if (-not $SkipWDS) {
@@ -583,10 +603,10 @@ To configure WDS before running this command:
        Install-WindowsFeature WDS -IncludeManagementTools
   2. Configure it (replace paths/options as needed):
        wdsutil /Initialize-Server /RemInst:"C:\RemoteInstall"
-  3. Then re-run: Build-NDTPEImage
+  3. Then re-run: New-NDTPEImage
 
 To skip WDS and build the WIM only:
-    Build-NDTPEImage -SkipWDS
+    New-NDTPEImage -SkipWDS
 '@
         }
     }
@@ -633,7 +653,7 @@ To skip WDS and build the WIM only:
         }
     } else {
         if (-not (Test-Path $wimFile)) {
-            throw "RegisterOnly: boot WIM not found at: $wimFile — run Build-NDTPEImage first."
+            throw "RegisterOnly: boot WIM not found at: $wimFile — run New-NDTPEImage first."
         }
         Write-Host 'RegisterOnly: skipping build (Steps 1-6), using existing boot2026.wim.' -ForegroundColor Yellow
     }
@@ -912,7 +932,7 @@ cmd.exe /k
         Write-Host "========================================`n" -ForegroundColor Green
 
     } catch {
-        Write-Error "Build-NDTPEImage failed: $_"
+        Write-Error "New-NDTPEImage failed: $_"
 
         # Attempt to discard a still-mounted WIM
         if (Test-Path $MountDir) {
@@ -1606,3 +1626,7 @@ function Test-NDTDeployment {
 }
 
 #endregion
+
+# Backward-compatible alias for the former command name (Build- is not an
+# approved verb under Windows PowerShell 5.1). Exported via ndt.psd1.
+New-Alias -Name Build-NDTPEImage -Value New-NDTPEImage -Force -ErrorAction SilentlyContinue

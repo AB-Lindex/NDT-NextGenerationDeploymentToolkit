@@ -89,9 +89,27 @@ if (-not $machineConfig) {
     exit 1
 }
 
+# Resolve the NDT Monitor URL early (from C:\temp\settings.json, written by Copy-Install.ps1)
+# so that even early-exit paths below can report a final status to the monitor.
+$script:MonitorUrl = $null
+$earlySettingsPath = 'C:\temp\settings.json'
+if (Test-Path $earlySettingsPath) {
+    try {
+        $earlySettings = Get-Content -Path $earlySettingsPath -Raw | ConvertFrom-Json
+        if ($earlySettings.Deploy -and $earlySettings.Deploy.MonitorUrl) {
+            $script:MonitorUrl = $earlySettings.Deploy.MonitorUrl.TrimEnd('/')
+        }
+    } catch {
+        # settings.json unreadable - monitor reporting stays disabled.
+    }
+}
+
 # Check if DeploymentSteps reference exists
 if (-not $machineConfig.DeploymentSteps) {
     Write-Log 'No deployment steps defined for this machine' -ForegroundColor Yellow
+    # OS-only deployment - nothing further to run. Report complete so the monitor
+    # does not stay stuck on the last WinPE update.
+    Send-NDTProgress -Status 'Done' -Description 'OS deployment complete (no steps)' -Completed 1 -Total 1
     exit 0
 }
 
@@ -150,10 +168,12 @@ if (Test-Path $settingsPath) {
     $autoLogonSettings = $null
 }
 
-# Resolve NDT Monitor URL from settings.json (populated by Copy-Install.ps1 from Deploy section)
-$script:MonitorUrl = $null
-if ($settings -and $settings.Deploy -and $settings.Deploy.MonitorUrl) {
+# Resolve NDT Monitor URL from settings.json (populated by Copy-Install.ps1 from Deploy section).
+# Already resolved early above; re-affirm here and log it once for the main run.
+if (-not $script:MonitorUrl -and $settings -and $settings.Deploy -and $settings.Deploy.MonitorUrl) {
     $script:MonitorUrl = $settings.Deploy.MonitorUrl.TrimEnd('/')
+}
+if ($script:MonitorUrl) {
     Write-Log "NDT Monitor : $script:MonitorUrl" -ForegroundColor Gray
 }
 
