@@ -9,6 +9,42 @@
 # 7. Applies unattend.xml to the offline image
 # Check if this is a capture operation (reference image creation)
 # Must be checked BEFORE diskpart to avoid wiping the reference system
+
+# ------------------------------------------------------------------
+# WinPE progress reporting to the NDT Monitor (best-effort, never blocks).
+# $script:MonitorUrl / PEMac / PEComputername are populated after the MAC is
+# validated below. Until then these calls are no-ops.
+# ------------------------------------------------------------------
+$script:MonitorUrl     = $null
+$script:PEMac          = $null
+$script:PEComputername = $null
+function Send-PEProgress {
+    param(
+        [string]$Description,
+        [int]$Percent = 0
+    )
+    if (-not $script:MonitorUrl) { return }
+    $body = @{
+        Computername = $script:PEComputername
+        MAC          = $script:PEMac
+        Phase        = 'WinPE'
+        Status       = 'WinPE'
+        Description  = $Description
+        Group        = 'WinPE'
+        StepId       = ''
+        Completed    = 0
+        Total        = 0
+        Percent      = $Percent
+        Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+    } | ConvertTo-Json -Compress
+    try {
+        Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post -Body $body `
+            -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop | Out-Null
+    } catch {
+        # Non-critical - never block deployment on a monitor outage.
+    }
+}
+
 Write-Host "Checking for capture mode..." -ForegroundColor Cyan
 $captureMode = $false
 $captureConfig = $null
@@ -89,14 +125,31 @@ if (-not $customSettings.$macAddress) {
 $machineConfig = $customSettings.$macAddress
 
 # ------------------------------------------------------------------
-# SAFETY CHECK - Deploy:NO prevents accidental disk wipe
+# SAFETY CHECK - Install:NO prevents accidental disk wipe
 # ------------------------------------------------------------------
-if ($machineConfig.Deploy -eq "NO") {
-    Write-Host "Deploy is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
+if ($machineConfig.Install -eq "NO") {
+    Write-Host "Install is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
     Write-Host "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 10
     wpeutil Reboot
     exit 0
+}
+
+# ------------------------------------------------------------------
+# Resolve NDT Monitor URL for WinPE-phase progress reporting (best-effort).
+# Uses the machine's deploy section (or default 'Deploy') from Sections.json.
+# ------------------------------------------------------------------
+$script:PEMac          = $macAddress
+$script:PEComputername = $machineConfig.Computername
+try {
+    $peSections = Get-Content 'Z:\Control\Sections.json' -Raw | ConvertFrom-Json
+    $peDeploySection = if ($machineConfig.Deploy -and $machineConfig.Deploy -notmatch '^(yes|no)$') { $machineConfig.Deploy } else { 'Deploy' }
+    if ($peSections.$peDeploySection -and $peSections.$peDeploySection.MonitorUrl) {
+        $script:MonitorUrl = $peSections.$peDeploySection.MonitorUrl.TrimEnd('/')
+        Write-Host "NDT Monitor: $script:MonitorUrl" -ForegroundColor Gray
+    }
+} catch {
+    # Sections.json missing MonitorUrl or unreadable - PE reporting stays disabled.
 }
 
 # ------------------------------------------------------------------
@@ -131,10 +184,13 @@ if (-not (Test-Path $wimPath)) {
 Write-Host "  WIM Path : $wimPath" -ForegroundColor Cyan
 Write-Host "  WIM Index: $wimIndex" -ForegroundColor Cyan
 
+Send-PEProgress -Description 'Configuration validated' -Percent 5
+
 # ------------------------------------------------------------------
 # STEP 3 - All validations passed - safe to wipe and partition disk
 # ------------------------------------------------------------------
 Write-Host "All pre-flight checks passed - partitioning disk 0..." -ForegroundColor Green
+Send-PEProgress -Description 'Partitioning disk' -Percent 10
 
 if ($isUEFI) {
     $diskpartScript = @"
@@ -186,6 +242,7 @@ Set-Partition -DriveLetter $windowsPartition.DriveLetter -NewDriveLetter C
 # ------------------------------------------------------------------
 # STEP 4 - Apply OS image
 # ------------------------------------------------------------------
+Send-PEProgress -Description 'Applying OS image' -Percent 20
 Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:$wimIndex /ApplyDir:C:\
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: DISM /Apply-Image failed with exit code $LASTEXITCODE" -ForegroundColor Red
@@ -194,6 +251,7 @@ if ($LASTEXITCODE -ne 0) {
     Read-Host "Press Enter to exit"
     exit $LASTEXITCODE
 }
+Send-PEProgress -Description 'OS image applied' -Percent 45
 
 # ------------------------------------------------------------------
 # STEP 4b - Run optional PostPEScript (PS5) after image apply
@@ -229,4 +287,5 @@ if ($isUEFI) {
 BCDEdit.exe /timeout 0
 
 Write-Host "Rebooting..." -ForegroundColor Green
+Send-PEProgress -Description 'Rebooting to Windows' -Percent 50
 wpeutil Reboot

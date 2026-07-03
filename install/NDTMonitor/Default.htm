@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NDT Deployment Monitor</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: Segoe UI, Tahoma, sans-serif; margin: 0; background: #1e1e1e; color: #e0e0e0; }
+  header { background: #0a5; padding: 12px 20px; color: #fff; }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header span { font-size: 12px; opacity: .85; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #333; font-size: 13px; white-space: nowrap; }
+  th { background: #252526; position: sticky; top: 0; }
+  tr:hover { background: #2a2d2e; }
+  .bar { background: #333; border-radius: 3px; height: 14px; width: 160px; overflow: hidden; display: inline-block; vertical-align: middle; }
+  .bar > i { display: block; height: 100%; background: #0a5; }
+  .pct { margin-left: 8px; font-size: 12px; }
+  .st { padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .st.WinPE { background:#553; color:#fd6; }
+  .st.Starting, .st.Running { background:#245; color:#6bf; }
+  .st.Completed { background:#252; color:#8e8; }
+  .st.Rebooting { background:#435; color:#c9f; }
+  .st.Paused { background:#553; color:#fe8; }
+  .st.Failed { background:#622; color:#f88; }
+  .st.Done { background:#0a5; color:#fff; }
+  .muted { color:#888; font-size:11px; }
+  #empty { padding: 30px; text-align:center; color:#888; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NDT Deployment Monitor</h1>
+  <span id="meta">loading…</span>
+</header>
+<table>
+  <thead>
+    <tr>
+      <th>Computer</th><th>MAC</th><th>Phase</th><th>Status</th>
+      <th>Step</th><th>Progress</th><th>Updated</th>
+    </tr>
+  </thead>
+  <tbody id="rows"></tbody>
+</table>
+<div id="empty">No machines are reporting yet.</div>
+
+<script>
+async function refresh() {
+  try {
+    const res = await fetch('progress', { cache: 'no-store' });
+    const data = await res.json();
+    const rows = document.getElementById('rows');
+    const empty = document.getElementById('empty');
+    rows.innerHTML = '';
+    if (!Array.isArray(data) || data.length === 0) {
+      empty.style.display = 'block';
+    } else {
+      empty.style.display = 'none';
+      data.sort((a, b) => (a.Computername || '').localeCompare(b.Computername || ''));
+      for (const m of data) {
+        const pct = Number(m.Percent || 0);
+        const status = (m.Status || '').replace(/[^A-Za-z]/g, '');
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          `<td>${esc(m.Computername)}</td>` +
+          `<td class="muted">${esc(m.MAC)}</td>` +
+          `<td>${esc(m.Phase || '')}</td>` +
+          `<td><span class="st ${status}">${esc(m.Status)}</span></td>` +
+          `<td>${esc(m.Description || '')}</td>` +
+          `<td><span class="bar"><i style="width:${pct}%"></i></span><span class="pct">${pct}%</span></td>` +
+          `<td class="muted">${esc(m.Received || m.Timestamp || '')}</td>`;
+        rows.appendChild(tr);
+      }
+    }
+    document.getElementById('meta').textContent =
+      `${Array.isArray(data) ? data.length : 0} machine(s) · refreshed ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    document.getElementById('meta').textContent = 'error: ' + e.message;
+  }
+}
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+}
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

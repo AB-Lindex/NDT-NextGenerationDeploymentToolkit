@@ -56,9 +56,12 @@
         [Parameter(Mandatory)]
         [SecureString]$DeployPassword,
         [Parameter()]
-        [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip'
+        [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip',
+        [Parameter()]
+        [int]$MonitorPort = 9999,
+        [Parameter()]
+        [switch]$SkipMonitor
     )
-
     #region ── Download and extract repository ZIP into LocalPath ────────────────
     $tempZip = Join-Path $env:TEMP 'ndt-repo.zip'
     $tempDir = Join-Path $env:TEMP 'ndt-repo'
@@ -139,6 +142,16 @@
             $settings.Deploy.Username = $DeployUsername
             $settings.Deploy.Password = $plainPassword
 
+            # Derive the monitor URL from the share host so clients reach it the same
+            # way they reach the share (e.g. \\ndt01\Deploy2026 -> http://ndt01:9999).
+            $shareHost = ($ShareUNC.TrimStart('\') -split '\\')[0]
+            $monitorUrl = "http://${shareHost}:$MonitorPort"
+            if ($settings.Deploy.PSObject.Properties.Name -contains 'MonitorUrl') {
+                $settings.Deploy.MonitorUrl = $monitorUrl
+            } else {
+                $settings.Deploy | Add-Member -NotePropertyName MonitorUrl -NotePropertyValue $monitorUrl
+            }
+
             $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $sectionsDest -Encoding UTF8
             Write-Verbose 'Deploy section stamped in Sections.json.'
 
@@ -187,6 +200,19 @@
     }
     #endregion
 
+    #region ── NDT Monitor (IIS progress web service) ────────────────────────────
+    if ($SkipMonitor) {
+        Write-Verbose 'NDT Monitor installation skipped (-SkipMonitor).'
+    } else {
+        try {
+            Install-NDTMonitor -LocalPath $LocalPath -Port $MonitorPort
+        } catch {
+            Write-Warning "NDT Monitor installation failed: $_"
+            Write-Warning 'The deployment share is still usable. Re-run Install-NDTMonitor to retry.'
+        }
+    }
+    #endregion
+
     Write-Host "NDT deployment share installed successfully." -ForegroundColor Green
     Write-Host "  Local path : $LocalPath"
     Write-Host "  Share      : \\$(hostname)\$ShareName"
@@ -217,6 +243,225 @@
     Write-Host "          - WIM files for operating systems and reference images" -ForegroundColor Yellow
     Write-Host "          - Licensed or third-party application installers" -ForegroundColor Yellow
     Write-Host "          - Site-specific content under Applications2026\" -ForegroundColor Yellow
+}
+
+function Install-NDTMonitor {
+    <#
+    .SYNOPSIS
+        Installs the NDT deployment-progress web service in IIS (idempotent).
+
+    .DESCRIPTION
+        Provisions an IIS-hosted REST endpoint that receives deployment progress
+        updates from each deploying machine (WinPE phase and the post-image step
+        engine) - the NDT equivalent of the MDT monitoring web service.
+
+        The function is fully idempotent and performs the following steps:
+          1. Installs the required IIS roles/features (Web-Server, ASP.NET 4.x,
+             ISAPI, management + scripting tools). Install-WindowsFeature skips
+             anything already present.
+          2. Creates the progress-log folder.
+          3. Deploys the site content (web.config, App_Code\ProgressHandler.cs,
+             Default.htm dashboard) from install\NDTMonitor into the site path,
+             stamping the real log-folder path into web.config.
+          4. Creates / updates a dedicated application pool (.NET v4.0, Integrated).
+          5. Creates / updates the website bound to the requested port.
+          6. Grants the app-pool identity Modify rights on the log folder.
+          7. Opens the inbound firewall port.
+          8. Starts the app pool and website.
+
+        Endpoints (served on http://<host>:<Port>):
+          POST /progress          receive a progress update (JSON body)
+          GET  /progress          all machine states as a JSON array
+          GET  /progress?mac=..   a single machine's latest state
+          GET  /                  live HTML dashboard (Default.htm)
+
+    .PARAMETER LocalPath
+        Root of the NDT deployment share (source of the site content).
+        Default: C:\Deploy2026
+
+    .PARAMETER Port
+        TCP port the monitor website listens on. Default: 9999
+
+    .PARAMETER SitePath
+        Physical path for the IIS site. Default: C:\inetpub\ndtmonitor
+
+    .PARAMETER LogRoot
+        Folder where per-machine progress JSON is stored.
+        Default: <LocalPath>\Logs\progress
+
+    .PARAMETER SiteName
+        IIS website name. Default: NDTMonitor
+
+    .PARAMETER AppPoolName
+        IIS application pool name. Default: NDTMonitor
+
+    .EXAMPLE
+        Install-NDTMonitor
+
+    .EXAMPLE
+        Install-NDTMonitor -Port 8080 -Verbose
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter()]
+        [int]$Port = 9999,
+        [Parameter()]
+        [string]$SitePath = 'C:\inetpub\ndtmonitor',
+        [Parameter()]
+        [string]$LogRoot,
+        [Parameter()]
+        [string]$SiteName = 'NDTMonitor',
+        [Parameter()]
+        [string]$AppPoolName = 'NDTMonitor'
+    )
+
+    # ── Verify Administrator ────────────────────────────────────────────────────
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) { throw 'Install-NDTMonitor must be run as Administrator.' }
+
+    if (-not $LogRoot) { $LogRoot = Join-Path $LocalPath 'Logs\progress' }
+    $sourceDir = Join-Path $LocalPath 'install\NDTMonitor'
+    if (-not (Test-Path $sourceDir)) {
+        throw "NDT Monitor source content not found at: $sourceDir"
+    }
+
+    Write-Host "`nInstalling NDT Monitor (IIS)..." -ForegroundColor Cyan
+
+    # ── Step 1: Install IIS roles/features (idempotent) ─────────────────────────
+    Write-Host 'Step 1: Ensuring IIS roles and features...' -ForegroundColor Cyan
+    $features = @(
+        'Web-Server',
+        'Web-Common-Http',
+        'Web-Static-Content',
+        'Web-Default-Doc',
+        'Web-Http-Errors',
+        'Web-Net-Ext45',
+        'Web-Asp-Net45',
+        'Web-ISAPI-Ext',
+        'Web-ISAPI-Filter',
+        'Web-Mgmt-Console',
+        'Web-Scripting-Tools'
+    )
+    if ($PSCmdlet.ShouldProcess('IIS', "Install features: $($features -join ', ')")) {
+        # Install-WindowsFeature is inherently idempotent - installed features are skipped.
+        $result = Install-WindowsFeature -Name $features -IncludeManagementTools -ErrorAction Stop
+        if ($result.RestartNeeded -eq 'Yes') {
+            Write-Warning '  A restart is required to complete IIS feature installation.'
+        }
+        Write-Host '  [OK] IIS features present' -ForegroundColor Green
+    }
+
+    Import-Module WebAdministration -ErrorAction Stop
+
+    # ── Step 2: Create the progress-log folder ──────────────────────────────────
+    Write-Host 'Step 2: Ensuring progress-log folder...' -ForegroundColor Cyan
+    if (-not (Test-Path $LogRoot)) {
+        New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
+        Write-Host "  [OK] Created: $LogRoot" -ForegroundColor Green
+    } else {
+        Write-Host "  [OK] Exists: $LogRoot" -ForegroundColor Gray
+    }
+
+    # ── Step 3: Deploy site content ─────────────────────────────────────────────
+    Write-Host 'Step 3: Deploying site content...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($SitePath, 'Deploy NDT Monitor site content')) {
+        if (-not (Test-Path $SitePath)) { New-Item -ItemType Directory -Path $SitePath -Force | Out-Null }
+
+        # Copy App_Code, Default.htm and web.config (overwrite = idempotent).
+        Copy-Item -Path (Join-Path $sourceDir '*') -Destination $SitePath -Recurse -Force
+
+        # Stamp the real LogRoot into the deployed web.config appSetting.
+        $webConfig = Join-Path $SitePath 'web.config'
+        $xml = [xml](Get-Content $webConfig -Raw)
+        $node = $xml.configuration.appSettings.add | Where-Object { $_.key -eq 'LogRoot' }
+        if ($node) {
+            $node.value = $LogRoot
+        } else {
+            $add = $xml.CreateElement('add')
+            $add.SetAttribute('key', 'LogRoot')
+            $add.SetAttribute('value', $LogRoot)
+            $xml.configuration.appSettings.AppendChild($add) | Out-Null
+        }
+        $xml.Save($webConfig)
+        Write-Host "  [OK] Content deployed to $SitePath (LogRoot -> $LogRoot)" -ForegroundColor Green
+    }
+
+    # ── Step 4: Application pool ─────────────────────────────────────────────────
+    Write-Host 'Step 4: Configuring application pool...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($AppPoolName, 'Create/update IIS application pool')) {
+        if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
+            New-WebAppPool -Name $AppPoolName | Out-Null
+            Write-Host "  [OK] Created app pool: $AppPoolName" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] App pool exists: $AppPoolName" -ForegroundColor Gray
+        }
+        Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value 'v4.0'
+        Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedPipelineMode  -Value 'Integrated'
+        Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name startMode            -Value 'AlwaysRunning'
+    }
+
+    # ── Step 5: Website ──────────────────────────────────────────────────────────
+    Write-Host 'Step 5: Configuring website...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $Port")) {
+        $existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
+        if (-not $existingSite) {
+            New-Website -Name $SiteName -Port $Port -PhysicalPath $SitePath `
+                -ApplicationPool $AppPoolName -Force | Out-Null
+            Write-Host "  [OK] Created website: $SiteName (port $Port)" -ForegroundColor Green
+        } else {
+            Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath      -Value $SitePath
+            Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool   -Value $AppPoolName
+            # Ensure the http binding on the requested port exists.
+            $hasBinding = Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
+                Where-Object { $_.bindingInformation -like "*:$($Port):*" }
+            if (-not $hasBinding) {
+                New-WebBinding -Name $SiteName -Protocol http -Port $Port -IPAddress '*' | Out-Null
+            }
+            Write-Host "  [OK] Website updated: $SiteName (port $Port)" -ForegroundColor Green
+        }
+    }
+
+    # ── Step 6: Grant app-pool identity write access to the log folder ──────────
+    Write-Host 'Step 6: Granting log-folder permissions...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($LogRoot, "Grant Modify to IIS AppPool\$AppPoolName")) {
+        # icacls re-grant is idempotent (updates the existing ACE).
+        icacls $LogRoot /grant "IIS AppPool\${AppPoolName}:(OI)(CI)M" /T /C | Out-Null
+        Write-Host "  [OK] Modify granted to 'IIS AppPool\$AppPoolName'" -ForegroundColor Green
+    }
+
+    # ── Step 7: Firewall rule (idempotent) ──────────────────────────────────────
+    Write-Host 'Step 7: Ensuring firewall rule...' -ForegroundColor Cyan
+    $ruleName = "NDT Monitor $Port"
+    if ($PSCmdlet.ShouldProcess($ruleName, 'Create inbound firewall rule')) {
+        $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+        if (-not $existingRule) {
+            New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
+                -Protocol TCP -LocalPort $Port | Out-Null
+            Write-Host "  [OK] Firewall rule created: $ruleName" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] Firewall rule exists: $ruleName" -ForegroundColor Gray
+        }
+    }
+
+    # ── Step 8: Start app pool + site ───────────────────────────────────────────
+    Write-Host 'Step 8: Starting monitor...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($SiteName, 'Start app pool and website')) {
+        if ((Get-WebAppPoolState -Name $AppPoolName).Value -ne 'Started') {
+            Start-WebAppPool -Name $AppPoolName
+        }
+        if ((Get-WebsiteState -Name $SiteName).Value -ne 'Started') {
+            Start-Website -Name $SiteName
+        }
+        Write-Host '  [OK] Monitor started' -ForegroundColor Green
+    }
+
+    $hostName = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
+    Write-Host "`nNDT Monitor installed." -ForegroundColor Green
+    Write-Host "  Dashboard : http://${hostName}:$Port/" -ForegroundColor White
+    Write-Host "  Endpoint  : http://${hostName}:$Port/progress" -ForegroundColor White
+    Write-Host "  Log folder: $LogRoot" -ForegroundColor Gray
 }
 
 function Build-NDTPEImage {

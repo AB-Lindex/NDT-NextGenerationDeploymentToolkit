@@ -35,6 +35,7 @@ function Send-NDTProgress {
     $body = [ordered]@{
         Computername = $env:COMPUTERNAME
         MAC          = $macAddress
+        Phase        = 'Windows'
         Status       = $Status
         Description  = $Description
         Group        = $Group
