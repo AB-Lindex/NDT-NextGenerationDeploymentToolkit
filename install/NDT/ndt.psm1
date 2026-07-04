@@ -1,4 +1,4 @@
-﻿function Install-NDT {
+function Install-NDT {
     <#
     .SYNOPSIS
         Installs and configures an NDT deployment share.
@@ -28,7 +28,7 @@
 
     .PARAMETER DeployPassword
         Password for the deploy account as a SecureString. Stored in CustomSettings.json.
-        Mandatory — you will be prompted if not supplied.
+        Mandatory  -  you will be prompted if not supplied.
 
     .PARAMETER RepoZipUrl
         URL of the GitHub repository archive ZIP to download seed control files from.
@@ -58,11 +58,11 @@
         [Parameter()]
         [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip',
         [Parameter()]
-        [int]$MonitorPort = 9999,
+        [int]$MonitorPort = 443,
         [Parameter()]
         [switch]$SkipMonitor
     )
-    #region ── Download and extract repository ZIP into LocalPath ────────────────
+    #region -- Download and extract repository ZIP into LocalPath ----------------
     $tempZip = Join-Path $env:TEMP 'ndt-repo.zip'
     $tempDir = Join-Path $env:TEMP 'ndt-repo'
 
@@ -124,7 +124,7 @@
     }
     #endregion
 
-    #region ── Stamp Deploy section of Sections.json with parameters ─────────────
+    #region -- Stamp Deploy section of Sections.json with parameters -------------
     $controlDir   = Join-Path $LocalPath 'Control'
     $sectionsDest = Join-Path $controlDir 'Sections.json'
 
@@ -143,9 +143,9 @@
             $settings.Deploy.Password = $plainPassword
 
             # Derive the monitor URL from the share host so clients reach it the same
-            # way they reach the share (e.g. \\ndt01\Deploy2026 -> http://ndt01:9999).
+            # way they reach the share (e.g. \\ndt01\Deploy2026 -> https://ndt01:443).
             $shareHost = ($ShareUNC.TrimStart('\') -split '\\')[0]
-            $monitorUrl = "http://${shareHost}:$MonitorPort"
+            $monitorUrl = "https://${shareHost}:$MonitorPort"
             if ($settings.Deploy.PSObject.Properties.Name -contains 'MonitorUrl') {
                 $settings.Deploy.MonitorUrl = $monitorUrl
             } else {
@@ -160,7 +160,7 @@
     }
     #endregion
 
-    #region ── SMB share ─────────────────────────────────────────────────────────
+    #region -- SMB share ---------------------------------------------------------
     $existingShare = Get-SmbShare -Name $ShareName -ErrorAction SilentlyContinue
 
     if ($existingShare) {
@@ -173,7 +173,7 @@
     }
     #endregion
 
-    #region ── Share permissions ─────────────────────────────────────────────────
+    #region -- Share permissions -------------------------------------------------
     # Grant the deploy account Full Access on the share.
     $existingAccess = Get-SmbShareAccess -Name $ShareName -ErrorAction SilentlyContinue |
         Where-Object { $_.AccountName -eq $DeployUsername }
@@ -200,7 +200,7 @@
     }
     #endregion
 
-    #region ── NDT Monitor (IIS progress web service) ────────────────────────────
+    #region -- NDT Monitor (IIS progress web service) ----------------------------
     if ($SkipMonitor) {
         Write-Verbose 'NDT Monitor installation skipped (-SkipMonitor).'
     } else {
@@ -263,13 +263,15 @@ function Install-NDTMonitor {
           3. Deploys the site content (web.config, App_Code\ProgressHandler.cs,
              Default.htm dashboard) from install\NDTMonitor into the site path,
              stamping the real log-folder path into web.config.
-          4. Creates / updates a dedicated application pool (.NET v4.0, Integrated).
-          5. Creates / updates the website bound to the requested port.
-          6. Grants the app-pool identity Modify rights on the log folder.
-          7. Opens the inbound firewall port.
-          8. Starts the app pool and website.
+          4. Imports the PFX certificate into LocalMachine\My (idempotent by thumbprint).
+          5. Creates / updates a dedicated application pool (.NET v4.0, Integrated).
+          6. Creates / updates the HTTPS website bound to the requested port, removes
+             any existing HTTP bindings, and attaches the imported certificate.
+          7. Grants the app-pool identity Modify rights on the log folder.
+          8. Opens the inbound firewall port.
+          9. Starts the app pool and website.
 
-        Endpoints (served on http://<host>:<Port>):
+        Endpoints (served on https://<host>:<Port>):
           POST /progress          receive a progress update (JSON body)
           GET  /progress          all machine states as a JSON array
           GET  /progress?mac=..   a single machine's latest state
@@ -280,7 +282,7 @@ function Install-NDTMonitor {
         Default: C:\Deploy2026
 
     .PARAMETER Port
-        TCP port the monitor website listens on. Default: 9999
+        TCP port the monitor website listens on. Default: 443
 
     .PARAMETER SitePath
         Physical path for the IIS site. Default: C:\inetpub\ndtmonitor
@@ -295,18 +297,26 @@ function Install-NDTMonitor {
     .PARAMETER AppPoolName
         IIS application pool name. Default: NDTMonitor
 
+    .PARAMETER CertificatePath
+        Path to the PFX certificate file to bind to the HTTPS site.
+        Default: <LocalPath>\install\NDTMonitor\ndt01.corp.dev.pfx
+
+    .PARAMETER CertificatePassword
+        Password for the PFX certificate as a SecureString.
+        If not supplied, uses the standard NDT Monitor certificate password.
+
     .EXAMPLE
         Install-NDTMonitor
 
     .EXAMPLE
-        Install-NDTMonitor -Port 8080 -Verbose
+        Install-NDTMonitor -Port 8443 -Verbose
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
         [Parameter()]
         [string]$LocalPath = 'C:\Deploy2026',
         [Parameter()]
-        [int]$Port = 9999,
+        [int]$Port = 443,
         [Parameter()]
         [string]$SitePath = 'C:\inetpub\ndtmonitor',
         [Parameter()]
@@ -314,14 +324,18 @@ function Install-NDTMonitor {
         [Parameter()]
         [string]$SiteName = 'NDTMonitor',
         [Parameter()]
-        [string]$AppPoolName = 'NDTMonitor'
+        [string]$AppPoolName = 'NDTMonitor',
+        [Parameter()]
+        [string]$CertificatePath,
+        [Parameter()]
+        [SecureString]$CertificatePassword
     )
 
-    # ── Verify Administrator ────────────────────────────────────────────────────
+    # -- Verify Administrator ----------------------------------------------------
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) { throw 'Install-NDTMonitor must be run as Administrator.' }
 
-    # ── Ensure Windows PowerShell 5.1 ───────────────────────────────────────────
+    # -- Ensure Windows PowerShell 5.1 -------------------------------------------
     # The WebAdministration IIS: PSDrive provider does not work under PowerShell 7+.
     # When invoked from PS7 (e.g. by Install-NDT running in pwsh), relaunch this
     # command in Windows PowerShell 5.1 and return.
@@ -334,6 +348,14 @@ function Install-NDTMonitor {
 
         $inner = "Import-Module '$manifest' -Force; Install-NDTMonitor -LocalPath '$LocalPath' -Port $Port -SitePath '$SitePath' -SiteName '$SiteName' -AppPoolName '$AppPoolName'"
         if ($PSBoundParameters.ContainsKey('LogRoot') -and $LogRoot) { $inner += " -LogRoot '$LogRoot'" }
+        if ($CertificatePath) { $inner += " -CertificatePath '$CertificatePath'" }
+        if ($CertificatePassword) {
+            $bstr5 = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($CertificatePassword)
+            $plain5 = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr5)
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr5)
+            $inner += " -CertificatePassword (ConvertTo-SecureString '$plain5' -AsPlainText -Force)"
+            $plain5 = $null
+        }
         if ($VerbosePreference -eq 'Continue') { $inner += ' -Verbose' }
 
         & $ps5 -NoProfile -ExecutionPolicy Bypass -Command $inner
@@ -342,14 +364,21 @@ function Install-NDTMonitor {
     }
 
     if (-not $LogRoot) { $LogRoot = Join-Path $LocalPath 'Logs\progress' }
+    if (-not $CertificatePath) { $CertificatePath = Join-Path $LocalPath 'install\NDTMonitor\ndt01.corp.dev.pfx' }
+    if (-not $CertificatePassword) {
+        $CertificatePassword = ConvertTo-SecureString '1q2w3e4r' -AsPlainText -Force
+    }
     $sourceDir = Join-Path $LocalPath 'install\NDTMonitor'
     if (-not (Test-Path $sourceDir)) {
         throw "NDT Monitor source content not found at: $sourceDir"
     }
+    if (-not (Test-Path $CertificatePath)) {
+        throw "Certificate not found at: $CertificatePath -- place the PFX file there before running Install-NDTMonitor."
+    }
 
     Write-Host "`nInstalling NDT Monitor (IIS)..." -ForegroundColor Cyan
 
-    # ── Step 1: Install IIS roles/features (idempotent) ─────────────────────────
+    # -- Step 1: Install IIS roles/features (idempotent) -------------------------
     Write-Host 'Step 1: Ensuring IIS roles and features...' -ForegroundColor Cyan
     $features = @(
         'Web-Server',
@@ -375,7 +404,7 @@ function Install-NDTMonitor {
 
     Import-Module WebAdministration -ErrorAction Stop
 
-    # ── Step 2: Create the progress-log folder ──────────────────────────────────
+    # -- Step 2: Create the progress-log folder ----------------------------------
     Write-Host 'Step 2: Ensuring progress-log folder...' -ForegroundColor Cyan
     if (-not (Test-Path $LogRoot)) {
         New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
@@ -384,7 +413,7 @@ function Install-NDTMonitor {
         Write-Host "  [OK] Exists: $LogRoot" -ForegroundColor Gray
     }
 
-    # ── Step 3: Deploy site content ─────────────────────────────────────────────
+    # -- Step 3: Deploy site content ---------------------------------------------
     Write-Host 'Step 3: Deploying site content...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($SitePath, 'Deploy NDT Monitor site content')) {
         if (-not (Test-Path $SitePath)) { New-Item -ItemType Directory -Path $SitePath -Force | Out-Null }
@@ -408,8 +437,35 @@ function Install-NDTMonitor {
         Write-Host "  [OK] Content deployed to $SitePath (LogRoot -> $LogRoot)" -ForegroundColor Green
     }
 
-    # ── Step 4: Application pool ─────────────────────────────────────────────────
-    Write-Host 'Step 4: Configuring application pool...' -ForegroundColor Cyan
+    # -- Step 4: Import SSL certificate ------------------------------------------
+    Write-Host 'Step 4: Importing SSL certificate...' -ForegroundColor Cyan
+    $thumbprint = $null
+    if ($PSCmdlet.ShouldProcess($CertificatePath, 'Import PFX certificate into LocalMachine\My store')) {
+        # Read the thumbprint from the PFX without importing first so the import is idempotent.
+        $certObj = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $CertificatePath,
+            $CertificatePassword,
+            [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet
+        )
+        $thumbprint = $certObj.Thumbprint
+        $certObj.Dispose()
+
+        $existingCert = Get-ChildItem Cert:\LocalMachine\My |
+            Where-Object { $_.Thumbprint -eq $thumbprint } |
+            Select-Object -First 1
+
+        if ($existingCert) {
+            Write-Host "  [OK] Certificate already in store (thumbprint: $thumbprint)" -ForegroundColor Gray
+        } else {
+            Import-PfxCertificate -FilePath $CertificatePath `
+                -Password $CertificatePassword `
+                -CertStoreLocation Cert:\LocalMachine\My | Out-Null
+            Write-Host "  [OK] Certificate imported (thumbprint: $thumbprint)" -ForegroundColor Green
+        }
+    }
+
+    # -- Step 5: Application pool -------------------------------------------------
+    Write-Host 'Step 5: Configuring application pool...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($AppPoolName, 'Create/update IIS application pool')) {
         if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
             New-WebAppPool -Name $AppPoolName | Out-Null
@@ -422,37 +478,64 @@ function Install-NDTMonitor {
         Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name startMode            -Value 'AlwaysRunning'
     }
 
-    # ── Step 5: Website ──────────────────────────────────────────────────────────
-    Write-Host 'Step 5: Configuring website...' -ForegroundColor Cyan
-    if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $Port")) {
+    # -- Step 6: Website (HTTPS) --------------------------------------------------
+    Write-Host 'Step 6: Configuring website (HTTPS)...' -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $Port (HTTPS)")) {
         $existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
         if (-not $existingSite) {
+            # New-Website creates an HTTP binding by default; remove it, then add HTTPS.
             New-Website -Name $SiteName -Port $Port -PhysicalPath $SitePath `
                 -ApplicationPool $AppPoolName -Force | Out-Null
-            Write-Host "  [OK] Created website: $SiteName (port $Port)" -ForegroundColor Green
+            Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
+                Remove-WebBinding -ErrorAction SilentlyContinue
+            Write-Host "  [OK] Created website: $SiteName" -ForegroundColor Green
         } else {
-            Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath      -Value $SitePath
-            Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool   -Value $AppPoolName
-            # Ensure the http binding on the requested port exists.
-            $hasBinding = Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
-                Where-Object { $_.bindingInformation -like "*:$($Port):*" }
-            if (-not $hasBinding) {
-                New-WebBinding -Name $SiteName -Protocol http -Port $Port -IPAddress '*' | Out-Null
+            Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath    -Value $SitePath
+            Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $AppPoolName
+            # Remove any stale HTTP bindings (idempotent transition from HTTP to HTTPS).
+            Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
+                Remove-WebBinding -ErrorAction SilentlyContinue
+            Write-Host "  [OK] Website updated: $SiteName" -ForegroundColor Green
+        }
+
+        # Ensure an HTTPS binding exists on the requested port.
+        $hasHttpsBinding = Get-WebBinding -Name $SiteName -Protocol https -ErrorAction SilentlyContinue |
+            Where-Object { $_.bindingInformation -like "*:${Port}:*" }
+        if (-not $hasHttpsBinding) {
+            New-WebBinding -Name $SiteName -Protocol https -Port $Port -IPAddress '*' -SslFlags 0 | Out-Null
+            Write-Host "  [OK] HTTPS binding added (port $Port)" -ForegroundColor Green
+        } else {
+            Write-Host "  [OK] HTTPS binding exists (port $Port)" -ForegroundColor Gray
+        }
+
+        # Bind the SSL certificate to the port (idempotent: only replace if thumbprint differs).
+        if ($thumbprint) {
+            $sslBind = Get-Item "IIS:\SslBindings\0.0.0.0!$Port" -ErrorAction SilentlyContinue
+            if ($sslBind -and $sslBind.Thumbprint -eq $thumbprint) {
+                Write-Host "  [OK] SSL certificate already bound (thumbprint: $thumbprint)" -ForegroundColor Gray
+            } else {
+                if ($sslBind) { Remove-Item "IIS:\SslBindings\0.0.0.0!$Port" -ErrorAction SilentlyContinue }
+                $httpsWebBinding = Get-WebBinding -Name $SiteName -Protocol https |
+                    Where-Object { $_.bindingInformation -like "*:${Port}:*" } |
+                    Select-Object -First 1
+                $httpsWebBinding.AddSslCertificate($thumbprint, 'MY')
+                Write-Host "  [OK] SSL certificate bound (thumbprint: $thumbprint)" -ForegroundColor Green
             }
-            Write-Host "  [OK] Website updated: $SiteName (port $Port)" -ForegroundColor Green
+        } else {
+            Write-Warning "  SSL thumbprint unavailable (ShouldProcess skipped step 4) -- HTTPS binding has no certificate."
         }
     }
 
-    # ── Step 6: Grant app-pool identity write access to the log folder ──────────
-    Write-Host 'Step 6: Granting log-folder permissions...' -ForegroundColor Cyan
+    # -- Step 7: Grant app-pool identity write access to the log folder ----------
+    Write-Host 'Step 7: Granting log-folder permissions...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($LogRoot, "Grant Modify to IIS AppPool\$AppPoolName")) {
         # icacls re-grant is idempotent (updates the existing ACE).
         icacls $LogRoot /grant "IIS AppPool\${AppPoolName}:(OI)(CI)M" /T /C | Out-Null
         Write-Host "  [OK] Modify granted to 'IIS AppPool\$AppPoolName'" -ForegroundColor Green
     }
 
-    # ── Step 7: Firewall rule (idempotent) ──────────────────────────────────────
-    Write-Host 'Step 7: Ensuring firewall rule...' -ForegroundColor Cyan
+    # -- Step 8: Firewall rule (idempotent) --------------------------------------
+    Write-Host 'Step 8: Ensuring firewall rule...' -ForegroundColor Cyan
     $ruleName = "NDT Monitor $Port"
     if ($PSCmdlet.ShouldProcess($ruleName, 'Create inbound firewall rule')) {
         $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
@@ -465,8 +548,8 @@ function Install-NDTMonitor {
         }
     }
 
-    # ── Step 8: Start app pool + site ───────────────────────────────────────────
-    Write-Host 'Step 8: Starting monitor...' -ForegroundColor Cyan
+    # -- Step 9: Start app pool + site -------------------------------------------
+    Write-Host 'Step 9: Starting monitor...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($SiteName, 'Start app pool and website')) {
         if ((Get-WebAppPoolState -Name $AppPoolName).Value -ne 'Started') {
             Start-WebAppPool -Name $AppPoolName
@@ -479,8 +562,8 @@ function Install-NDTMonitor {
 
     $hostName = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
     Write-Host "`nNDT Monitor installed." -ForegroundColor Green
-    Write-Host "  Dashboard : http://${hostName}:$Port/" -ForegroundColor White
-    Write-Host "  Endpoint  : http://${hostName}:$Port/progress" -ForegroundColor White
+    Write-Host "  Dashboard : https://${hostName}:$Port/" -ForegroundColor White
+    Write-Host "  Endpoint  : https://${hostName}:$Port/progress" -ForegroundColor White
     Write-Host "  Log folder: $LogRoot" -ForegroundColor Gray
 }
 
@@ -494,7 +577,7 @@ function New-NDTPEImage {
           1. Generates settings.json from the Deploy section of CustomSettings.json
              and writes it into the WindowsPE\Deploy folder.
           2. Creates a fresh WinPE staging tree from the ADK base using copype
-             (always builds clean — never patches an existing WIM).
+             (always builds clean  -  never patches an existing WIM).
           3. Mounts the staging boot.wim with DISM.
           4. Adds required WinPE optional packages in dependency order:
              WinPE-WMI, WinPE-NetFx, WinPE-Scripting, WinPE-PowerShell,
@@ -528,7 +611,7 @@ function New-NDTPEImage {
         Skip ISO creation (Step 8). Useful when only a WDS-served WIM is needed.
 
     .PARAMETER RegisterOnly
-        Skip the full PE build (Steps 1–6) and register the existing Boot\boot2026.wim
+        Skip the full PE build (Steps 1-6) and register the existing Boot\boot2026.wim
         directly in WDS. Implies -SkipISO. Use this when the WIM is already built and
         only the WDS boot-image registration needs to be refreshed.
 
@@ -573,15 +656,15 @@ function New-NDTPEImage {
         [string]$DeploySection = 'Deploy'
     )
 
-    # ── Verify Administrator ────────────────────────────────────────────────────
+    # -- Verify Administrator ----------------------------------------------------
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if (-not $isAdmin) { throw 'New-NDTPEImage must be run as Administrator.' }
 
-    # ── Pre-flight: verify WDS is configured (skip if -SkipWDS) ────────────────
+    # -- Pre-flight: verify WDS is configured (skip if -SkipWDS) ----------------
     if (-not $SkipWDS) {
         # Two-stage check:
-        #   1. Service exists — the WDS role is installed.
-        #   2. wdsutil /get-server exit code — 0 means WDS is initialized and configured;
+        #   1. Service exists  -  the WDS role is installed.
+        #   2. wdsutil /get-server exit code  -  0 means WDS is initialized and configured;
         #      non-zero means the role is present but wdsutil /Initialize-Server has not
         #      been run yet (or the service is stopped/broken).
         # Note: the WdsInstallState registry value documented in older guides is not
@@ -611,7 +694,7 @@ To skip WDS and build the WIM only:
         }
     }
 
-    # ── Resolve paths ───────────────────────────────────────────────────────────
+    # -- Resolve paths -----------------------------------------------------------
     $wimFile        = Join-Path $LocalPath 'Boot\boot2026.wim'
     $isoFile        = Join-Path $LocalPath 'Boot\boot2026.iso'
     $sectionsPath   = Join-Path $LocalPath 'Control\Sections.json'
@@ -619,7 +702,7 @@ To skip WDS and build the WIM only:
     $deploySource       = Join-Path $winPEScriptDir 'Deploy'
     $unattendSource     = Join-Path $winPEScriptDir 'Unattend.xml'
 
-    # ── Locate Windows ADK ──────────────────────────────────────────────────────
+    # -- Locate Windows ADK ------------------------------------------------------
     $adkRoot    = $null
     $adkRegPath = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots'
     if (Test-Path $adkRegPath) {
@@ -653,14 +736,14 @@ To skip WDS and build the WIM only:
         }
     } else {
         if (-not (Test-Path $wimFile)) {
-            throw "RegisterOnly: boot WIM not found at: $wimFile — run New-NDTPEImage first."
+            throw "RegisterOnly: boot WIM not found at: $wimFile  -  run New-NDTPEImage first."
         }
         Write-Host 'RegisterOnly: skipping build (Steps 1-6), using existing boot2026.wim.' -ForegroundColor Yellow
     }
 
     try {
         if (-not $RegisterOnly) {
-        # ── Step 1: Generate settings.json ─────────────────────────────────────
+        # -- Step 1: Generate settings.json -------------------------------------
         Write-Host 'Step 1: Generating settings.json...' -ForegroundColor Cyan
 
         if (-not (Test-Path $sectionsPath)) {
@@ -677,7 +760,7 @@ To skip WDS and build the WIM only:
             Password = $deployCfg.Password
         }
 
-        # settings.json is injected directly into the WIM in Step 5 — the source-folder
+        # settings.json is injected directly into the WIM in Step 5  -  the source-folder
         # copy (Scripts\unattend2026\WindowsPE\Deploy\settings.json) is intentionally
         # NOT modified so it stays as a safe placeholder in source control.
         Write-Host '  [OK] settings.json prepared (will be written into WIM in Step 5)' -ForegroundColor Green
@@ -685,8 +768,8 @@ To skip WDS and build the WIM only:
         Write-Host "  Share          : $($settingsObj.Share)" -ForegroundColor Gray
         Write-Host "  Username       : $($settingsObj.Username)" -ForegroundColor Gray
 
-        # ── Step 2: Create fresh WinPE staging tree with copype ─────────────────
-        # Always build from the clean ADK base — never patch an existing WIM.
+        # -- Step 2: Create fresh WinPE staging tree with copype -----------------
+        # Always build from the clean ADK base  -  never patch an existing WIM.
         Write-Host "`nStep 2: Creating fresh WinPE staging tree..." -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($IsoStagingDir, 'Run copype to create fresh ADK base')) {
@@ -701,7 +784,7 @@ To skip WDS and build the WIM only:
 
         $stagingBootWim = Join-Path $IsoStagingDir 'media\sources\boot.wim'
 
-        # ── Step 3: Mount the fresh base WIM ────────────────────────────────────
+        # -- Step 3: Mount the fresh base WIM ------------------------------------
         Write-Host "`nStep 3: Mounting base WIM..." -ForegroundColor Cyan
 
         if (-not (Test-Path $MountDir)) {
@@ -714,13 +797,13 @@ To skip WDS and build the WIM only:
             Write-Host "  [OK] WIM mounted at: $MountDir" -ForegroundColor Green
         }
 
-        # ── Step 4: Add required WinPE optional packages ─────────────────────────
-        # WinPE-WMI        — WMI (prerequisite for PowerShell)
-        # WinPE-NetFx      — .NET Framework (prerequisite for PowerShell)
-        # WinPE-Scripting  — scripting support (prerequisite for PowerShell)
-        # WinPE-PowerShell — powershell.exe in WinPE
-        # WinPE-StorageWMI — storage management via WMI
-        # WinPE-DismCmdlets— DISM PowerShell cmdlets
+        # -- Step 4: Add required WinPE optional packages -------------------------
+        # WinPE-WMI         -  WMI (prerequisite for PowerShell)
+        # WinPE-NetFx       -  .NET Framework (prerequisite for PowerShell)
+        # WinPE-Scripting   -  scripting support (prerequisite for PowerShell)
+        # WinPE-PowerShell  -  powershell.exe in WinPE
+        # WinPE-StorageWMI  -  storage management via WMI
+        # WinPE-DismCmdlets -  DISM PowerShell cmdlets
         Write-Host "`nStep 4: Adding WinPE optional packages..." -ForegroundColor Cyan
 
         $packages = @(
@@ -747,7 +830,7 @@ To skip WDS and build the WIM only:
             Write-Host '  [OK] All optional packages added' -ForegroundColor Green
         }
 
-        # ── Step 5: Inject Deploy folder and Unattend.xml ───────────────────────
+        # -- Step 5: Inject Deploy folder and Unattend.xml -----------------------
         Write-Host "`nStep 5: Injecting Deploy folder into WIM..." -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Inject Deploy folder and Unattend.xml')) {
@@ -758,7 +841,7 @@ To skip WDS and build the WIM only:
 
             foreach ($file in (Get-ChildItem -Path $deploySource -File)) {
                 if ($file.Name -eq 'settings.json') {
-                    # Skip — settings.json is written fresh from CustomSettings.json below
+                    # Skip  -  settings.json is written fresh from CustomSettings.json below
                     # to avoid baking hardcoded placeholder values into the WIM.
                     continue
                 }
@@ -778,8 +861,8 @@ To skip WDS and build the WIM only:
             # The MDT pattern: launch the deployment script in a NEW window with
             # 'start', so this cmd.exe window stays alive as a permanent debug shell.
             # The user gets two windows from the moment PE boots:
-            #   Window 1 (this cmd) — free debug shell, Z: already mapped
-            #   Window 2            — the running install.ps1
+            #   Window 1 (this cmd)  -  free debug shell, Z: already mapped
+            #   Window 2             -  the running install.ps1
             # No F8 polling, no HTA, no bddrun.exe needed.
             $startDeployContent = @'
 @echo off
@@ -795,14 +878,14 @@ cmd.exe /k
             Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
             Write-Host '  [OK] StartDeploy.cmd generated -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
 
-            # Generate winpeshl.ini — controls what winpeshl.exe runs at PE boot.
+            # Generate winpeshl.ini  -  controls what winpeshl.exe runs at PE boot.
             #
             # [LaunchApps] lists what to execute.  startnet.cmd is NOT run when
             # winpeshl.ini is present, so wpeinit must be called from StartDeploy.cmd
             # (which it is).
             #
             # Note: 'DebugShell=Yes' is MDT-specific (requires bddrun.exe) and is NOT
-            # a standard WinPE winpeshl.ini option — do not add it here.
+            # a standard WinPE winpeshl.ini option  -  do not add it here.
             $winpeshlContent = @'
 [LaunchApps]
 %SYSTEMDRIVE%\Deploy\StartDeploy.cmd
@@ -811,7 +894,7 @@ cmd.exe /k
             Set-Content -Path $winpeshlDest -Value $winpeshlContent -Encoding ASCII
             Write-Host '  [OK] winpeshl.ini generated -> Windows\System32\winpeshl.ini' -ForegroundColor Gray
 
-            # startnet.cmd fallback — only executed when winpeshl.ini is absent.
+            # startnet.cmd fallback  -  only executed when winpeshl.ini is absent.
             # Write a minimal version so that if winpeshl.ini were ever missing the
             # machine still initialises the network; without this it would hang silently.
             $startnetContent = "@echo off`r`nwpeinit`r`n"
@@ -819,7 +902,7 @@ cmd.exe /k
             Set-Content -Path $startnetDest -Value $startnetContent -Encoding ASCII
             Write-Host '  [OK] startnet.cmd (fallback) -> Windows\System32\startnet.cmd' -ForegroundColor Gray
 
-            # Unattend.xml at WIM root — display settings only.
+            # Unattend.xml at WIM root  -  display settings only.
             # RunSynchronous is NOT used here; winpeshl.ini is the launcher.
             $unattendDest = Join-Path $MountDir 'Unattend.xml'
             if (Test-Path $unattendSource) {
@@ -830,7 +913,7 @@ cmd.exe /k
             }
         }
 
-        # ── Step 6: Commit WIM and copy to Boot\boot2026.wim ────────────────────
+        # -- Step 6: Commit WIM and copy to Boot\boot2026.wim --------------------
         Write-Host "`nStep 6: Committing WIM..." -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Commit and unmount WIM')) {
@@ -845,7 +928,7 @@ cmd.exe /k
         }
         } # end -not RegisterOnly
 
-        # ── Step 7: Update WDS ──────────────────────────────────────────────────
+        # -- Step 7: Update WDS --------------------------------------------------
         if (-not $SkipWDS) {
             Write-Host "`nStep 7: Updating WDS..." -ForegroundColor Cyan
 
@@ -853,7 +936,7 @@ cmd.exe /k
                 $wdsImageName = 'NDT PE Boot 2026'
                 $wimLeaf      = Split-Path $wimFile -Leaf
 
-                # ── Find existing image name via wdsutil output (service must be running) ──
+                # -- Find existing image name via wdsutil output (service must be running) --
                 # Get-WdsBootImage is unreliable for FileName matching; parse wdsutil text
                 # output instead to get the exact registered display name.
                 Write-Host '  Checking for existing boot image...' -ForegroundColor Gray
@@ -879,7 +962,7 @@ cmd.exe /k
                 Stop-Service WDSServer -Force
                 Write-Host '  [OK] WDS stopped' -ForegroundColor Gray
 
-                # ── Delete physical WIM from WDS image store ──────────────────────────
+                # -- Delete physical WIM from WDS image store --------------------------
                 # wdsutil /Add-Image copies the WIM to RemoteInstall\Boot\x64\Images\.
                 # If that file already exists (even after a Remove-Image) it fails 0x50.
                 # Read the RemoteInstall path from the registry; fall back to the default.
@@ -905,7 +988,7 @@ cmd.exe /k
             Write-Verbose 'Step 7: WDS update skipped (-SkipWDS).'
         }
 
-        # ── Step 8: Create bootable ISO ─────────────────────────────────────────
+        # -- Step 8: Create bootable ISO -----------------------------------------
         if (-not $SkipISO -and -not $RegisterOnly) {
             Write-Host "`nStep 8: Creating bootable ISO..." -ForegroundColor Cyan
 
@@ -944,7 +1027,7 @@ cmd.exe /k
     }
 }
 
-#region ── Server management (CustomSettings.json) ───────────────────────────
+#region -- Server management (CustomSettings.json) ---------------------------
 
 function Get-NDTServer {
     <#
@@ -1176,7 +1259,7 @@ function Remove-NDTServer {
 
 #endregion
 
-#region ── OS management (OS.json) ───────────────────────────────────────────
+#region -- OS management (OS.json) -------------------------------------------
 
 function Get-NDTOs {
     <#
@@ -1345,7 +1428,7 @@ function Remove-NDTOs {
 
 #endregion
 
-#region ── Reference image management ────────────────────────────────────────
+#region -- Reference image management ----------------------------------------
 
 function Move-NDTReferenceImage {
     <#
@@ -1415,7 +1498,7 @@ function Move-NDTReferenceImage {
         Write-Host "  Source : $($wim.FullName)" -ForegroundColor Gray
         Write-Host "  Dest   : $relDest" -ForegroundColor Gray
         if (Test-Path $destFile) {
-            Write-Host "  Status : destination exists — overwriting" -ForegroundColor Yellow
+            Write-Host "  Status : destination exists  -  overwriting" -ForegroundColor Yellow
         } else {
             Write-Host "  Status : new file" -ForegroundColor Gray
         }
@@ -1433,7 +1516,7 @@ function Move-NDTReferenceImage {
 
 #endregion
 
-#region ── Deployment validation ─────────────────────────────────────────────
+#region -- Deployment validation ---------------------------------------------
 
 function Test-NDTDeployment {
     <#
@@ -1449,7 +1532,7 @@ function Test-NDTDeployment {
           - Each DeploymentSteps group exists in DeploymentGroups.json
           - Each step's Reference key exists in Deployment.json
           - Each script file referenced in Deployment.json exists on disk
-        No changes are made — this is a read-only validation.
+        No changes are made  -  this is a read-only validation.
         Returns \$true if all checks passed, \$false if any check failed.
     .PARAMETER MAC
         MAC address of the machine to validate (colon-separated, any case).
@@ -1496,14 +1579,14 @@ function Test-NDTDeployment {
     Write-Host "`nNDT Deployment Validation: $normalMAC" -ForegroundColor Cyan
     Write-Host ('-' * 60) -ForegroundColor DarkGray
 
-    # ── Control file paths ──────────────────────────────────────────────────────
+    # -- Control file paths ------------------------------------------------------
     $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
     $snPath = Join-Path $LocalPath 'Control\Sections.json'
     $djPath = Join-Path $LocalPath 'Control\Deployment.json'
     $dgPath = Join-Path $LocalPath 'Control\DeploymentGroups.json'
     $osPath = Join-Path $LocalPath 'Control\OS.json'
 
-    # ── [1] Control files ───────────────────────────────────────────────────────
+    # -- [1] Control files -------------------------------------------------------
     Write-Host "`n[1] Control files" -ForegroundColor White
     $csOk = Test-Path $csPath; Write-Check 'CustomSettings.json'   $csOk $csPath
     $snOk = Test-Path $snPath; Write-Check 'Sections.json'         $snOk $snPath
@@ -1512,7 +1595,7 @@ function Test-NDTDeployment {
     $osOk = Test-Path $osPath; Write-Check 'OS.json'               $osOk $osPath
 
     if (-not ($csOk -and $snOk -and $djOk -and $dgOk -and $osOk)) {
-        Write-Host "`n  One or more control files missing — cannot continue." -ForegroundColor Red
+        Write-Host "`n  One or more control files missing  -  cannot continue." -ForegroundColor Red
         Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
         return $false
     }
@@ -1523,27 +1606,27 @@ function Test-NDTDeployment {
     $groups          = Get-Content $dgPath -Raw | ConvertFrom-Json
     $osCatalog       = Get-Content $osPath -Raw | ConvertFrom-Json
 
-    # ── [2] MAC entry ───────────────────────────────────────────────────────────
+    # -- [2] MAC entry -----------------------------------------------------------
     Write-Host "`n[2] Machine entry" -ForegroundColor White
     $machineEntry = $settings.PSObject.Properties[$normalMAC]
     Write-Check "MAC $normalMAC in CustomSettings.json" ([bool]$machineEntry)
 
     if (-not $machineEntry) {
-        Write-Host "`n  MAC not found — cannot continue." -ForegroundColor Red
+        Write-Host "`n  MAC not found  -  cannot continue." -ForegroundColor Red
         Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
         return $false
     }
 
     $machine = $machineEntry.Value
 
-    # ── [3] Required fields ─────────────────────────────────────────────────────
+    # -- [3] Required fields -----------------------------------------------------
     Write-Host "`n[3] Required fields" -ForegroundColor White
     Write-Check 'Computername'    ([bool]$machine.Computername)    $machine.Computername
     Write-Check 'OS'              ([bool]$machine.OS)               $machine.OS
     Write-Check 'AdminPassword'   ([bool]$machine.AdminPassword)   '(set)'
     Write-Check 'DeploymentSteps' ([bool]$machine.DeploymentSteps) ($machine.DeploymentSteps -join ', ')
 
-    # ── [4] Sections ────────────────────────────────────────────────────────────
+    # -- [4] Sections ------------------------------------------------------------
     if ($machine.Sections) {
         Write-Host "`n[4] Sections" -ForegroundColor White
         foreach ($sectionProp in $machine.Sections.PSObject.Properties) {
@@ -1553,7 +1636,7 @@ function Test-NDTDeployment {
         }
     }
 
-    # ── [5] Operating system ────────────────────────────────────────────────────
+    # -- [5] Operating system ----------------------------------------------------
     Write-Host "`n[5] Operating system" -ForegroundColor White
     $osKey = $machine.OS
     if ($osKey) {
@@ -1568,7 +1651,7 @@ function Test-NDTDeployment {
         }
     }
 
-    # ── [6] Deployment groups ───────────────────────────────────────────────────
+    # -- [6] Deployment groups ---------------------------------------------------
     if ($machine.DeploymentSteps) {
         Write-Host "`n[6] Deployment groups" -ForegroundColor White
         $resolvedRefs = [System.Collections.Generic.List[string]]::new()
@@ -1587,14 +1670,14 @@ function Test-NDTDeployment {
             }
         }
 
-        # ── [7] Action references ───────────────────────────────────────────────
+        # -- [7] Action references -----------------------------------------------
         Write-Host "`n[7] Deployment action references" -ForegroundColor White
         foreach ($ref in $resolvedRefs) {
             $actionEntry = $deployment.PSObject.Properties[$ref]
             Write-Check "'$ref'" ([bool]$actionEntry)
         }
 
-        # ── [8] Script files ────────────────────────────────────────────────────
+        # -- [8] Script files ----------------------------------------------------
         Write-Host "`n[8] Script files" -ForegroundColor White
         $anyScripts = $false
         foreach ($ref in $resolvedRefs) {
@@ -1611,7 +1694,7 @@ function Test-NDTDeployment {
         }
     }
 
-    # ── Summary ─────────────────────────────────────────────────────────────────
+    # -- Summary -----------------------------------------------------------------
     Write-Host "`n$('-' * 60)" -ForegroundColor DarkGray
     if ($script:checkErrors -eq 0 -and $script:checkWarnings -eq 0) {
         Write-Host 'Result: ALL CHECKS PASSED' -ForegroundColor Green

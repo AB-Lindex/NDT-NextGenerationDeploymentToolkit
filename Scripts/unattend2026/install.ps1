@@ -38,6 +38,11 @@ function Send-PEProgress {
         Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     } | ConvertTo-Json -Compress
     try {
+        # Bypass TLS cert validation for the internal monitoring endpoint (best-effort, PS5.1).
+        # The monitor uses an internal-CA cert that WinPE does not trust by default.
+        if ($script:MonitorUrl -like 'https://*') {
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+        }
         Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post -Body $body `
             -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop | Out-Null
     } catch {

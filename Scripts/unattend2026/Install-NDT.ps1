@@ -47,9 +47,10 @@ function Send-NDTProgress {
     } | ConvertTo-Json -Compress
     try {
         $null = Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post `
-            -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop
+            -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop `
+            -SkipCertificateCheck
     } catch {
-        # Non-critical — never block deployment
+        # Non-critical -- never block deployment
     }
 }
 
