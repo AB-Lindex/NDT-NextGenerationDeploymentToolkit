@@ -60,6 +60,10 @@ function Install-NDT {
         [Parameter()]
         [int]$MonitorPort = 443,
         [Parameter()]
+        [string]$CertificatePath,
+        [Parameter()]
+        [SecureString]$CertificatePassword,
+        [Parameter()]
         [switch]$SkipMonitor
     )
     #region -- Download and extract repository ZIP into LocalPath ----------------
@@ -204,8 +208,11 @@ function Install-NDT {
     if ($SkipMonitor) {
         Write-Verbose 'NDT Monitor installation skipped (-SkipMonitor).'
     } else {
+        $monitorParams = @{ LocalPath = $LocalPath; Port = $MonitorPort }
+        if ($PSBoundParameters.ContainsKey('CertificatePath'))   { $monitorParams['CertificatePath']   = $CertificatePath }
+        if ($PSBoundParameters.ContainsKey('CertificatePassword')) { $monitorParams['CertificatePassword'] = $CertificatePassword }
         try {
-            Install-NDTMonitor -LocalPath $LocalPath -Port $MonitorPort
+            Install-NDTMonitor @monitorParams
         } catch {
             Write-Warning "NDT Monitor installation failed: $_"
             Write-Warning 'The deployment share is still usable. Re-run Install-NDTMonitor to retry.'
