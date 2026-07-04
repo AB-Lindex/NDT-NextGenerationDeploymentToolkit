@@ -1,598 +1,450 @@
 <#
 .SYNOPSIS
-    iPXE Windows Deployment Environment - Full Setup Guide
-    Target OS : Windows Server 2025
-    Scope     : DHCP + WDS + IIS (HTTPS, static) + iPXE + WinPE + wimboot
-    PKI       : Internal / own CA
-    Author    : LeialmI
-    Date      : 2026-03-05
+    Configure a Windows Server 2025 box (WDS + ADK already installed) to serve
+    iPXE. Chainloads the prebuilt iPXE binaries in this folder from the existing
+    WDS/PXE server and boots the repo's WinPE (boot2026.wim) over HTTP via wimboot.
+
+    NOTE: Run under Windows PowerShell 5.1 (powershell.exe). The WebAdministration
+    IIS:\ provider and the ServerManager module are unreliable under PowerShell 7.
 
 .DESCRIPTION
-    This script is an INTERACTIVE GUIDE. It is divided into clearly labeled
-    sections. Run each section manually or use it as a reference checklist.
-    Not all steps are fully automatable (e.g. cert issuance, iPXE build).
-    Those steps are documented as comments with clear action items.
+    Architecture (all choices are HTTP, no internal-PKI / HTTPS):
 
-    SECTIONS
-    --------
-    1.  Prerequisites check
-    2.  Windows Features installation  (minimal, no -IncludeAllSubFeature)
-    3.  DHCP server configuration      (scope, options 66/67/60)
-    4.  WDS initialisation
-    5.  IIS HTTPS static site setup
-    6.  TLS certificate binding        (internal PKI)
-    7.  iPXE build guidance            (embed internal CA)
-    8.  iPXE boot file placement
-    9.  WinPE image preparation
-    10. wimboot placement
-    11. Sample iPXE boot scripts
-    12. Firewall rules
-    13. Validation checklist
+        firmware PXE --> WDS (TFTP) --> snponly.efi / ipxe.pxe   (chainload)
+                                            |
+                                            v   (loop broken by DHCP user-class "iPXE")
+                                    http://<host>/boot/boot.ipxe
+                                            |
+                                            v   wimboot
+                                    http://<host>/winpe/{BCD,boot.sdi,boot.wim}
+
+    The script is idempotent - safe to re-run. It:
+
+      1. Verifies prerequisites (Admin, WDS initialised, ADK present) and
+         installs IIS if missing.
+      2. Copies the prebuilt iPXE binaries from this folder into the WDS
+         RemoteInstall\Boot tree.
+      3. Points the WDS boot programs at iPXE (x64 UEFI = snponly.efi,
+         BIOS = ipxe.pxe) and restarts WDS.
+      4. Creates a dedicated IIS site (host-header bound, coexists with any
+         Default Web Site) with the MIME types iPXE/wimboot need.
+      5. Stages the payload: downloads wimboot, copies boot2026.wim, and
+         extracts BCD + boot.sdi from the ADK WinPE media.
+      6. Writes boot\boot.ipxe (menu that boots WinPE via wimboot).
+      7. Breaks the PXE chainload loop: if the DHCP Server role is local, it
+         auto-creates the "iPXE" user class + a policy that serves the HTTP
+         boot script to iPXE clients only. If DHCP is remote, it prints the
+         exact settings to apply there.
+      8. Opens the firewall (TFTP 69/UDP + the HTTP port).
+
+    WHY THESE BINARIES / WHY HTTP
+    -----------------------------
+    * snponly.efi uses the firmware's own SNP/UNDI NIC driver - the most
+      compatible choice when chainloading from WDS (no iPXE driver conflicts).
+    * ipxe.pxe covers legacy BIOS clients.
+    * The prebuilt ipxe.efi / snponly.efi ship with Mozilla's public CA bundle,
+      NOT your internal CA, so HTTPS to an internal PKI would fail TLS. HTTP is
+      the correct transport for these stock binaries. To use HTTPS you must
+      rebuild iPXE with TRUST=<your-ca-chain.pem> embedded.
+
+    Target : Windows Server 2025  (WDS + Windows ADK + WinPE add-on installed)
+    Author : LeialmI  (rewritten 2026-07-04)
 #>
 
 #Requires -RunAsAdministrator
+[CmdletBinding()]
+param(
+    # Hostname clients use in HTTP URLs. Must resolve on the deployment network.
+    [string]$ServerHost = $env:COMPUTERNAME,
+
+    # WDS remote install root.
+    [string]$RemoteInstallPath = 'C:\RemoteInstall',
+
+    # IIS site hosting the iPXE boot files.
+    [string]$SiteName = 'iPXE',
+    [string]$SitePath = 'C:\iPXE',
+    [int]   $HttpPort = 80,
+
+    # WinPE image to boot. Default resolves to <share-root>\Boot\boot2026.wim
+    # relative to this script (works from any drive letter / UNC). Copied to
+    # C:\iPXE\winpe\boot.wim - iPXE always requests boot.wim, so no rename needed.
+    [string]$BootWim,
+
+    # Direct download of the latest wimboot binary (official ipxe.org location).
+    # Hybrid binary - works on BIOS and 64-bit UEFI (incl. Secure Boot).
+    [string]$WimbootUrl = 'https://github.com/ipxe/wimboot/releases/latest/download/wimboot',
+
+    # Skip the automatic DHCP user-class / policy configuration.
+    [switch]$SkipDhcpPolicy
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# ============================================================
-# SECTION 1 – PREREQUISITES CHECK
-# ============================================================
-Write-Host "`n[1/13] Checking prerequisites..." -ForegroundColor Cyan
+function Write-Step  { param($m) Write-Host "`n==> $m" -ForegroundColor Cyan }
+function Write-Ok    { param($m) Write-Host "    [ok]   $m" -ForegroundColor Green }
+function Write-Info  { param($m) Write-Host "    [info] $m" -ForegroundColor DarkGray }
+function Write-Todo  { param($m) Write-Host "    [TODO] $m" -ForegroundColor Yellow }
 
-# Confirm OS
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
+# Default the WinPE source to <share-root>\Boot\boot2026.wim (this script lives in
+# <share-root>\Applications\iPXE), so it resolves regardless of drive letter / UNC.
+if (-not $BootWim) {
+    $shareRoot = Split-Path (Split-Path $ScriptDir -Parent) -Parent
+    $BootWim   = Join-Path $shareRoot 'Boot\boot2026.wim'
+}
+
+# Resolve an FQDN when possible (falls back to the short name / passed value).
+try {
+    if ($ServerHost -eq $env:COMPUTERNAME) {
+        $ServerHost = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
+    }
+} catch { Write-Info "Could not resolve FQDN; using '$ServerHost'." }
+
+$BaseUrl        = "http://${ServerHost}:$HttpPort"
+$BootScriptUrl  = "$BaseUrl/boot/boot.ipxe"
+
+# ============================================================
+# 1 - PREREQUISITES
+# ============================================================
+Write-Step '1/8  Checking prerequisites'
+
 $os = Get-CimInstance Win32_OperatingSystem
 if ($os.Caption -notmatch 'Windows Server 2025') {
-    Write-Warning "This guide targets Windows Server 2025. Detected: $($os.Caption)"
+    Write-Warning "This script targets Windows Server 2025. Detected: $($os.Caption)"
 } else {
-    Write-Host "  OS OK: $($os.Caption)" -ForegroundColor Green
+    Write-Ok "OS: $($os.Caption)"
 }
 
-# Confirm running as Administrator (redundant with #Requires but explicit)
-$currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    throw "Please run this script as Administrator."
+# WDS role + initialisation.
+if (-not (Get-WindowsFeature -Name WDS).Installed) {
+    throw "WDS role is not installed. Install it (see Applications\WDS\install.ps1) before running this script."
 }
+# 'wdsutil /get-server' returns non-zero when the role exists but was never initialised.
+& wdsutil /get-server /show:config 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "WDS is installed but not initialised. Run: wdsutil /Initialize-Server /RemInst:`"$RemoteInstallPath`""
+}
+if (-not (Test-Path $RemoteInstallPath)) {
+    throw "RemoteInstall path '$RemoteInstallPath' not found. Is WDS initialised at a different location?"
+}
+Write-Ok "WDS is installed and initialised ($RemoteInstallPath)."
 
-# Required variables – edit these before running
-$ServerFQDN        = 'pxe.corp.dev'      # FQDN for IIS HTTPS binding & TLS cert SAN
-$DHCPScopeID       = '10.0.3.0'            # DHCP scope network address
-$DHCPScopeStart    = '10.0.3.70'          # DHCP range start
-$DHCPScopeEnd      = '10.0.3.79'          # DHCP range end
-$DHCPSubnetMask    = '255.255.255.0'          # Subnet mask
-$DHCPGateway       = '10.0.3.1'            # Default gateway
-$DHCPScopeName     = 'iPXE Deployment Scope'
-$WDSRemInstPath    = 'C:\RemoteInstall'        # WDS remote install folder (dedicated drive recommended)
-$IISSiteName       = 'iPXE'
-$IISPhysicalPath   = 'C:\iPXE'                # Root folder for boot files served over HTTPS
-$IISHttpsPort      = 443
-$CertThumbprint    = 'AF65873FE84F98BE0718CA9D4FE74E1C656EAFF9'
-
-Write-Host "  Variables loaded. Review values at the top of the script before proceeding." -ForegroundColor Yellow
-
-# ============================================================
-# SECTION 2 – WINDOWS FEATURES INSTALLATION
-# ============================================================
-# Only the subfeatures actually needed are installed.
-# NO -IncludeAllSubFeature on Web-Server.
-Write-Host "`n[2/13] Installing Windows Features..." -ForegroundColor Cyan
-
-$features = @(
-    # DHCP Server
-    'DHCP',
-
-    # Windows Deployment Services
-    'WDS',
-    'WDS-Deployment',
-    'WDS-Transport',
-
-    # IIS core
-    'Web-Server',
-
-    # IIS – static file serving (required for boot files)
-    'Web-Static-Content',
-
-    # IIS – HTTP to HTTPS redirect (optional, recommended)
-    'Web-Http-Redirect',
-
-    # IIS – Request Filtering (security baseline, keeps unwanted verbs/extensions blocked)
-    'Web-Filtering',
-
-    # IIS – HTTP Logging (useful for debugging iPXE fetches)
-    'Web-Http-Logging',
-
-    # IIS – Request Monitor (real-time request visibility)
-    'Web-Request-Monitor',
-
-    # IIS Management Tools (IIS Manager GUI + PowerShell module)
-    'Web-Mgmt-Tools',
-    'Web-Mgmt-Console',
-    'Web-Scripting-Tools'
-)
-
-$result = Install-WindowsFeature -Name $features -IncludeManagementTools
-if ($result.RestartNeeded -eq 'Yes') {
-    Write-Warning "A restart is required. Restart now and re-run this script from Section 3 onward."
+# ADK / WinPE (needed to source BCD + boot.sdi for wimboot).
+# Read the registry value defensively - Set-StrictMode makes a missing property throw,
+# and the key lives under the WOW6432Node view on 64-bit installs.
+$kitsRoot = $null
+foreach ($rk in @(
+        'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots')) {
+    $key = Get-Item $rk -ErrorAction SilentlyContinue
+    if ($key) {
+        $val = $key.GetValue('KitsRoot10')
+        if ($val) { $kitsRoot = $val; break }
+    }
+}
+$copype   = if ($kitsRoot) { Join-Path $kitsRoot 'Assessment and Deployment Kit\Windows Preinstallation Environment\copype.cmd' } else { $null }
+$dandiEnv = if ($kitsRoot) { Join-Path $kitsRoot 'Assessment and Deployment Kit\Deployment Tools\DandISetEnv.bat' } else { $null }
+if ($copype -and (Test-Path $copype)) {
+    Write-Ok "Windows ADK + WinPE add-on found."
 } else {
-    Write-Host "  All features installed successfully." -ForegroundColor Green
+    Write-Warning "ADK WinPE (copype.cmd) not found. BCD/boot.sdi extraction (step 5) will be skipped - supply them manually."
 }
 
-# ============================================================
-# SECTION 3 – DHCP SERVER CONFIGURATION
-# ============================================================
-Write-Host "`n[3/13] Configuring DHCP..." -ForegroundColor Cyan
-
-# Authorise DHCP in Active Directory (requires Domain Admin or delegation)
-try {
-    Add-DhcpServerInDC -DnsName 'corp.dev'
-    Write-Host "  DHCP server authorised in AD." -ForegroundColor Green
-} catch {
-    Write-Warning "  DHCP authorisation failed (may already be authorised or no AD): $_"
+# IIS - install if missing.
+if (-not (Get-WindowsFeature -Name Web-Server).Installed) {
+    Write-Info "Installing IIS (static content + management tools)..."
+    Install-WindowsFeature -Name Web-Server, Web-Static-Content, Web-Http-Logging,
+        Web-Mgmt-Console, Web-Scripting-Tools -IncludeManagementTools | Out-Null
 }
-
-# Create IPv4 scope
-Add-DhcpServerv4Scope `
-    -Name        $DHCPScopeName `
-    -StartRange  $DHCPScopeStart `
-    -EndRange    $DHCPScopeEnd `
-    -SubnetMask  $DHCPSubnetMask `
-    -State       Active
-
-# Scope options
-Set-DhcpServerv4OptionValue `
-    -ScopeId    $DHCPScopeID `
-    -Router     $DHCPGateway `
-    -DnsServer  '10.0.3.11'
-
-# Option 66 – TFTP/boot server (point to this server)
-Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 66 -Value $ServerFQDN
-
-# Option 67 – Boot file
-# For UEFI x64, use a chainloading snponly.efi or ipxe.efi
-# For legacy BIOS,  use undionly.kpxe
-# WDS + iPXE together: use WDS PXE first, chain to iPXE, or serve iPXE directly.
-# Uncomment the appropriate line:
-# Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 67 -Value 'boot\x64\ipxe.efi'   # UEFI
-# Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 67 -Value 'undionly.kpxe'        # BIOS
-
-# Option 060 – Vendor class (PXEClient marker, required for some firmware)
-# Option 60 is not predefined in Windows DHCP; define it first if absent
-if (-not (Get-DhcpServerv4OptionDefinition -OptionId 60 -ErrorAction SilentlyContinue)) {
-    Add-DhcpServerv4OptionDefinition -OptionId 60 -Name 'VendorClassIdentifier' -Type String
-}
-Set-DhcpServerv4OptionValue -ScopeId $DHCPScopeID -OptionId 60 -Value 'PXEClient'
-
-Write-Host "  DHCP scope and options configured." -ForegroundColor Green
-Write-Host "  ACTION: Set Option 67 boot filename based on UEFI/BIOS client type." -ForegroundColor Yellow
-
-# ============================================================
-# SECTION 4 – WDS INITIALISATION
-# ============================================================
-Write-Host "`n[4/13] Initialising WDS..." -ForegroundColor Cyan
-
-# Create RemoteInstall folder if it does not exist
-if (-not (Test-Path $WDSRemInstPath)) {
-    New-Item -Path $WDSRemInstPath -ItemType Directory | Out-Null
-}
-
-<#
-    WDS cannot be fully configured via PowerShell on first run.
-    Use the WDS MMC console or run the following from an elevated CMD:
-
-    wdsutil /Initialize-Server /RemInst:"C:\RemoteInstall"
-
-    Post-initialisation:
-    - Open WDS console
-    - Right-click server → Properties → Boot tab:
-        * Set "Default boot program" for x64 UEFI to:  boot\x64\ipxe.efi
-        * Set "Default boot program" for x86 BIOS to:  boot\x86\undionly.kpxe
-    - PXE Response: "Respond to all client computers (known and unknown)"
-    - Add your WinPE boot image (Section 9) via: Add Boot Image wizard
-    - Add your install image (install.wim) via:   Add Install Image wizard
-#>
-
-Write-Host "  ACTION: Run 'wdsutil /Initialize-Server /RemInst:$WDSRemInstPath' if this is a first-time setup." -ForegroundColor Yellow
-Write-Host "  ACTION: Configure WDS boot tab and add images via WDS MMC." -ForegroundColor Yellow
-
-# ============================================================
-# SECTION 5 – IIS HTTPS STATIC SITE SETUP
-# ============================================================
-Write-Host "`n[5/13] Configuring IIS static site for iPXE..." -ForegroundColor Cyan
-
 Import-Module WebAdministration -ErrorAction Stop
+Write-Ok "IIS available."
 
-# Create physical path
-if (-not (Test-Path $IISPhysicalPath)) {
-    New-Item -Path $IISPhysicalPath -ItemType Directory | Out-Null
+# ============================================================
+# 2 - COPY iPXE BINARIES INTO WDS
+# ============================================================
+Write-Step '2/8  Staging iPXE binaries into WDS'
+
+$bootX64 = Join-Path $RemoteInstallPath 'Boot\x64'
+$bootX86 = Join-Path $RemoteInstallPath 'Boot\x86'
+foreach ($d in @($bootX64, $bootX86)) {
+    if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
-# Remove default site if present (avoid port conflicts)
-if (Get-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue) {
-    Remove-Website -Name 'Default Web Site'
-    Write-Host "  Removed Default Web Site." -ForegroundColor DarkGray
-}
-
-# Create application pool
-if (-not (Get-WebConfiguration -Filter "system.applicationHost/applicationPools/add[@name='$IISSiteName']")) {
-    New-WebAppPool -Name $IISSiteName
-    Set-ItemProperty -Path "IIS:\AppPools\$IISSiteName" -Name processModel.identityType -Value NetworkService
-}
-
-# Create the website (HTTP initially; HTTPS binding added in Section 6 after cert)
-if (-not (Get-Website -Name $IISSiteName -ErrorAction SilentlyContinue)) {
-    New-Website `
-        -Name           $IISSiteName `
-        -PhysicalPath   $IISPhysicalPath `
-        -ApplicationPool $IISSiteName `
-        -Port           80 `
-        -Force
-}
-
-# Enable Directory Browsing (optional – helpful for iPXE scripting)
-Set-WebConfigurationProperty -Filter 'system.webServer/directoryBrowse' `
-    -Name 'enabled' -Value $true -PSPath "IIS:\Sites\$IISSiteName"
-
-# Add MIME types required for iPXE / WinPE / wimboot
-$mimeTypes = @(
-    @{ Extension = '.ipxe'; MimeType = 'text/plain' },
-    @{ Extension = '.efi';  MimeType = 'application/octet-stream' },
-    @{ Extension = '.krn';  MimeType = 'application/octet-stream' },
-    @{ Extension = '.0';    MimeType = 'application/octet-stream' },  # pxelinux.0 / wimboot
-    @{ Extension = '.img';  MimeType = 'application/octet-stream' },
-    @{ Extension = '.wim';  MimeType = 'application/octet-stream' },
-    @{ Extension = '.sdi';  MimeType = 'application/octet-stream' },
-    @{ Extension = '.cfg';  MimeType = 'text/plain' }
+$binaries = @(
+    @{ Src = 'snponly.efi'; Dst = (Join-Path $bootX64 'snponly.efi') },  # x64 UEFI chainload (preferred)
+    @{ Src = 'ipxe.efi';    Dst = (Join-Path $bootX64 'ipxe.efi')    },  # x64 UEFI (full driver, fallback)
+    @{ Src = 'ipxe.pxe';    Dst = (Join-Path $bootX86 'ipxe.pxe')    }   # legacy BIOS
 )
-
-foreach ($mime in $mimeTypes) {
-    $filter = "system.webServer/staticContent/mimeMap[@fileExtension='$($mime.Extension)']"
-    if (-not (Get-WebConfigurationProperty -PSPath "IIS:\Sites\$IISSiteName" -Filter $filter -Name '.')) {
-        Add-WebConfigurationProperty `
-            -PSPath  "IIS:\Sites\$IISSiteName" `
-            -Filter  'system.webServer/staticContent' `
-            -Name    '.' `
-            -Value   @{ fileExtension = $mime.Extension; mimeType = $mime.MimeType }
-        Write-Host "  Added MIME type: $($mime.Extension) -> $($mime.MimeType)" -ForegroundColor DarkGray
-    }
+foreach ($b in $binaries) {
+    $src = Join-Path $ScriptDir $b.Src
+    if (-not (Test-Path $src)) { Write-Warning "Missing binary '$($b.Src)' in $ScriptDir - skipped."; continue }
+    Copy-Item $src $b.Dst -Force
+    Write-Ok "Copied $($b.Src) -> $($b.Dst)"
 }
 
-Write-Host "  IIS site '$IISSiteName' created on port 80 (HTTPS binding follows in Section 6)." -ForegroundColor Green
-
 # ============================================================
-# SECTION 6 – TLS CERTIFICATE BINDING (INTERNAL PKI)
+# 3 - POINT WDS BOOT PROGRAMS AT iPXE
 # ============================================================
-Write-Host "`n[6/13] TLS certificate binding..." -ForegroundColor Cyan
+Write-Step '3/8  Configuring WDS boot programs'
 
-<#
-    INTERNAL PKI REQUIREMENTS
-    -------------------------
-    1. On your CA (ADCS), issue a Web Server certificate with:
-       - Subject / SAN: DNS = $ServerFQDN (e.g. pxe.contoso.local)
-       - EKU: Server Authentication (1.3.6.1.5.5.7.3.1)
-       - Key usage: Digital Signature, Key Encipherment
-       - Include the full chain (server + intermediate) in the response
-
-    2. Import the cert to the LOCAL MACHINE > Personal store on this server:
-       Import-PfxCertificate -FilePath 'C:\certs\pxe-server.pfx' `
-           -CertStoreLocation Cert:\LocalMachine\My `
-           -Password (Read-Host -AsSecureString 'PFX Password')
-
-    3. Copy the thumbprint (no spaces) into $CertThumbprint at the top of this script.
-
-    4. Re-run this section.
-#>
-
-if ([string]::IsNullOrWhiteSpace($CertThumbprint)) {
-    Write-Warning "  \$CertThumbprint is empty. Complete the cert import steps above, then set the thumbprint and re-run Section 6."
-} else {
-    # Remove any existing HTTP binding on port 80 redirect later; add HTTPS
-    New-WebBinding -Name $IISSiteName -Protocol 'https' -Port $IISHttpsPort -HostHeader $ServerFQDN
-
-    # Bind certificate to the HTTPS binding via http.sys
-    # Validate the cert exists in the store before binding
-    if (-not (Test-Path "Cert:\LocalMachine\My\$CertThumbprint")) {
-        throw "Certificate with thumbprint '$CertThumbprint' not found in LocalMachine\My."
-    }
-    $guid = [System.Guid]::NewGuid().ToString('B')
-
-    # Use netsh to bind the cert (most reliable cross-version approach)
-    $ip = '0.0.0.0'
-    netsh http add sslcert ipport="${ip}:${IISHttpsPort}" `
-        certhash=$CertThumbprint `
-        appid=$guid | Out-Null
-
-    # Optional: redirect HTTP → HTTPS
-    # Requires Web-Http-Redirect feature (installed in Section 2)
-    Set-WebConfiguration -Filter 'system.webServer/httpRedirect' `
-        -PSPath "IIS:\Sites\$IISSiteName" `
-        -Value @{
-            enabled         = $true
-            destination     = "https://$ServerFQDN"
-            exactDestination = $false
-            httpResponseStatus = 'Permanent'
+function Set-WdsBootProgram {
+    param([string]$Arch, [string]$Program)
+    foreach ($opt in @('BootProgram', 'N12BootProgram')) {
+        $out = & wdsutil "/Set-Server" "/$($opt):$Program" "/Architecture:$Arch" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "wdsutil /Set-Server /$opt for $Arch FAILED (exit $LASTEXITCODE): $out"
         }
-
-    Write-Host "  HTTPS binding created and certificate bound." -ForegroundColor Green
-    Write-Host "  ACTION: Verify in IIS Manager -> $IISSiteName -> Bindings." -ForegroundColor Yellow
-}
-
-# ============================================================
-# SECTION 7 – iPXE BUILD GUIDANCE (EMBED INTERNAL CA)
-# ============================================================
-Write-Host "`n[7/13] iPXE build notes (internal PKI / HTTPS)..." -ForegroundColor Cyan
-
-<#
-    WHY YOU MUST EMBED YOUR CA
-    --------------------------
-    iPXE ships with Mozilla's public CA bundle. Your internal CA is NOT in it.
-    Without embedding your root (and any intermediate) CA, iPXE HTTPS downloads
-    will fail with a TLS certificate verification error.
-
-    BUILD STEPS (Linux build host recommended)
-    ------------------------------------------
-    1. Install build dependencies:
-       sudo apt-get install build-essential liblzma-dev isolinux git
-
-    2. Clone iPXE:
-       git clone https://github.com/ipxe/ipxe.git
-       cd ipxe/src
-
-    3. Export your internal Root CA and any intermediate CA(s) as PEM:
-       # On Windows:
-       certutil -ca.cert rootca.cer
-       certutil -encode rootca.cer rootca.pem
-       # Copy rootca.pem (and intermediates) to your Linux build host.
-
-    4. Concatenate CA chain:
-       cat rootca.pem intermediateca.pem > internal-ca-chain.pem
-
-    5. Place the PEM in config/local/ and configure crypto:
-       # In config/local/crypto.h  (create if missing):
-       #define TRUSTED_CA  "internal-ca-chain.pem"
-
-       Alternatively, pass it at make time via:
-       EMBED=myscript.ipxe (see step 7)
-
-    6. (Optional but recommended) Embed a boot script so iPXE auto-loads it:
-       Create boot.ipxe (see Section 11 for sample), then:
-       # in config/local/general.h:
-       #define EMBED_SCRIPT "boot.ipxe"
-
-    7. Build for UEFI x64 and/or legacy BIOS:
-       # UEFI x64:
-       make bin-x86_64-efi/ipxe.efi TRUST=internal-ca-chain.pem EMBED=boot.ipxe
-       # Legacy BIOS (UNDI only, most compatible):
-       make bin/undionly.kpxe        TRUST=internal-ca-chain.pem EMBED=boot.ipxe
-       # BIOS full NIC driver:
-       make bin/ipxe.pxe             TRUST=internal-ca-chain.pem EMBED=boot.ipxe
-
-    8. Copy the built files to $WDSRemInstPath\Boot\:
-       ipxe.efi       → C:\RemoteInstall\Boot\x64\ipxe.efi
-       undionly.kpxe  → C:\RemoteInstall\Boot\x86\undionly.kpxe
-
-    IMPORTANT: The TRUST= flag is the key – it replaces the built-in Mozilla CA
-    bundle with ONLY your internal chain. Clients will reject public certs, so
-    ensure all your download URLs use your internal CA-signed cert.
-#>
-
-Write-Host "  ACTION: Build iPXE with TRUST=<your-ca-chain.pem> on a Linux host." -ForegroundColor Yellow
-Write-Host "  ACTION: Copy ipxe.efi and undionly.kpxe to $WDSRemInstPath\Boot\." -ForegroundColor Yellow
-
-# ============================================================
-# SECTION 8 – iPXE BOOT FILE PLACEMENT
-# ============================================================
-Write-Host "`n[8/13] Creating iPXE web root folder structure..." -ForegroundColor Cyan
-
-$folders = @(
-    "$IISPhysicalPath\boot",       # boot scripts
-    "$IISPhysicalPath\wimboot",    # wimboot binary
-    "$IISPhysicalPath\winpe",      # WinPE files (BCD, boot.sdi, boot.wim)
-    "$IISPhysicalPath\drivers",    # optional injected drivers
-    "$IISPhysicalPath\scripts"     # additional iPXE chain scripts
-)
-
-foreach ($folder in $folders) {
-    if (-not (Test-Path $folder)) {
-        New-Item -Path $folder -ItemType Directory | Out-Null
-        Write-Host "  Created: $folder" -ForegroundColor DarkGray
     }
+    Write-Ok "$Arch boot program -> $Program"
 }
 
-<#
-    Expected file layout under $IISPhysicalPath:
-    ├── boot\
-    │   └── boot.ipxe          ← main iPXE menu/script (see Section 11)
-    ├── wimboot\
-    │   └── wimboot             ← wimboot binary (https://git.ipxe.org/wimboot.git)
-    ├── winpe\
-    │   ├── BCD                 ← BCD from WinPE/ADK build
-    │   ├── boot.sdi            ← boot.sdi from Windows ADK
-    │   └── boot.wim            ← WinPE boot.wim (Section 9)
-    ├── drivers\                ← optional: NIC/storage drivers for WinPE injection
-    └── scripts\
-        └── *.ipxe              ← per-model or per-task chain scripts
-#>
+# x64 UEFI clients (DHCP arch 7/9) -> snponly.efi (firmware SNP/UNDI - best for chainload)
+Set-WdsBootProgram -Arch 'x64uefi' -Program 'boot\x64\snponly.efi'
 
-Write-Host "  Folder structure ready under $IISPhysicalPath." -ForegroundColor Green
-Write-Host "  ACTION: Place wimboot, WinPE files, and scripts per the layout above." -ForegroundColor Yellow
+# Legacy BIOS clients (DHCP arch 0) -> ipxe.pxe
+Set-WdsBootProgram -Arch 'x86' -Program 'boot\x86\ipxe.pxe'
 
-# ============================================================
-# SECTION 9 – WinPE IMAGE PREPARATION
-# ============================================================
-Write-Host "`n[9/13] WinPE preparation notes..." -ForegroundColor Cyan
+Restart-Service -Name WDSServer -Force
+Start-Sleep -Seconds 3
+Write-Ok 'WDS service restarted.'
 
-<#
-    REQUIREMENTS: Windows ADK + WinPE Add-on for Windows 11/Server 2025
-    Download from: https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install
-
-    STEPS
-    -----
-    1. Open "Deployment and Imaging Tools Environment" as Administrator.
-
-    2. Create a WinPE working copy (x64):
-       copype amd64 C:\WinPE_amd64
-
-    3. Mount the WinPE image:
-       Dism /Mount-Image /ImageFile:"C:\WinPE_amd64\media\sources\boot.wim" /index:1 /MountDir:"C:\WinPE_amd64\mount"
-
-    4. (Optional) Add WinPE optional components:
-       Dism /Add-Package /Image:"C:\WinPE_amd64\mount" /PackagePath:"%WinPERoot%\amd64\WinPE_OCs\WinPE-WMI.cab"
-       Dism /Add-Package /Image:"C:\WinPE_amd64\mount" /PackagePath:"%WinPERoot%\amd64\WinPE_OCs\WinPE-NetFX.cab"
-       Dism /Add-Package /Image:"C:\WinPE_amd64\mount" /PackagePath:"%WinPERoot%\amd64\WinPE_OCs\WinPE-Scripting.cab"
-       Dism /Add-Package /Image:"C:\WinPE_amd64\mount" /PackagePath:"%WinPERoot%\amd64\WinPE_OCs\WinPE-PowerShell.cab"
-
-    5. Import your internal Root CA so WinPE trusts HTTPS from your IIS server:
-       $certPath = 'C:\certs\rootca.cer'
-       Import-Certificate -FilePath $certPath `
-           -CertStoreLocation "Cert:\LocalMachine\Root" `
-           -ErrorAction Stop
-       # OR use DISM offline:
-       # certutil -addstore -f Root $certPath
-
-    6. (Optional) Inject NIC/storage drivers:
-       Dism /Add-Driver /Image:"C:\WinPE_amd64\mount" /Driver:"C:\Drivers\" /Recurse
-
-    7. Commit and unmount:
-       Dism /Unmount-Image /MountDir:"C:\WinPE_amd64\mount" /Commit
-
-    8. Copy output files to IIS:
-       Copy-Item "C:\WinPE_amd64\media\sources\boot.wim" "$IISPhysicalPath\winpe\boot.wim"
-       Copy-Item "C:\WinPE_amd64\media\Boot\BCD"         "$IISPhysicalPath\winpe\BCD"
-       Copy-Item "C:\WinPE_amd64\media\Boot\boot.sdi"    "$IISPhysicalPath\winpe\boot.sdi"
-#>
-
-Write-Host "  ACTION: Build WinPE with ADK, inject internal CA root cert, copy output to $IISPhysicalPath\winpe\." -ForegroundColor Yellow
+# Verify the UEFI boot program actually stuck (this was silently failing before).
+$cfg = (& wdsutil /Get-Server /Show:Config 2>&1) -join "`n"
+if ($cfg -match 'x64uefi\s*-\s*boot\\x64\\snponly\.efi') {
+    Write-Ok 'Verified: x64uefi boot program = boot\x64\snponly.efi'
+} else {
+    Write-Warning 'Could not verify x64uefi boot program = snponly.efi. Check: wdsutil /Get-Server /Show:Config'
+}
 
 # ============================================================
-# SECTION 10 – wimboot PLACEMENT
+# 4 - IIS SITE
 # ============================================================
-Write-Host "`n[10/13] wimboot notes..." -ForegroundColor Cyan
+Write-Step '4/8  Creating IIS site for iPXE boot files'
 
-<#
-    wimboot is a small bootloader that allows WinPE/Windows to boot directly
-    from a WIM file over HTTP (via iPXE).
+foreach ($sub in @('', 'boot', 'wimboot', 'winpe', 'scripts')) {
+    $p = if ($sub) { Join-Path $SitePath $sub } else { $SitePath }
+    if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
+}
 
-    Download latest release:
-    https://github.com/ipxe/wimboot/releases
+# App pool.
+if (-not (Test-Path "IIS:\AppPools\$SiteName")) {
+    New-WebAppPool -Name $SiteName | Out-Null
+    Set-ItemProperty "IIS:\AppPools\$SiteName" -Name managedRuntimeVersion -Value ''  # no managed code
+}
 
-    Place the binary:
-    Copy-Item 'wimboot' "$IISPhysicalPath\wimboot\wimboot"
+# Site (host-header bound so it coexists with Default Web Site on the same port).
+if (-not (Get-Website -Name $SiteName -ErrorAction SilentlyContinue)) {
+    New-Website -Name $SiteName -PhysicalPath $SitePath -ApplicationPool $SiteName `
+        -Port $HttpPort -HostHeader $ServerHost -Force | Out-Null
+}
+# Also answer requests without a host header (e.g. clients using the bare IP).
+if (-not (Get-WebBinding -Name $SiteName -Port $HttpPort -HostHeader '' -ErrorAction SilentlyContinue)) {
+    New-WebBinding -Name $SiteName -Protocol http -Port $HttpPort -HostHeader '' -ErrorAction SilentlyContinue | Out-Null
+}
+Write-Ok "Site '$SiteName' bound to $BaseUrl (physical: $SitePath)."
 
-    iPXE uses it as a kernel-like image (see Section 11 boot script).
-#>
-
-Write-Host "  ACTION: Download wimboot from https://github.com/ipxe/wimboot/releases" -ForegroundColor Yellow
-Write-Host "  ACTION: Place at $IISPhysicalPath\wimboot\wimboot" -ForegroundColor Yellow
+# MIME types. iPXE/wimboot fetch several extensionless files (wimboot, BCD),
+# so a '.' mapping is required for IIS to serve them.
+$mime = @(
+    @{ ext = '.';       type = 'application/octet-stream' },  # extensionless (wimboot, BCD)
+    @{ ext = '.ipxe';   type = 'text/plain'               },
+    @{ ext = '.efi';    type = 'application/octet-stream' },
+    @{ ext = '.wim';    type = 'application/octet-stream' },
+    @{ ext = '.sdi';    type = 'application/octet-stream' }
+)
+foreach ($m in $mime) {
+    $f = "system.webServer/staticContent/mimeMap[@fileExtension='$($m.ext)']"
+    if (Get-WebConfigurationProperty -PSPath "IIS:\Sites\$SiteName" -Filter $f -Name '.' -ErrorAction SilentlyContinue) {
+        Remove-WebConfigurationProperty -PSPath "IIS:\Sites\$SiteName" -Filter 'system.webServer/staticContent' `
+            -Name '.' -AtElement @{ fileExtension = $m.ext } -ErrorAction SilentlyContinue
+    }
+    Add-WebConfigurationProperty -PSPath "IIS:\Sites\$SiteName" -Filter 'system.webServer/staticContent' `
+        -Name '.' -Value @{ fileExtension = $m.ext; mimeType = $m.type }
+}
+Write-Ok 'MIME types configured (including extensionless).'
 
 # ============================================================
-# SECTION 11 – SAMPLE iPXE BOOT SCRIPTS
+# 5 - STAGE THE BOOT PAYLOAD
 # ============================================================
-Write-Host "`n[11/13] Writing sample iPXE boot scripts..." -ForegroundColor Cyan
+Write-Step '5/8  Staging wimboot + WinPE payload'
 
-# Main menu script
+# 5a. wimboot
+$wimbootDst = Join-Path $SitePath 'wimboot\wimboot'
+try {
+    Invoke-WebRequest -Uri $WimbootUrl -OutFile $wimbootDst -UseBasicParsing
+    Write-Ok "Downloaded wimboot -> $wimbootDst"
+} catch {
+    Write-Todo "Could not download wimboot from $WimbootUrl ($($_.Exception.Message))."
+    Write-Todo "Manually place the wimboot binary at: $wimbootDst"
+}
+
+# 5b. boot.wim (repo WinPE)
+$bootWimDst = Join-Path $SitePath 'winpe\boot.wim'
+if (Test-Path $BootWim) {
+    Copy-Item $BootWim $bootWimDst -Force
+    Write-Ok "Copied WinPE image -> $bootWimDst"
+} else {
+    Write-Todo "WinPE image not found at $BootWim - copy your boot.wim to $bootWimDst."
+}
+
+# 5c. BCD + boot.sdi from ADK WinPE media (via copype)
+$bcdDst = Join-Path $SitePath 'winpe\BCD'
+$sdiDst = Join-Path $SitePath 'winpe\boot.sdi'
+if ((Test-Path $bcdDst) -and (Test-Path $sdiDst)) {
+    Write-Ok 'BCD + boot.sdi already present.'
+} elseif ($copype -and (Test-Path $copype) -and $dandiEnv -and (Test-Path $dandiEnv)) {
+    $tmp = Join-Path $env:TEMP ("winpe_" + [guid]::NewGuid().ToString('N'))
+    try {
+        Write-Info 'Generating BCD + boot.sdi with copype...'
+        $cmdLine = '"' + $dandiEnv + '" && copype amd64 "' + $tmp + '"'
+        & cmd.exe /c $cmdLine | Out-Null
+        Copy-Item (Join-Path $tmp 'media\Boot\BCD')      $bcdDst -Force
+        Copy-Item (Join-Path $tmp 'media\Boot\boot.sdi') $sdiDst -Force
+        Write-Ok 'Extracted BCD + boot.sdi from ADK WinPE media.'
+    } catch {
+        Write-Todo "copype failed ($($_.Exception.Message)). Copy BCD + boot.sdi manually to $($SitePath)\winpe\."
+    } finally {
+        if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+} else {
+    Write-Todo "ADK not available - copy BCD + boot.sdi from a WinPE media build to $($SitePath)\winpe\."
+}
+
+# ============================================================
+# 6 - iPXE BOOT SCRIPT
+# ============================================================
+Write-Step '6/8  Writing boot\boot.ipxe'
+
 $bootIpxe = @"
 #!ipxe
-
-# -------------------------------------------------------
-# iPXE Boot Menu – $ServerFQDN
-# Internal PKI: CA must be embedded in iPXE binary
-# -------------------------------------------------------
-
+# ------------------------------------------------------------------
+# NDT iPXE menu - served from $BaseUrl
+# ------------------------------------------------------------------
 :start
-menu iPXE Boot Menu
-item --gap             -- Windows Deployment --
-item winpe             Boot WinPE x64 (wimboot)
-item --gap             -- Utilities --
-item shell             iPXE Shell
-item reboot            Reboot
+menu NDT Deployment - $ServerHost
+item --gap --                 --- Deploy ---
+item winpe   Boot WinPE (boot2026.wim) over HTTP
+item --gap --                 --- Tools ---
+item shell   iPXE shell
+item reboot  Reboot
+item exit    Exit / continue local boot
 choose --default winpe --timeout 30000 target && goto `${target}
 
 :winpe
-echo Booting WinPE via wimboot...
-kernel https://$ServerFQDN/wimboot/wimboot
-initrd https://$ServerFQDN/winpe/BCD         BCD
-initrd https://$ServerFQDN/winpe/boot.sdi    boot.sdi
-initrd https://$ServerFQDN/winpe/boot.wim    boot.wim
+echo Booting WinPE via wimboot from $BaseUrl ...
+kernel $BaseUrl/wimboot/wimboot
+initrd $BaseUrl/winpe/BCD       BCD
+initrd $BaseUrl/winpe/boot.sdi  boot.sdi
+initrd $BaseUrl/winpe/boot.wim  boot.wim
 boot || goto failed
 
 :shell
-echo Dropping to iPXE shell...
 shell
+goto start
 
 :reboot
 reboot
 
+:exit
+exit
+
 :failed
-echo Boot failed – press any key to return to menu
+echo Boot failed - press a key to return to the menu
 prompt
 goto start
 "@
-
-$bootScriptPath = "$IISPhysicalPath\boot\boot.ipxe"
-$bootIpxe | Set-Content -Path $bootScriptPath -Encoding UTF8
-Write-Host "  Written: $bootScriptPath" -ForegroundColor Green
+$bootScriptPath = Join-Path $SitePath 'boot\boot.ipxe'
+# Write without BOM - iPXE requires the '#!ipxe' magic on the very first byte.
+[System.IO.File]::WriteAllText($bootScriptPath, ($bootIpxe -replace "`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
+Write-Ok "Wrote $bootScriptPath"
 
 # ============================================================
-# SECTION 12 – FIREWALL RULES
+# 7 - LOOP BREAK (DHCP user-class "iPXE")
 # ============================================================
-Write-Host "`n[12/13] Configuring firewall rules..." -ForegroundColor Cyan
+Write-Step '7/8  Breaking the chainload loop'
 
-$firewallRules = @(
-    @{ Name = 'iPXE-DHCP-In';    Port = 67;  Protocol = 'UDP'; Description = 'DHCP Server inbound' },
-    @{ Name = 'iPXE-DHCP-Out';   Port = 68;  Protocol = 'UDP'; Description = 'DHCP Client outbound' },
-    @{ Name = 'iPXE-TFTP-In';    Port = 69;  Protocol = 'UDP'; Description = 'TFTP (WDS PXE)' },
-    @{ Name = 'iPXE-HTTP-In';    Port = 80;  Protocol = 'TCP'; Description = 'HTTP (redirect to HTTPS)' },
-    @{ Name = 'iPXE-HTTPS-In';   Port = 443; Protocol = 'TCP'; Description = 'HTTPS (iPXE boot files)' },
-    @{ Name = 'iPXE-WDS-RPC-In'; Port = 135; Protocol = 'TCP'; Description = 'WDS RPC endpoint mapper' }
-)
+<#
+    WHY THIS IS NEEDED
+    ------------------
+    Firmware PXE boots snponly.efi/ipxe.pxe from WDS. Stock iPXE then re-runs
+    DHCP; without a distinguisher it would be handed the SAME iPXE binary again
+    -> infinite loop. iPXE identifies itself with DHCP user-class "iPXE", so we
+    hand iPXE (and only iPXE) an HTTP boot-script URL via a DHCP policy.
 
-foreach ($rule in $firewallRules) {
-    if (-not (Get-NetFirewallRule -DisplayName $rule.Name -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule `
-            -DisplayName  $rule.Name `
-            -Direction    Inbound `
-            -Protocol     $rule.Protocol `
-            -LocalPort    $rule.Port `
-            -Action       Allow `
-            -Description  $rule.Description | Out-Null
-        Write-Host "  Firewall rule created: $($rule.Name)" -ForegroundColor DarkGray
-    } else {
-        Write-Host "  Firewall rule already exists: $($rule.Name)" -ForegroundColor DarkGray
-    }
+    This runs automatically only when the DHCP Server role is on THIS machine.
+    If DHCP lives elsewhere, apply the printed settings on that server, OR
+    rebuild iPXE with an embedded script (EMBED=boot.ipxe) that chains
+    the boot script URL directly (no DHCP policy needed).
+#>
+
+$dhcpLocal = (Get-WindowsFeature -Name DHCP -ErrorAction SilentlyContinue).Installed `
+             -and (Get-Service DHCPServer -ErrorAction SilentlyContinue)
+
+if ($SkipDhcpPolicy) {
+    Write-Info 'Skipping DHCP policy (-SkipDhcpPolicy).'
+    Write-Todo "Ensure iPXE clients receive boot filename: $BootScriptUrl"
+}
+elseif ($dhcpLocal) {
+    Import-Module DhcpServer -ErrorAction Stop
+
+    # User class matching iPXE's DHCP option 77 value ("iPXE").
+    if (-not (Get-DhcpServerv4Class -Name 'iPXE' -Type User -ErrorAction SilentlyContinue)) {
+        Add-DhcpServerv4Class -Name 'iPXE' -Type User -Data 'iPXE' `
+            -Description 'iPXE clients (chainload loop break)'
+        Write-Ok 'Created DHCP user class "iPXE".'
+    } else { Write-Ok 'DHCP user class "iPXE" already present.' }
+
+    # Server-level policy: iPXE clients get the HTTP boot script as their bootfile.
+    if (-not (Get-DhcpServerv4Policy -Name 'iPXE-HTTP' -ErrorAction SilentlyContinue)) {
+        Add-DhcpServerv4Policy -Name 'iPXE-HTTP' -Condition OR -UserClass EQ, 'iPXE' `
+            -Description 'Serve HTTP iPXE boot script to iPXE clients'
+        Write-Ok 'Created DHCP policy "iPXE-HTTP".'
+    } else { Write-Ok 'DHCP policy "iPXE-HTTP" already present.' }
+
+    # Option 67 (bootfile) = the full HTTP URL; iPXE chainloads it directly.
+    Set-DhcpServerv4OptionValue -PolicyName 'iPXE-HTTP' -OptionId 67 -Value $BootScriptUrl
+    Write-Ok "Policy option 67 -> $BootScriptUrl"
+}
+else {
+    Write-Todo 'DHCP Server role is not on this machine. On your DHCP server:'
+    Write-Todo '  1. Define a User Class named "iPXE" with ASCII data "iPXE".'
+    Write-Todo '  2. Add a policy matching that user class.'
+    Write-Todo "  3. Set option 067 (Bootfile Name) = $BootScriptUrl for that policy."
+    Write-Todo 'Alternatively, rebuild iPXE with EMBED=boot.ipxe chaining that URL.'
 }
 
-Write-Host "  Firewall rules configured." -ForegroundColor Green
-
 # ============================================================
-# SECTION 13 – VALIDATION CHECKLIST
+# 8 - FIREWALL
 # ============================================================
-Write-Host "`n[13/13] Validation checklist..." -ForegroundColor Cyan
+Write-Step '8/8  Firewall rules'
 
-$checks = @(
-    "DHCP scope is active and handing out leases",
-    "Option 66 points to $ServerFQDN",
-    "Option 67 set to correct boot filename (ipxe.efi or undionly.kpxe)",
-    "WDS initialised and boot images added",
-    "IIS site '$IISSiteName' running on port 443",
-    "TLS cert bound (check: netsh http show sslcert)",
-    "Cert SAN matches $ServerFQDN",
-    "Internal CA embedded in iPXE binary (TRUST= flag at build)",
-    "Internal CA imported into WinPE image (Section 9 step 5)",
-    "wimboot placed at $IISPhysicalPath\wimboot\wimboot",
-    "WinPE files (BCD, boot.sdi, boot.wim) placed at $IISPhysicalPath\winpe\",
-    "boot.ipxe placed at $IISPhysicalPath\boot\boot.ipxe",
-    "Test client PXE boots and reaches iPXE menu",
-    "WinPE loads successfully over HTTPS"
+$rules = @(
+    @{ Name = 'NDT iPXE - TFTP (WDS)';     Port = 69;        Proto = 'UDP' },
+    @{ Name = "NDT iPXE - HTTP $HttpPort"; Port = $HttpPort; Proto = 'TCP' }
 )
-
-Write-Host ""
-$i = 1
-foreach ($check in $checks) {
-    Write-Host "  [ ] $i. $check" -ForegroundColor White
-    $i++
+foreach ($r in $rules) {
+    if (-not (Get-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $r.Name -Direction Inbound -Action Allow `
+            -Protocol $r.Proto -LocalPort $r.Port | Out-Null
+        Write-Ok "Opened $($r.Proto)/$($r.Port)."
+    } else { Write-Ok "Firewall rule already present: $($r.Name)." }
 }
 
+# ============================================================
+# SUMMARY
+# ============================================================
+Write-Host "`n============================================================" -ForegroundColor Cyan
+Write-Host " iPXE server configured" -ForegroundColor Cyan
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "  Boot script URL : $BootScriptUrl"
+Write-Host "  IIS root        : $SitePath  ($BaseUrl)"
+Write-Host "  WDS boot progs  : x64uefi=Boot\x64\snponly.efi  bios=Boot\x86\ipxe.pxe"
 Write-Host ""
-Write-Host "Setup guide complete. Work through the checklist above to validate your environment." -ForegroundColor Cyan
-Write-Host "For iPXE build help: https://ipxe.org/download" -ForegroundColor DarkGray
-Write-Host "For wimboot:         https://github.com/ipxe/wimboot" -ForegroundColor DarkGray
-Write-Host "For WinPE/ADK:       https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install" -ForegroundColor DarkGray
+Write-Host "  Verify:" -ForegroundColor DarkGray
+Write-Host "    Invoke-WebRequest $BootScriptUrl -UseBasicParsing | Select -Expand Content" -ForegroundColor DarkGray
+Write-Host "    wdsutil /Get-Server /Show:Config" -ForegroundColor DarkGray
+Write-Host "    netstat -a -n -p udp | findstr :69" -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "  Then PXE-boot a test client: firmware -> WDS -> iPXE -> WinPE menu." -ForegroundColor DarkGray

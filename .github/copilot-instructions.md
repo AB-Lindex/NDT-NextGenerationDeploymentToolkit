@@ -6,6 +6,24 @@ WDS/PXE handles network boot. The deploy share is a standard Windows SMB share.
 
 ---
 
+## Environment / infrastructure (corp.dev)
+
+| Host | IP | Role |
+|---|---|---|
+| `dc01.corp.dev`    | `10.0.3.11` | DNS, DHCP, ADDS; also hosts VS Code + the repos |
+| `ndt01.corp.dev`   | `10.0.3.16` | `Deploy2026` share for the NDT solution |
+| `ipxe01.corp.dev`  | `10.0.3.38` | iPXE server (WDS chainload + IIS boot files); ADK installed |
+| `eca01.corp.dev`   | `10.0.3.14` | Enterprise/intermediate CA (ADCS) |
+| `rootca01`         | *(offline)* | Standalone offline Root CA |
+
+The `corp.dev` Active Directory runs its own two-tier PKI: an offline standalone
+Root CA (`rootca01`) and an online enterprise/intermediate CA (`eca01`). Certificates
+for internal HTTPS chain to this internal CA — not a public CA — which is why stock
+iPXE binaries (public CA bundle only) cannot do HTTPS to internal endpoints without
+being rebuilt with the internal CA embedded (`TRUST=`).
+
+---
+
 ## Workspace layout
 
 ```
@@ -36,11 +54,16 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │       ├── Unattend.xml           ← WinPE auto-run unattend (wpeinit → install.ps1)
 │       └── Deploy/
 │           └── install.ps1        ← WinPE launcher: maps Z: from X:\Deploy\settings.json, calls install.ps1
+├── Logs/progress/                 ← NDT Monitor data: <MAC>.json (latest state) + audit-<date>.jsonl (history)
 ├── MDT-Scripts/                   ← legacy MDT helper scripts (reference only)
 └── install/                       ← PowerShell module to bootstrap a new NDT server
     ├── NDT/
     │   ├── ndt.psm1               ← module script (exports all NDT-* commands)
     │   └── ndt.psd1               ← module manifest (requires PS 5.1)
+    ├── NDTMonitor/                ← IIS progress web service (deployed by Install-NDTMonitor)
+    │   ├── web.config             ← maps /progress to the handler; LogRoot appSetting
+    │   ├── App_Code/ProgressHandler.cs ← ASP.NET handler (auto-compiled by IIS)
+    │   └── Default.htm            ← live dashboard (MDT-style monitoring view)
     ├── ndt.nuspec                 ← NuGet package spec (reference; PSGallery uses psd1)
     └── Publish-NDT.ps1            ← publishes the module to PSGallery
 ```
@@ -54,12 +77,15 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 1. Check capture flag (`DeployCapture.flag` on any drive) → if set, remove flag, clean `C:\temp`, call `Capture-ReferenceImage.ps1`, exit.
 2. Detect BIOS/UEFI firmware type — recorded early but **disk is not touched** until all validations pass.
 3. Validate MAC address against `Control/CustomSettings.json`; abort with error if not found.
+   - **`Install:NO` guard** — if the MAC block has `"Install": "NO"` (case-insensitive), skip deployment entirely: reboot without touching the disk. Prevents accidental re-imaging. Any other value (or absent) deploys normally.
 4. Resolve and validate WIM path + index from `Control/OS.json`; abort if WIM file not found.
 5. All pre-flight checks passed → partition disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
 6. Apply OS image to `C:\` with DISM.
-7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password) to `C:\temp`.
+7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password + optional `MonitorUrl`) to `C:\temp`.
 8. Run `Get-Settings.ps1` → generates `unattend.xml` from template (replaces `!PLACEHOLDER!` tokens); apply to offline image with DISM.
 9. Run BCDBoot (UEFI: `/f UEFI /s S:` ; BIOS: `/f BIOS /s C:`), set BCD timeout 0, then `wpeutil Reboot`.
+
+Throughout Phase 1, `install.ps1` reports progress to the NDT Monitor (best-effort) — `Phase: WinPE` updates at config-validated, partitioning, applying image, image applied, and rebooting. `MonitorUrl` is resolved from the machine's deploy section in `Sections.json`; if absent, reporting is silently disabled and never blocks deployment.
 
 ### Phase 2 — First boot (`install2026.ps1`, PS 5)
 
@@ -80,6 +106,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
 1. Read machine's `DeploymentSteps` from `CustomSettings.json` (matched by MAC).
+   - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentSteps`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
 2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `Deployment.json`.
 3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
 4. Execute steps by type:
@@ -89,6 +116,8 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
    - **WindowsUpdate** — runs the WU script; if it exits 3010 the step is **not** marked complete and the engine exits 3010 (iterates until no reboot is needed); if it exits 0 the step is marked complete.
    - **Pause** — creates a "Continue Deployment" shortcut on `C:\Users\Public\Desktop`, marks step complete, exits 3011.
 5. On completion: engine exits 0. `install2026.ps1` then unmaps share, removes RunOnce + AutoLogon, writes `deploy-complete.flag`.
+
+Throughout Phase 2, `Install-NDT.ps1` reports `Phase: Windows` progress to the NDT Monitor via `Send-NDTProgress` (best-effort): `Starting`, `Running`/`Completed` per step, `Rebooting`, `Paused`, `Failed`, and `Done`. Percent is step-based (completed / total). Requires `MonitorUrl` in `settings.json` (carried from the deploy section by `Copy-Install.ps1`); absent = silently disabled.
 
 ---
 
@@ -122,10 +151,11 @@ Shared named sections, referenced by name from MAC blocks. Merged into effective
 "NicAuto":     { "DefaultGateway": "10.0.3.1", "DNSServers": "10.0.3.11" },
 "ADJoinCorp":  { "JoinDomain": "corp.dev", "Domain": "corp", "OU": "ou=Servers,dc=corp,dc=dev", "User": "ADJoin2026", "Password": "..." },
 "RefSettings": { "Sysprep": "Generalize", "Shutdown": "Shutdown", "IPAddress": "DHCP", "JoinDomain": "WORKGROUP", ... },
-"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "..." },
+"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999" },
 "ADLogon-AD01": { "Username": "Corp\\ADLogon",   "Password": "..." },
 "ADLogon-AD02": { "Username": "Dev\\ADLogon",    "Password": "..." }
 // The key name must match the "Reference" value used in DeploymentGroups.json.
+// MonitorUrl (on the deploy section) is optional — enables NDT Monitor progress reporting; stamped by Install-NDT.
 ```
 
 ### DeploymentGroups.json
@@ -180,10 +210,13 @@ Parameters:
 | `DeployUsername` | optional | `Corp\Deploy2026` |
 | `DeployPassword` | **mandatory** | *(SecureString — prompted if omitted)* |
 | `RepoZipUrl` | optional | GitHub main-branch ZIP of this repo |
+| `MonitorPort` | optional | `9999` (NDT Monitor site port) |
+| `SkipMonitor` | optional | *(switch — skip NDT Monitor install)* |
 
-Downloads the repository ZIP from GitHub → extracts into `LocalPath` → removes repo-only artefacts (`.github`, `.vscode`, `.gitignore`, `README.md`) that must not exist on a live deployment share → stamps the `Deploy` section of `Control\Sections.json` with the supplied parameters → creates SMB share → grants deploy account Full Access → revokes Everyone access.
+Downloads the repository ZIP from GitHub → extracts into `LocalPath` → removes repo-only artefacts (`.github`, `.vscode`, `.gitignore`, `README.md`) that must not exist on a live deployment share → stamps the `Deploy` section of `Control\Sections.json` with the supplied parameters (including `MonitorUrl`, derived from the share host + `-MonitorPort`) → creates SMB share → grants deploy account Full Access → revokes Everyone access → installs the NDT Monitor via `Install-NDTMonitor` (unless `-SkipMonitor`).
 
 Also exported by the module (see `ndt.psd1`):
+- `Install-NDTMonitor` — installs the NDT Monitor IIS progress web service (idempotent). Installs IIS roles/features (ASP.NET 4.x), deploys `install/NDTMonitor` content, creates the app pool + site on the port (default 9999), grants the app-pool identity write access to `Logs\progress`, and opens the firewall. **Must run under Windows PowerShell 5.1** — it self-relaunches under `powershell.exe` if called from PS 7 (the IIS: provider is unreliable in PS 7). Called automatically by `Install-NDT` (skip with `-SkipMonitor`, port via `-MonitorPort`).
 - `New-NDTPEImage` (alias `Build-NDTPEImage`) — builds the WinPE WIM + optional ISO; updates WDS boot image.
 - `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
@@ -202,3 +235,5 @@ Also exported by the module (see `ndt.psd1`):
 - `C:\temp\settings.json` contains plaintext credentials and is deleted at the end of deployment.
 - Exit code `3010` from `Install-NDT.ps1` means "reboot pending" — `install2026.ps1` writes `reboot.flag` and exits cleanly (RunOnce remains).
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
+- **NDT Monitor** — IIS web service (`install/NDTMonitor`) providing centralized deployment progress (MDT-monitoring replacement). Endpoints: `POST /progress` (receive update), `GET /progress` (all machines as JSON array), `GET /progress?mac=..` (single machine), `GET /` (dashboard). Data lives in `Logs\progress\`: `<MAC>.json` (latest state) and `audit-<date>.jsonl` (daily-rolling append-only history, retry-on-lock, retained indefinitely). Reporting is best-effort and never blocks deployment; no credentials are stored in progress data. Uses JSON only (`JavaScriptSerializer`) — **not** XML — so it is not exposed to the MDT-monitor XXE vulnerability.
+- **`Install:NO`** in a MAC block disables deployment for that machine (reboot, no disk wipe). This is distinct from `Deploy` (a section-name reference); the reserved values `yes`/`no` are never treated as section names by `Copy-Install.ps1`.

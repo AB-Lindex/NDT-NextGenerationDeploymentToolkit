@@ -112,14 +112,14 @@ $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
 $customSettingsPath = "Z:\Control\CustomSettings.json"
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 
-if (-not $customSettings.$macAddress) {
+while (-not $customSettings.$macAddress) {
     Write-Host "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -ForegroundColor Red
     Write-Host "Available MAC addresses in configuration:" -ForegroundColor Yellow
     $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
         Write-Host "  $($_.Name)" -ForegroundColor Gray
     }
-    Read-Host "Press Enter to exit"
-    exit 1
+    Read-Host "Press Enter to retry"
+    $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 }
 
 $machineConfig = $customSettings.$macAddress
