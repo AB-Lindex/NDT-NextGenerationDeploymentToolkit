@@ -13,7 +13,7 @@
   <metadata>
     <!-- ── Identity ─────────────────────────────────────────────────────── -->
     <id>NDT</id>
-    <version>1.0.35</version>
+    <version>1.0.41</version>
     <authors>NDT</authors>
     <owners>NDT</owners>
 
@@ -26,16 +26,41 @@
     <!-- ── Description ──────────────────────────────────────────────────── -->
     <description>
 NDT (Next Deployment Tool) is a lightweight PowerShell-based replacement for
-Microsoft Deployment Toolkit (MDT). No GUI, no XML wizards — everything is
-driven by PowerShell 5/7 and three JSON control files.
+Microsoft Deployment Toolkit (MDT). No GUI, no XML wizards - everything is
+driven by PowerShell 5/7 and four JSON control files.
 
 WDS/PXE handles network boot. The deploy share is a standard Windows SMB share.
 
 Exported commands:
-  - Install-NDT          Bootstrap a new NDT deployment share from GitHub
-  - Build-NDTPEImage     Build / refresh the WinPE boot WIM (and optional ISO)
-  - Get/Add/Set/Remove-NDTServer   Manage machine entries in CustomSettings.json
-  - Get/Add/Set/Remove-NDTOs       Manage OS entries in OS.json
+  - Install-NDT              Bootstrap a new NDT deployment share from GitHub.
+                             Downloads the repo ZIP, extracts it into the share,
+                             stamps Sections.json with share/credential/monitor
+                             settings, creates the SMB share, and invokes
+                             Install-NDTMonitor unless -SkipMonitor is set.
+  - Install-NDTMonitor       Idempotent IIS-based deployment-progress web service
+                             (NDT Monitor). Installs IIS + ASP.NET 4.x features,
+                             deploys site content, imports a PFX certificate, creates
+                             the NDTMonitor app pool and HTTPS website (default port
+                             443), and opens the firewall port.
+                             Endpoints: POST /progress (receive update),
+                             GET /progress (all machines as JSON array),
+                             GET /progress?mac=.. (single machine latest state),
+                             GET / (live HTML dashboard).
+                             Progress data stored in Logs\progress\ as per-machine
+                             JSON + daily-rolling append-only JSONL audit log.
+                             Must run under Windows PowerShell 5.1; auto-relaunches
+                             from PS 7.
+  - Build-NDTPEImage         Build / refresh the WinPE boot WIM and optional ISO.
+                             (Alias: New-NDTPEImage)
+  - Get/Add/Set/Remove-NDTServer   Manage machine entries in CustomSettings.json.
+  - Get/Add/Set/Remove-NDTOs       Manage OS entries in OS.json.
+  - Move-NDTReferenceImage   Move captured WIM files from \Reference\ into
+                             \Operating Systems\ with per-image subfolders.
+                             Supports -WhatIf for dry-run preview.
+  - Test-NDTDeployment       Dry-run validation for a given MAC address: checks
+                             CustomSettings.json, Sections.json, OS.json, WIM file
+                             existence, DeploymentGroups.json, Deployment.json, and
+                             all referenced script paths. Returns $true / $false.
     </description>
 
     <!-- ── Discoverability ──────────────────────────────────────────────── -->
@@ -43,7 +68,22 @@ Exported commands:
     <summary>Lightweight PowerShell replacement for MDT — JSON-driven, no GUI required.</summary>
 
     <!-- ── Release notes ────────────────────────────────────────────────── -->
-    <releaseNotes>
+    <releaseNotes>1.0.41
+  - Install-NDTMonitor: idempotent IIS HTTPS progress web service (NDT Monitor).
+      Installs IIS + ASP.NET 4.x, deploys site content (web.config,
+      ProgressHandler.cs, Default.htm dashboard), imports PFX certificate, creates
+      NDTMonitor app pool and HTTPS site (default port 443), opens firewall port.
+      Auto-relaunches under Windows PowerShell 5.1 when called from PS 7.
+      Endpoints: POST /progress, GET /progress, GET /progress?mac=.., GET /.
+      Per-machine state in Logs\progress\&lt;MAC&gt;.json; daily audit in audit-&lt;date&gt;.jsonl.
+  - Install-NDT: now accepts -MonitorPort and -SkipMonitor; calls Install-NDTMonitor
+      automatically after share setup.
+  - Move-NDTReferenceImage: moves WIMs from \Reference\ into \Operating Systems\
+      per-image subfolders; -WhatIf supported.
+  - Test-NDTDeployment: dry-run validation for a MAC address across all control
+      files and all referenced script paths.
+  - Control files expanded to four: CustomSettings.json, Sections.json,
+      DeploymentGroups.json, Deployment.json (OS.json for OS catalog).
 1.0.0 — Initial release.
   - Install-NDT: bootstraps the deployment share from GitHub.
   - Build-NDTPEImage: full WinPE build pipeline (ADK packages, WDS update, ISO).

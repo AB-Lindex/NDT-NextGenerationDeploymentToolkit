@@ -99,8 +99,6 @@
     "Computername": "srv02",
     "IPAddress": "10.0.3.22/24",
     "AdminPassword": "Qantas-777",
-    "SQLServer": "SQL2025",
-    "AlwaysOn": "AO2025",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
@@ -155,7 +153,10 @@
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
-    }
+    },
+    "deploymentSteps": [
+      "IIS"
+    ]
   },
   "00:15:5D:02:40:17": {
     "OS": "WIN2025DCG",
