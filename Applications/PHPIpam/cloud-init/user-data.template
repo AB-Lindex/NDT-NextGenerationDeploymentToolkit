@@ -46,23 +46,52 @@ packages:
   - php-ldap
   - php-snmp
   - php-json
+  - php-pear
 
 # --- files -------------------------------------------------------------------
 write_files:
-  # Apache virtual host pointing at phpIPAM
+  # TLS: server certificate + private key (PKCS#12) and the intermediate chain.
+  - path: /root/ipam.pfx
+    permissions: '0600'
+    encoding: b64
+    content: __PFX_B64__
+
+  - path: /root/eca-chain.pem
+    permissions: '0644'
+    encoding: b64
+    content: __CHAIN_B64__
+
+  # Apache HTTP virtual host - redirects everything to HTTPS.
   - path: /etc/apache2/sites-available/phpipam.conf
     permissions: '0644'
     content: |
       <VirtualHost *:80>
-          ServerName __FQDN__
+          ServerName __CERT_CN__
+          ServerAlias __FQDN__
+          RewriteEngine On
+          RewriteRule ^/?(.*) https://%{HTTP_HOST}/$1 [R=301,L]
+          ErrorLog  ${APACHE_LOG_DIR}/phpipam-error.log
+          CustomLog ${APACHE_LOG_DIR}/phpipam-access.log combined
+      </VirtualHost>
+
+  # Apache HTTPS virtual host - serves phpIPAM over TLS.
+  - path: /etc/apache2/sites-available/phpipam-ssl.conf
+    permissions: '0644'
+    content: |
+      <VirtualHost *:443>
+          ServerName __CERT_CN__
+          ServerAlias __FQDN__
           DocumentRoot /var/www/html/phpipam
           <Directory /var/www/html/phpipam>
               Options -Indexes +FollowSymLinks
               AllowOverride All
               Require all granted
           </Directory>
-          ErrorLog  ${APACHE_LOG_DIR}/phpipam-error.log
-          CustomLog ${APACHE_LOG_DIR}/phpipam-access.log combined
+          SSLEngine on
+          SSLCertificateFile    /etc/ssl/phpipam/fullchain.pem
+          SSLCertificateKeyFile /etc/ssl/phpipam/key.pem
+          ErrorLog  ${APACHE_LOG_DIR}/phpipam-ssl-error.log
+          CustomLog ${APACHE_LOG_DIR}/phpipam-ssl-access.log combined
       </VirtualHost>
 
   # Idempotent provisioning script (kept on disk for troubleshooting/re-runs)
@@ -79,22 +108,24 @@ write_files:
       DB_USER="__DBUSER__"
       DB_PASS="__DBPASS__"
       DB_ROOT_PASS="__DBROOTPASS__"
+      PFX_PASSWORD="__PFX_PASSWORD__"
 
       export DEBIAN_FRONTEND=noninteractive
 
-      echo ">> Securing MariaDB root account"
-      mysql --user=root <<SQL
-      ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASS}';
-      DELETE FROM mysql.user WHERE User='';
-      DROP DATABASE IF EXISTS test;
-      DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
-      FLUSH PRIVILEGES;
-      SQL
-
-      MYSQL="mysql --user=root --password=${DB_ROOT_PASS}"
+      # Connect to MariaDB as root. A fresh install uses unix_socket auth, which
+      # works because this script runs as root; if a previous run set a root
+      # password, fall back to it. This keeps the script idempotent and never
+      # breaks socket auth by force-setting a password.
+      mysql_root() {
+          if mysql -e "SELECT 1;" >/dev/null 2>&1; then
+              mysql "$@"
+          else
+              mysql --user=root --password="${DB_ROOT_PASS}" "$@"
+          fi
+      }
 
       echo ">> Creating phpIPAM database and user"
-      ${MYSQL} <<SQL
+      mysql_root <<SQL
       CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8 COLLATE utf8_unicode_ci;
       CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
       ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
@@ -110,16 +141,16 @@ write_files:
       fi
 
       echo ">> Importing schema (only if database is empty)"
-      TABLE_COUNT=$(${MYSQL} -N -B -e \
+      TABLE_COUNT=$(mysql_root -N -B -e \
           "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';")
       if [ "${TABLE_COUNT}" -eq 0 ]; then
-          ${MYSQL} "${DB_NAME}" < "${PHPIPAM_DIR}/db/SCHEMA.sql"
+          mysql_root "${DB_NAME}" < "${PHPIPAM_DIR}/db/SCHEMA.sql"
       fi
 
       echo ">> Setting the phpIPAM 'admin' web password (no forced change)"
       ADMIN_HASH=$(php -r "echo password_hash('__ADMINPASSWORD__', PASSWORD_DEFAULT);")
-      ${MYSQL} "${DB_NAME}" -e \
-          "UPDATE users SET password='${ADMIN_HASH}', passwordChange='No' WHERE username='admin';"
+      mysql_root "${DB_NAME}" -e \
+          "UPDATE users SET password='${ADMIN_HASH}', passChange='No' WHERE username='admin';"
 
       echo ">> Writing config.php"
       cat > "${PHPIPAM_DIR}/config.php" <<PHP
@@ -138,10 +169,31 @@ write_files:
       find "${PHPIPAM_DIR}" -type d -exec chmod 755 {} \;
       find "${PHPIPAM_DIR}" -type f -exec chmod 644 {} \;
 
-      echo ">> Enabling Apache site + rewrite"
-      a2enmod rewrite
+      echo ">> Extracting TLS certificate and key from the PFX"
+      install -d -m 0750 /etc/ssl/phpipam
+      # openssl 3 may need -legacy for PFX files built with older algorithms.
+      extract_pfx() {
+          openssl pkcs12 -in /root/ipam.pfx -passin pass:"${PFX_PASSWORD}" "$@" 2>/dev/null \
+              || openssl pkcs12 -legacy -in /root/ipam.pfx -passin pass:"${PFX_PASSWORD}" "$@"
+      }
+      extract_pfx -clcerts -nokeys -out /etc/ssl/phpipam/cert.pem
+      extract_pfx -nocerts -nodes  -out /etc/ssl/phpipam/key.pem
+      chmod 0640 /etc/ssl/phpipam/key.pem
+      chgrp www-data /etc/ssl/phpipam/key.pem
+
+      # Full chain = leaf certificate + intermediate (when a chain was supplied).
+      cp /etc/ssl/phpipam/cert.pem /etc/ssl/phpipam/fullchain.pem
+      if grep -q "BEGIN CERTIFICATE" /root/eca-chain.pem 2>/dev/null; then
+          cat /root/eca-chain.pem >> /etc/ssl/phpipam/fullchain.pem
+      fi
+      # The PFX is no longer needed on disk.
+      shred -u /root/ipam.pfx 2>/dev/null || rm -f /root/ipam.pfx
+
+      echo ">> Enabling Apache sites (HTTP redirect + HTTPS)"
+      a2enmod rewrite ssl
       a2dissite 000-default || true
       a2ensite phpipam
+      a2ensite phpipam-ssl
       systemctl restart apache2
 
       echo ">> phpIPAM setup complete"
@@ -151,4 +203,4 @@ runcmd:
   - [ systemctl, enable, --now, apache2 ]
   - [ /usr/local/sbin/setup-phpipam.sh ]
 
-final_message: "phpIPAM provisioning finished after $UPTIME seconds. Browse to http://__FQDN__/ (login admin / __ADMINPASSWORD__)."
+final_message: "phpIPAM provisioning finished after $UPTIME seconds. Browse to https://__CERT_CN__/ (login admin / __ADMINPASSWORD__)."

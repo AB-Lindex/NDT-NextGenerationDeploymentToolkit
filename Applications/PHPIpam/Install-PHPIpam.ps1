@@ -44,6 +44,23 @@
     Optional access VLAN ID (1-4094) to tag the VM's network adapter with.
     Omit or use 0 for untagged (the switch default).
 
+.PARAMETER PfxPath
+    Mandatory. Path to the PKCS#12 (.pfx) file containing the server certificate
+    and private key for HTTPS. The PFX holds only the leaf certificate (no chain).
+
+.PARAMETER PfxPassword
+    Mandatory. Password used to import the -PfxPath file.
+
+.PARAMETER ChainCertPath
+    Optional PEM file with the issuing/intermediate CA certificate(s) used to
+    complete the TLS chain (the PFX has no chain). Defaults to 'eca01.cer' next
+    to this script. If absent, HTTPS serves the leaf certificate only.
+
+.PARAMETER ServerName
+    Optional Apache ServerName / TLS hostname. Defaults to the certificate's
+    subject (CN/SAN), e.g. ipam.corp.dev. Browse to this name for a valid chain;
+    the machine FQDN (e.g. ipam01.corp.dev) is added as a ServerAlias.
+
 .PARAMETER MemoryGB
     Startup memory in GB. Default: 2.
 
@@ -97,16 +114,18 @@
     Wait for the VM to report an IPv4 address and print the phpIPAM URL.
 
 .EXAMPLE
-    .\Install-PHPIpam.ps1 -WaitForIP
+    .\Install-PHPIpam.ps1 -PfxPath .\ipam.corp.dev.pfx -PfxPassword 1q2w3e4r -WaitForIP
 
-    Provision IPAM01 on DHCP and wait for its address.
+    Provision IPAM01 on DHCP with HTTPS and wait for its address.
 
 .EXAMPLE
-    .\Install-PHPIpam.ps1 -VMName IPAM01 -Hostname ipam01 `
+    .\Install-PHPIpam.ps1 -VMName ipam -Hostname ipam `
+        -PfxPath .\ipam.corp.dev.pfx -PfxPassword 1q2w3e4r `
         -IPAddress 10.0.3.40/24 -Gateway 10.0.3.1 -DnsServers 10.0.3.11 `
         -SwitchName 'External' -WaitForIP
 
-    Provision with a static address.
+    Provision with a static address. Use -Hostname/-VMName so the FQDN matches the
+    certificate subject (e.g. ipam.corp.dev).
 #>
 
 [CmdletBinding()]
@@ -134,6 +153,13 @@ param(
     [string]$DbPassword = 'Qantas-777',
 
     [string]$PhpIpamVersion = 'v1.7.3',
+
+    [Parameter(Mandatory)]
+    [string]$PfxPath,
+    [Parameter(Mandatory)]
+    [string]$PfxPassword,
+    [string]$ChainCertPath = (Join-Path $PSScriptRoot 'eca01.cer'),
+    [string]$ServerName,
 
     [string]$ImageUrl = 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img',
     [string]$QemuImgUrl = 'https://cloudbase.it/downloads/qemu-img-win-x64-2_3_0.zip',
@@ -265,6 +291,28 @@ if ($IPAddress -and -not $Gateway) {
     throw '-Gateway is required when -IPAddress is specified.'
 }
 
+# Validate the TLS certificate up front (fail fast before any download).
+if (-not (Test-Path $PfxPath)) { throw "PFX file not found: $PfxPath" }
+$PfxPath = (Resolve-Path $PfxPath).Path
+try {
+    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
+        $PfxPath, $PfxPassword)
+    $certCn = $cert.GetNameInfo(
+        [System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false)
+    $cert.Dispose()
+}
+catch {
+    throw "Unable to open PFX '$PfxPath' with the supplied -PfxPassword: $($_.Exception.Message)"
+}
+if ($ServerName) { $certCn = $ServerName }
+if ($ChainCertPath -and (Test-Path $ChainCertPath)) {
+    $ChainCertPath = (Resolve-Path $ChainCertPath).Path
+}
+else {
+    Write-Warning "Chain cert not found ($ChainCertPath) - HTTPS will serve the leaf certificate only (clients may report an incomplete chain)."
+    $ChainCertPath = $null
+}
+
 if (-not $Hostname) { $Hostname = ($VMName.ToLower()) }
 $fqdn = "$Hostname.$DomainName"
 
@@ -316,6 +364,16 @@ Resize-VHD -Path $osVhdx -SizeBytes ($DiskSizeGB * 1GB)
 Write-Step 'Building cloud-init seed disk'
 $ciDir = Join-Path $PSScriptRoot 'cloud-init'
 
+# TLS material for the seed: the PFX (base64) plus the optional chain (base64).
+$pfxB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($PfxPath))
+if ($ChainCertPath) {
+    $chainB64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ChainCertPath))
+    Write-Host "  TLS chain: $ChainCertPath" -ForegroundColor DarkGray
+}
+else {
+    $chainB64 = 'Cg=='   # a single newline: yields an effectively empty chain file
+}
+
 $userData = Set-Tokens -TemplatePath (Join-Path $ciDir 'user-data.template') -Tokens @{
     '__HOSTNAME__'       = $Hostname
     '__FQDN__'           = $fqdn
@@ -326,6 +384,10 @@ $userData = Set-Tokens -TemplatePath (Join-Path $ciDir 'user-data.template') -To
     '__DBUSER__'         = $DbUser
     '__DBPASS__'         = $DbPassword
     '__PHPIPAMVERSION__' = $PhpIpamVersion
+    '__PFX_B64__'        = $pfxB64
+    '__PFX_PASSWORD__'   = $PfxPassword
+    '__CHAIN_B64__'      = $chainB64
+    '__CERT_CN__'        = $(if ($certCn) { $certCn } else { $fqdn })
 }
 
 $metaData = Set-Tokens -TemplatePath (Join-Path $ciDir 'meta-data.template') -Tokens @{
@@ -411,10 +473,10 @@ if ($WaitForIP) {
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Green
 Write-Host " phpIPAM VM '$VMName' has been created and started." -ForegroundColor Green
-Write-Host ' cloud-init is installing Apache + PHP + MariaDB + phpIPAM.' -ForegroundColor Green
+Write-Host ' cloud-init is installing Apache + PHP + MariaDB + phpIPAM (HTTPS).' -ForegroundColor Green
 Write-Host ' This takes a few minutes on first boot.' -ForegroundColor Green
 Write-Host ''
-Write-Host " Web UI : http://$fqdn/   (or the IP address above)"        -ForegroundColor Green
+Write-Host " Web UI : https://$(if ($certCn) { $certCn } else { $fqdn })/   (matches the certificate; HTTP redirects to HTTPS)" -ForegroundColor Green
 Write-Host " Login  : admin / $AdminPassword"                           -ForegroundColor Green
 Write-Host " SSH    : $AdminUser@$fqdn  (password: $AdminPassword)"      -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Green
