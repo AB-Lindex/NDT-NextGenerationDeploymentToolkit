@@ -48,8 +48,8 @@
     Mandatory. Path to the PKCS#12 (.pfx) file containing the server certificate
     and private key for HTTPS. The PFX holds only the leaf certificate (no chain).
 
-.PARAMETER PfxPassword
-    Mandatory. Password used to import the -PfxPath file.
+.PARAMETER PfxClearPWD
+    Mandatory. Clear-text password used to import the -PfxPath file.
 
 .PARAMETER ChainCertPath
     Optional PEM file with the issuing/intermediate CA certificate(s) used to
@@ -82,10 +82,10 @@
 .PARAMETER AdminUser
     Local Linux sudo account created by cloud-init. Default: ipamadmin.
 
-.PARAMETER AdminPassword
-    Password for -AdminUser (console/SSH login). Default: Qantas-777.
+.PARAMETER AdminClearPWD
+    Clear-text password for -AdminUser (console/SSH login). Default: Qantas-777.
 
-.PARAMETER DbRootPassword
+.PARAMETER DbRootClearPWD
     MariaDB root password to set. Default: Qantas-777.
 
 .PARAMETER DbName
@@ -94,8 +94,8 @@
 .PARAMETER DbUser
     phpIPAM database user. Default: phpipam.
 
-.PARAMETER DbPassword
-    Password for the phpIPAM database user. Default: Qantas-777.
+.PARAMETER DbClearPWD
+    Clear-text password for the phpIPAM database user. Default: Qantas-777.
 
 .PARAMETER PhpIpamVersion
     Git tag of phpIPAM to deploy. Default: v1.7.3.
@@ -114,13 +114,13 @@
     Wait for the VM to report an IPv4 address and print the phpIPAM URL.
 
 .EXAMPLE
-    .\Install-PHPIpam.ps1 -PfxPath .\ipam.corp.dev.pfx -PfxPassword 1q2w3e4r -WaitForIP
+    .\Install-PHPIpam.ps1 -PfxPath .\ipam.corp.dev.pfx -PfxClearPWD 1q2w3e4r -WaitForIP
 
     Provision IPAM01 on DHCP with HTTPS and wait for its address.
 
 .EXAMPLE
     .\Install-PHPIpam.ps1 -VMName ipam -Hostname ipam `
-        -PfxPath .\ipam.corp.dev.pfx -PfxPassword 1q2w3e4r `
+        -PfxPath .\ipam.corp.dev.pfx -PfxClearPWD 1q2w3e4r `
         -IPAddress 10.0.3.40/24 -Gateway 10.0.3.1 -DnsServers 10.0.3.11 `
         -SwitchName 'External' -WaitForIP
 
@@ -145,19 +145,19 @@ param(
     [string[]]$DnsServers = @('10.0.3.11'),
 
     [string]$AdminUser = 'ipamadmin',
-    [string]$AdminPassword = 'Qantas-777',
+    [string]$AdminClearPWD = 'Qantas-777',
 
-    [string]$DbRootPassword = 'Qantas-777',
+    [string]$DbRootClearPWD = 'Qantas-777',
     [string]$DbName = 'phpipam',
     [string]$DbUser = 'phpipam',
-    [string]$DbPassword = 'Qantas-777',
+    [string]$DbClearPWD = 'Qantas-777',
 
     [string]$PhpIpamVersion = 'v1.7.3',
 
     [Parameter(Mandatory)]
     [string]$PfxPath,
     [Parameter(Mandatory)]
-    [string]$PfxPassword,
+    [string]$PfxClearPWD,
     [string]$ChainCertPath = (Join-Path $PSScriptRoot 'eca01.cer'),
     [string]$ServerName,
 
@@ -296,13 +296,13 @@ if (-not (Test-Path $PfxPath)) { throw "PFX file not found: $PfxPath" }
 $PfxPath = (Resolve-Path $PfxPath).Path
 try {
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(
-        $PfxPath, $PfxPassword)
+        $PfxPath, $PfxClearPWD)
     $certCn = $cert.GetNameInfo(
         [System.Security.Cryptography.X509Certificates.X509NameType]::DnsName, $false)
     $cert.Dispose()
 }
 catch {
-    throw "Unable to open PFX '$PfxPath' with the supplied -PfxPassword: $($_.Exception.Message)"
+    throw "Unable to open PFX '$PfxPath' with the supplied -PfxClearPWD: $($_.Exception.Message)"
 }
 if ($ServerName) { $certCn = $ServerName }
 if ($ChainCertPath -and (Test-Path $ChainCertPath)) {
@@ -378,14 +378,14 @@ $userData = Set-Tokens -TemplatePath (Join-Path $ciDir 'user-data.template') -To
     '__HOSTNAME__'       = $Hostname
     '__FQDN__'           = $fqdn
     '__ADMINUSER__'      = $AdminUser
-    '__ADMINPASSWORD__'  = $AdminPassword
-    '__DBROOTPASS__'     = $DbRootPassword
+    '__ADMINPASSWORD__'  = $AdminClearPWD
+    '__DBROOTPASS__'     = $DbRootClearPWD
     '__DBNAME__'         = $DbName
     '__DBUSER__'         = $DbUser
-    '__DBPASS__'         = $DbPassword
+    '__DBPASS__'         = $DbClearPWD
     '__PHPIPAMVERSION__' = $PhpIpamVersion
     '__PFX_B64__'        = $pfxB64
-    '__PFX_PASSWORD__'   = $PfxPassword
+    '__PFX_PASSWORD__'   = $PfxClearPWD
     '__CHAIN_B64__'      = $chainB64
     '__CERT_CN__'        = $(if ($certCn) { $certCn } else { $fqdn })
 }
@@ -477,6 +477,6 @@ Write-Host ' cloud-init is installing Apache + PHP + MariaDB + phpIPAM (HTTPS).'
 Write-Host ' This takes a few minutes on first boot.' -ForegroundColor Green
 Write-Host ''
 Write-Host " Web UI : https://$(if ($certCn) { $certCn } else { $fqdn })/   (matches the certificate; HTTP redirects to HTTPS)" -ForegroundColor Green
-Write-Host " Login  : admin / $AdminPassword"                           -ForegroundColor Green
-Write-Host " SSH    : $AdminUser@$fqdn  (password: $AdminPassword)"      -ForegroundColor Green
+Write-Host " Login  : admin / $AdminClearPWD"                           -ForegroundColor Green
+Write-Host " SSH    : $AdminUser@$fqdn  (password: $AdminClearPWD)"      -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Green
