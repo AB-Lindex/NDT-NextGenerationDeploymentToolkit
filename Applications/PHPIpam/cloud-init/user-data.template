@@ -7,6 +7,9 @@ hostname: __HOSTNAME__
 fqdn: __FQDN__
 prefer_fqdn_over_hostname: true
 
+# Swedish timezone (affects logs and the 06:30 auto-reboot window).
+timezone: Europe/Stockholm
+
 # --- local admin account -----------------------------------------------------
 users:
   - name: __ADMINUSER__
@@ -47,6 +50,7 @@ packages:
   - php-snmp
   - php-json
   - php-pear
+  - unattended-upgrades
 
 # --- files -------------------------------------------------------------------
 write_files:
@@ -93,6 +97,25 @@ write_files:
           ErrorLog  ${APACHE_LOG_DIR}/phpipam-ssl-error.log
           CustomLog ${APACHE_LOG_DIR}/phpipam-ssl-access.log combined
       </VirtualHost>
+
+  # Automatic patching: apply security + updates daily and reboot at 06:30.
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    permissions: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  - path: /etc/apt/apt.conf.d/52phpipam-autoupgrade
+    permissions: '0644'
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+          "${distro_id}ESMApps:${distro_codename}-apps-security";
+          "${distro_id}ESM:${distro_codename}-infra-security";
+          "${distro_id}:${distro_codename}-updates";
+      };
+      Unattended-Upgrade::Automatic-Reboot "true";
+      Unattended-Upgrade::Automatic-Reboot-Time "06:30";
 
   # Idempotent provisioning script (kept on disk for troubleshooting/re-runs)
   - path: /usr/local/sbin/setup-phpipam.sh
