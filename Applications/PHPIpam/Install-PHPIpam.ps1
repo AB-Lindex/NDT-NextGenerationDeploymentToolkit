@@ -106,9 +106,15 @@
 .PARAMETER QemuImgUrl
     URL of a qemu-img Windows build (zip) used when qemu-img is not on PATH.
 
-.PARAMETER WorkPath
-    Working directory for downloads and generated disks.
-    Default: C:\HyperV\phpipam.
+.PARAMETER VhdPath
+    Folder where the VM's .vhdx files (OS + cloud-init seed) are created.
+    Default: the Hyper-V host's configured Virtual Hard Disk path
+    (Get-VMHost).VirtualHardDiskPath. Example: F:\Hyper-V\vhd.
+
+.PARAMETER ScratchPath
+    Folder for throwaway downloads (the Ubuntu cloud image and qemu-img). These
+    are cached here to speed up re-runs but are not needed after provisioning.
+    Default: %TEMP%\phpipam-scratch.
 
 .PARAMETER WaitForIP
     Wait for the VM to report an IPv4 address and print the phpIPAM URL.
@@ -164,7 +170,8 @@ param(
     [string]$ImageUrl = 'https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img',
     [string]$QemuImgUrl = 'https://cloudbase.it/downloads/qemu-img-win-x64-2_3_0.zip',
 
-    [string]$WorkPath = 'C:\HyperV\phpipam',
+    [string]$VhdPath,
+    [string]$ScratchPath = (Join-Path $env:TEMP 'phpipam-scratch'),
 
     [switch]$WaitForIP
 )
@@ -329,16 +336,18 @@ if (-not $SwitchName) {
 Write-Host "  VM switch : $SwitchName" -ForegroundColor DarkGray
 Write-Host "  FQDN      : $fqdn" -ForegroundColor DarkGray
 
-$null = New-Item -ItemType Directory -Path $WorkPath -Force
-$vmDir = Join-Path $WorkPath $VMName
-$null = New-Item -ItemType Directory -Path $vmDir -Force
+$null = New-Item -ItemType Directory -Path $ScratchPath -Force
+if (-not $VhdPath) { $VhdPath = (Get-VMHost).VirtualHardDiskPath }
+$null = New-Item -ItemType Directory -Path $VhdPath -Force
+Write-Host "  VHD path  : $VhdPath" -ForegroundColor DarkGray
+Write-Host "  Scratch   : $ScratchPath" -ForegroundColor DarkGray
 
 # ----------------------------------------------------------------------------
 # 1. Download the cloud image
 # ----------------------------------------------------------------------------
 
 Write-Step 'Obtaining Ubuntu cloud image'
-$imgFile = Join-Path $WorkPath ([System.IO.Path]::GetFileName($ImageUrl))
+$imgFile = Join-Path $ScratchPath ([System.IO.Path]::GetFileName($ImageUrl))
 Get-RemoteFile -Uri $ImageUrl -OutFile $imgFile
 
 # ----------------------------------------------------------------------------
@@ -346,8 +355,8 @@ Get-RemoteFile -Uri $ImageUrl -OutFile $imgFile
 # ----------------------------------------------------------------------------
 
 Write-Step 'Converting cloud image to VHDX'
-$qemuImg = Resolve-QemuImg -Url $QemuImgUrl -WorkDir $WorkPath
-$osVhdx = Join-Path $vmDir "$VMName-os.vhdx"
+$qemuImg = Resolve-QemuImg -Url $QemuImgUrl -WorkDir $ScratchPath
+$osVhdx = Join-Path $VhdPath "$VMName-os.vhdx"
 if (Test-Path $osVhdx) { Remove-Item $osVhdx -Force }
 
 Write-Host "  qemu-img: $qemuImg" -ForegroundColor DarkGray
@@ -414,7 +423,7 @@ else {
     Write-Host '  Network: DHCP' -ForegroundColor DarkGray
 }
 
-$seedVhdx = Join-Path $vmDir "$VMName-seed.vhdx"
+$seedVhdx = Join-Path $VhdPath "$VMName-seed.vhdx"
 New-SeedDisk -Path $seedVhdx -Files $seedFiles
 
 # ----------------------------------------------------------------------------
@@ -423,7 +432,7 @@ New-SeedDisk -Path $seedVhdx -Files $seedFiles
 
 Write-Step "Creating VM '$VMName'"
 $vm = New-VM -Name $VMName -Generation 2 -MemoryStartupBytes ($MemoryGB * 1GB) `
-    -SwitchName $SwitchName -Path $WorkPath
+    -SwitchName $SwitchName
 Set-VM -VM $vm -ProcessorCount $CpuCount -AutomaticStartAction Start -CheckpointType Disabled
 
 # Attach OS disk then the seed disk.
