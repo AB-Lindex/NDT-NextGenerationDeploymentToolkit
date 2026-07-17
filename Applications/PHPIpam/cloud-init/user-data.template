@@ -1,0 +1,154 @@
+#cloud-config
+# phpIPAM unattended provisioning (Ubuntu Server + Apache + PHP + MariaDB)
+# Tokens (__NAME__) are substituted by Install-PHPIpam.ps1 before the seed disk
+# is built. Do not edit the token markers.
+
+hostname: __HOSTNAME__
+fqdn: __FQDN__
+prefer_fqdn_over_hostname: true
+
+# --- local admin account -----------------------------------------------------
+users:
+  - name: __ADMINUSER__
+    groups: [adm, sudo]
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+
+# Set the account password WITHOUT forcing a change/expiry at first login.
+# cloud-init expires passwords by default, which breaks the first SSH login.
+chpasswd:
+  expire: false
+  users:
+    - name: __ADMINUSER__
+      password: __ADMINPASSWORD__
+      type: text
+
+ssh_pwauth: true
+package_update: true
+package_upgrade: true
+
+# --- OS packages (LAMP stack + phpIPAM prerequisites) ------------------------
+packages:
+  - apache2
+  - mariadb-server
+  - git
+  - php
+  - libapache2-mod-php
+  - php-cli
+  - php-mysql
+  - php-gmp
+  - php-mbstring
+  - php-curl
+  - php-gd
+  - php-intl
+  - php-xml
+  - php-ldap
+  - php-snmp
+  - php-json
+
+# --- files -------------------------------------------------------------------
+write_files:
+  # Apache virtual host pointing at phpIPAM
+  - path: /etc/apache2/sites-available/phpipam.conf
+    permissions: '0644'
+    content: |
+      <VirtualHost *:80>
+          ServerName __FQDN__
+          DocumentRoot /var/www/html/phpipam
+          <Directory /var/www/html/phpipam>
+              Options -Indexes +FollowSymLinks
+              AllowOverride All
+              Require all granted
+          </Directory>
+          ErrorLog  ${APACHE_LOG_DIR}/phpipam-error.log
+          CustomLog ${APACHE_LOG_DIR}/phpipam-access.log combined
+      </VirtualHost>
+
+  # Idempotent provisioning script (kept on disk for troubleshooting/re-runs)
+  - path: /usr/local/sbin/setup-phpipam.sh
+    permissions: '0750'
+    content: |
+      #!/bin/bash
+      # phpIPAM setup - safe to re-run.
+      set -euo pipefail
+
+      PHPIPAM_DIR="/var/www/html/phpipam"
+      PHPIPAM_VERSION="__PHPIPAMVERSION__"
+      DB_NAME="__DBNAME__"
+      DB_USER="__DBUSER__"
+      DB_PASS="__DBPASS__"
+      DB_ROOT_PASS="__DBROOTPASS__"
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      echo ">> Securing MariaDB root account"
+      mysql --user=root <<SQL
+      ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASS}';
+      DELETE FROM mysql.user WHERE User='';
+      DROP DATABASE IF EXISTS test;
+      DELETE FROM mysql.db WHERE Db='test' OR Db='test\\_%';
+      FLUSH PRIVILEGES;
+      SQL
+
+      MYSQL="mysql --user=root --password=${DB_ROOT_PASS}"
+
+      echo ">> Creating phpIPAM database and user"
+      ${MYSQL} <<SQL
+      CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8 COLLATE utf8_unicode_ci;
+      CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+      ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASS}';
+      GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
+      FLUSH PRIVILEGES;
+      SQL
+
+      echo ">> Fetching phpIPAM ${PHPIPAM_VERSION}"
+      if [ ! -d "${PHPIPAM_DIR}/.git" ]; then
+          rm -rf "${PHPIPAM_DIR}"
+          git clone --recursive --branch "${PHPIPAM_VERSION}" \
+              https://github.com/phpipam/phpipam.git "${PHPIPAM_DIR}"
+      fi
+
+      echo ">> Importing schema (only if database is empty)"
+      TABLE_COUNT=$(${MYSQL} -N -B -e \
+          "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}';")
+      if [ "${TABLE_COUNT}" -eq 0 ]; then
+          ${MYSQL} "${DB_NAME}" < "${PHPIPAM_DIR}/db/SCHEMA.sql"
+      fi
+
+      echo ">> Setting the phpIPAM 'admin' web password (no forced change)"
+      ADMIN_HASH=$(php -r "echo password_hash('__ADMINPASSWORD__', PASSWORD_DEFAULT);")
+      ${MYSQL} "${DB_NAME}" -e \
+          "UPDATE users SET password='${ADMIN_HASH}', passwordChange='No' WHERE username='admin';"
+
+      echo ">> Writing config.php"
+      cat > "${PHPIPAM_DIR}/config.php" <<PHP
+      <?php
+      \$db['host'] = 'localhost';
+      \$db['user'] = '${DB_USER}';
+      \$db['pass'] = '${DB_PASS}';
+      \$db['name'] = '${DB_NAME}';
+      \$db['port'] = 3306;
+      \$disable_installer = true;
+      define('BASE', "/");
+      PHP
+
+      echo ">> Setting permissions"
+      chown -R www-data:www-data "${PHPIPAM_DIR}"
+      find "${PHPIPAM_DIR}" -type d -exec chmod 755 {} \;
+      find "${PHPIPAM_DIR}" -type f -exec chmod 644 {} \;
+
+      echo ">> Enabling Apache site + rewrite"
+      a2enmod rewrite
+      a2dissite 000-default || true
+      a2ensite phpipam
+      systemctl restart apache2
+
+      echo ">> phpIPAM setup complete"
+
+runcmd:
+  - [ systemctl, enable, --now, mariadb ]
+  - [ systemctl, enable, --now, apache2 ]
+  - [ /usr/local/sbin/setup-phpipam.sh ]
+
+final_message: "phpIPAM provisioning finished after $UPTIME seconds. Browse to http://__FQDN__/ (login admin / __ADMINPASSWORD__)."

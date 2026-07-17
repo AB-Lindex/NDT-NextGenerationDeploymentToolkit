@@ -1,0 +1,12 @@
+version: 2
+ethernets:
+  eth0:
+    match:
+      name: "e*"
+    addresses:
+      - __ADDRESSCIDR__
+    routes:
+      - to: default
+        via: __GATEWAY__
+    nameservers:
+      addresses: [__DNSSERVERS__]
