@@ -40,6 +40,10 @@
     Hyper-V virtual switch to connect the VM to. Default: first external switch,
     otherwise the first switch found.
 
+.PARAMETER Vlan
+    Optional access VLAN ID (1-4094) to tag the VM's network adapter with.
+    Omit or use 0 for untagged (the switch default).
+
 .PARAMETER MemoryGB
     Startup memory in GB. Default: 2.
 
@@ -111,6 +115,8 @@ param(
     [string]$Hostname,
     [string]$DomainName = 'corp.dev',
     [string]$SwitchName,
+    [ValidateRange(0, 4094)]
+    [int]$Vlan = 0,
     [int]$MemoryGB = 2,
     [int]$CpuCount = 2,
     [int]$DiskSizeGB = 20,
@@ -361,6 +367,12 @@ Set-VM -VM $vm -ProcessorCount $CpuCount -AutomaticStartAction Start -Checkpoint
 # Attach OS disk then the seed disk.
 Add-VMHardDiskDrive -VMName $VMName -Path $osVhdx
 Add-VMHardDiskDrive -VMName $VMName -Path $seedVhdx
+
+# Tag the network adapter with an access VLAN when requested.
+if ($Vlan -gt 0) {
+    Set-VMNetworkAdapterVlan -VMName $VMName -Access -VlanId $Vlan
+    Write-Host "  VLAN: access $Vlan" -ForegroundColor DarkGray
+}
 
 # Secure Boot with the Microsoft third-party UEFI CA (required for Linux shim).
 Set-VMFirmware -VMName $VMName -EnableSecureBoot On `
