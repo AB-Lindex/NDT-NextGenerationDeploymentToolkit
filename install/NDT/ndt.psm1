@@ -252,6 +252,227 @@ function Install-NDT {
     Write-Host "          - Site-specific content under Applications2026\" -ForegroundColor Yellow
 }
 
+function Update-NDT {
+    <#
+    .SYNOPSIS
+        Upgrades an existing NDT deployment share to the latest code without
+        touching its live configuration or data.
+
+    .DESCRIPTION
+        Refreshes the code of an already-installed NDT deployment share by
+        downloading the repository ZIP from GitHub and copying it over the
+        existing LocalPath, while PRESERVING everything that is site-specific:
+
+          * Control\*.json  -  per-machine settings, sections, and the stamped
+            Deploy credentials are never overwritten. New control files that a
+            newer version introduces are added, but existing files are left as-is.
+          * Operating Systems\, Reference\, Scratch\, Applications2026\, Logs\,
+            Boot\boot2026.wim, and all *.wim / *.pfx / *.cer files are gitignored
+            and therefore absent from the repo ZIP, so they are preserved
+            automatically.
+
+        Unlike Install-NDT, this command does NOT re-stamp credentials, create
+        the SMB share, or change share permissions  -  those already exist. It is
+        the safe, repeatable way to roll out new script/module versions to a
+        server that is already in production.
+
+        A timestamped backup of Control\ and install\ is taken before any change
+        (skip with -NoBackup).
+
+    .PARAMETER LocalPath
+        Root of the existing NDT deployment share to upgrade.
+        Default: C:\Deploy2026
+
+    .PARAMETER RepoZipUrl
+        URL of the GitHub repository archive ZIP to upgrade from.
+        Default: https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip
+
+    .PARAMETER BackupPath
+        Folder to write the pre-upgrade backup to.
+        Default: <LocalPath>\Backup\ndt-upgrade-<timestamp>
+
+    .PARAMETER NoBackup
+        Skip the pre-upgrade backup of Control\ and install\.
+
+    .PARAMETER UpdateMonitor
+        Also re-deploy the NDT Monitor site code (runs Install-NDTMonitor). The
+        monitor's PFX certificate and log data are preserved. Omit if you do not
+        want to touch the running IIS site.
+
+    .PARAMETER Preserve
+        Additional top-level folder names to protect from being overwritten
+        (e.g. 'Applications' if you keep site-customised installers there).
+        Control is always preserved.
+
+    .EXAMPLE
+        Update-NDT
+
+    .EXAMPLE
+        Update-NDT -WhatIf
+
+    .EXAMPLE
+        Update-NDT -LocalPath D:\Deploy2026 -UpdateMonitor -Verbose
+
+    .EXAMPLE
+        Update-NDT -Preserve 'Applications' -RepoZipUrl 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/dev.zip'
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter()]
+        [string]$RepoZipUrl = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit/archive/refs/heads/main.zip',
+        [Parameter()]
+        [string]$BackupPath,
+        [Parameter()]
+        [switch]$NoBackup,
+        [Parameter()]
+        [switch]$UpdateMonitor,
+        [Parameter()]
+        [string[]]$Preserve
+    )
+
+    #region -- Pre-flight: must be an existing NDT install -----------------------
+    $controlDir   = Join-Path $LocalPath 'Control'
+    $sectionsDest = Join-Path $controlDir 'Sections.json'
+    if (-not (Test-Path $sectionsDest)) {
+        throw "No existing NDT installation found at '$LocalPath' (Control\Sections.json is missing). Use Install-NDT for a fresh install."
+    }
+
+    # Top-level items that must never be overwritten. Control holds customised
+    # JSON (per-machine settings, sections, and the stamped Deploy credentials).
+    # Everything else that is site-specific is gitignored and thus not present in
+    # the repo ZIP, so it is preserved automatically.
+    $preserveItems = @('Control') + ($Preserve | Where-Object { $_ })
+    #endregion
+
+    #region -- Backup ------------------------------------------------------------
+    if (-not $NoBackup) {
+        if (-not $BackupPath) {
+            $stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
+            $BackupPath = Join-Path $LocalPath "Backup\ndt-upgrade-$stamp"
+        }
+        if ($PSCmdlet.ShouldProcess($BackupPath, 'Back up Control and install before upgrade')) {
+            New-Item -ItemType Directory -Path $BackupPath -Force | Out-Null
+            Copy-Item -Path $controlDir -Destination (Join-Path $BackupPath 'Control') -Recurse -Force
+            $installDir = Join-Path $LocalPath 'install'
+            if (Test-Path $installDir) {
+                Copy-Item -Path $installDir -Destination (Join-Path $BackupPath 'install') -Recurse -Force
+            }
+            Write-Host "Backup created: $BackupPath" -ForegroundColor Green
+        }
+    }
+    #endregion
+
+    #region -- Download and extract repository ZIP -------------------------------
+    $tempZip = Join-Path $env:TEMP 'ndt-repo-update.zip'
+    $tempDir = Join-Path $env:TEMP 'ndt-repo-update'
+
+    try {
+        Write-Verbose "Downloading NDT repository ZIP from '$RepoZipUrl'..."
+        if ($PSCmdlet.ShouldProcess($RepoZipUrl, 'Download repository ZIP')) {
+            Invoke-WebRequest -Uri $RepoZipUrl -OutFile $tempZip -UseBasicParsing
+            Write-Verbose "  Downloaded: $tempZip"
+        }
+
+        if ($PSCmdlet.ShouldProcess($tempDir, 'Extract repository ZIP')) {
+            if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
+            Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+            Write-Verbose "  Extracted to: $tempDir"
+        }
+
+        # GitHub archive ZIPs always extract into a single top-level folder.
+        $repoRoot = Get-ChildItem -Path $tempDir -Directory | Select-Object -First 1 -ExpandProperty FullName
+        if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
+        Write-Verbose "  Repository root: $repoRoot"
+
+        if ($PSCmdlet.ShouldProcess($LocalPath, 'Apply upgrade (refresh code, preserve config)')) {
+            # Artefacts that belong only in the source repo and must not land on a
+            # live deployment share.
+            $repoOnlyItems = @('.github', '.vscode', '.gitignore', 'README.md')
+
+            foreach ($item in (Get-ChildItem -Path $repoRoot -Force)) {
+                if ($repoOnlyItems -contains $item.Name) { continue }
+
+                if ($preserveItems -contains $item.Name) {
+                    # Preserve existing config. For a preserved folder, still copy in
+                    # any NEW files a newer version introduced (add-only), but never
+                    # overwrite files that already exist on the live share.
+                    if ($item.PSIsContainer) {
+                        $destSub = Join-Path $LocalPath $item.Name
+                        foreach ($child in (Get-ChildItem -Path $item.FullName -Recurse -File -Force)) {
+                            $rel       = $child.FullName.Substring($item.FullName.Length).TrimStart('\')
+                            $destChild = Join-Path $destSub $rel
+                            if (-not (Test-Path $destChild)) {
+                                $destChildDir = Split-Path $destChild -Parent
+                                if (-not (Test-Path $destChildDir)) {
+                                    New-Item -ItemType Directory -Path $destChildDir -Force | Out-Null
+                                }
+                                Copy-Item -Path $child.FullName -Destination $destChild -Force
+                                Write-Host "  [NEW] $($item.Name)\$rel (added; existing config preserved)" -ForegroundColor Green
+                            }
+                        }
+                    }
+                    Write-Verbose "  Preserved: $($item.Name)"
+                    continue
+                }
+
+                # Code item: overwrite in place.
+                Copy-Item -Path $item.FullName -Destination $LocalPath -Recurse -Force
+                Write-Verbose "  Updated: $($item.Name)"
+            }
+
+            # Belt-and-braces: strip repo-only artefacts if any slipped in.
+            foreach ($item in $repoOnlyItems) {
+                $itemPath = Join-Path $LocalPath $item
+                if (Test-Path $itemPath) {
+                    Remove-Item -Path $itemPath -Recurse -Force -ErrorAction SilentlyContinue
+                    Write-Verbose "  Removed repo-only item: $item"
+                }
+            }
+
+            # Remove .gitkeep placeholders that only exist to keep empty folders in git.
+            Get-ChildItem -Path $LocalPath -Filter '.gitkeep' -Recurse -Force -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Remove-Item -Path $_.FullName -Force -ErrorAction SilentlyContinue
+                    Write-Verbose "  Removed .gitkeep: $($_.FullName)"
+                }
+
+            Write-Host 'Code refreshed (Control configuration preserved).' -ForegroundColor Green
+        }
+    } finally {
+        if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    #endregion
+
+    #region -- Optionally refresh the NDT Monitor site code ----------------------
+    if ($UpdateMonitor) {
+        Write-Host "`nRefreshing NDT Monitor site code..." -ForegroundColor Cyan
+        try {
+            Install-NDTMonitor -LocalPath $LocalPath
+        } catch {
+            Write-Warning "NDT Monitor refresh failed: $_"
+            Write-Warning 'The upgraded share is still usable. Re-run Install-NDTMonitor to retry.'
+        }
+    }
+    #endregion
+
+    Write-Host "`nNDT upgrade complete." -ForegroundColor Green
+    Write-Host "  Local path : $LocalPath"
+    if (-not $NoBackup) { Write-Host "  Backup     : $BackupPath" }
+    Write-Host ''
+    Write-Host 'Post-upgrade notes:' -ForegroundColor Cyan
+    Write-Host '  * Re-import the module to load the new commands into this session:' -ForegroundColor White
+    Write-Host "      Import-Module '$([System.IO.Path]::Combine($LocalPath,'install','NDT','ndt.psd1'))' -Force" -ForegroundColor Gray
+    Write-Host '  * If WinPE scripts changed, rebuild the boot image:' -ForegroundColor White
+    Write-Host '      New-NDTPEImage' -ForegroundColor Gray
+    if (-not $UpdateMonitor) {
+        Write-Host '  * To push updated NDT Monitor code to IIS, re-run with -UpdateMonitor' -ForegroundColor White
+        Write-Host '    (or run Install-NDTMonitor). The certificate and logs are preserved.' -ForegroundColor Gray
+    }
+}
+
 function Install-NDTMonitor {
     <#
     .SYNOPSIS
