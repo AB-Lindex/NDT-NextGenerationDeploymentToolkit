@@ -64,7 +64,6 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
     │   ├── web.config             ← maps /progress to the handler; LogRoot appSetting
     │   ├── App_Code/ProgressHandler.cs ← ASP.NET handler (auto-compiled by IIS)
     │   └── Default.htm            ← live dashboard (MDT-style monitoring view)
-    ├── ndt.nuspec                 ← NuGet package spec (reference; PSGallery uses psd1)
     └── Publish-NDT.ps1            ← publishes the module to PSGallery
 ```
 
