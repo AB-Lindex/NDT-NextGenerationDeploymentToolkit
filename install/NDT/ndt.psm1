@@ -1757,7 +1757,7 @@ function Test-NDTDeployment {
           - Each referenced section exists as a top-level key in CustomSettings.json
           - OS key exists in OS.json
           - WIM file exists on disk
-          - Each DeploymentSteps group exists in DeploymentGroups.json
+          - Each DeploymentSteps group exists in DeploymentSteps.json
           - Each step's Reference key exists in Deployment.json
           - Each script file referenced in Deployment.json exists on disk
         No changes are made  -  this is a read-only validation.
@@ -1811,7 +1811,7 @@ function Test-NDTDeployment {
     $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
     $snPath = Join-Path $LocalPath 'Control\Sections.json'
     $djPath = Join-Path $LocalPath 'Control\Deployment.json'
-    $dgPath = Join-Path $LocalPath 'Control\DeploymentGroups.json'
+    $dgPath = Join-Path $LocalPath 'Control\DeploymentSteps.json'
     $osPath = Join-Path $LocalPath 'Control\OS.json'
 
     # -- [1] Control files -------------------------------------------------------
@@ -1819,7 +1819,7 @@ function Test-NDTDeployment {
     $csOk = Test-Path $csPath; Write-Check 'CustomSettings.json'   $csOk $csPath
     $snOk = Test-Path $snPath; Write-Check 'Sections.json'         $snOk $snPath
     $djOk = Test-Path $djPath; Write-Check 'Deployment.json'       $djOk $djPath
-    $dgOk = Test-Path $dgPath; Write-Check 'DeploymentGroups.json' $dgOk $dgPath
+    $dgOk = Test-Path $dgPath; Write-Check 'DeploymentSteps.json'  $dgOk $dgPath
     $osOk = Test-Path $osPath; Write-Check 'OS.json'               $osOk $osPath
 
     if (-not ($csOk -and $snOk -and $djOk -and $dgOk -and $osOk)) {

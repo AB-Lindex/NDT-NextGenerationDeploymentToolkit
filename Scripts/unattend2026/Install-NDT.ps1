@@ -75,8 +75,8 @@ $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 $sectionsPath = "Z:\Control\Sections.json"
 $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 
-# Load DeploymentGroups.json (groups → ordered steps with References)
-$deploymentGroupsPath = "Z:\Control\DeploymentGroups.json"
+# Load DeploymentSteps.json (groups → ordered steps with References)
+$deploymentGroupsPath = "Z:\Control\DeploymentSteps.json"
 $deploymentGroups = Get-Content -Path $deploymentGroupsPath -Raw | ConvertFrom-Json
 
 # Load Deployment.json (actions → scripts / Reboot / AutoLogon entries)
@@ -206,7 +206,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     $deploymentGroup = $deploymentGroups.$deploymentGroupName
 
     if (-not $deploymentGroup) {
-        Write-Log "Deployment group '$deploymentGroupName' not found in DeploymentGroups.json" -Level WARN
+        Write-Log "Deployment group '$deploymentGroupName' not found in DeploymentSteps.json" -Level WARN
         continue
     }
     

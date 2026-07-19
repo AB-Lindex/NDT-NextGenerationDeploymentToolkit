@@ -40,10 +40,12 @@
   },
   "Reboot": {
     "Type": "Reboot",
+    "Builtin": true,
     "Description": "Restart the computer"
   },
   "ADLogon": {
     "Type": "AutoLogon",
+    "Builtin": true,
     "Description": "Configure automatic logon"
   },
   "Install PowerShell 7": {
@@ -77,10 +79,12 @@
   },
   "Pause": {
     "Type": "Pause",
+    "Builtin": true,
     "Description": "Pause deployment — creates a desktop shortcut to resume"
   },
   "WindowsUpdate": {
     "Type": "WindowsUpdate",
+    "Builtin": true,
     "Script": "\\Applications\\WindowsUpdate\\install.ps1",
     "Description": "Install Windows updates"
   },
@@ -170,6 +174,7 @@
   },
   "ADLogon-AD01": {
     "Type": "AutoLogon",
+    "Builtin": true,
     "Description": "Configure automatic logon"
   },
   "Setup PKI IIS and Share": {

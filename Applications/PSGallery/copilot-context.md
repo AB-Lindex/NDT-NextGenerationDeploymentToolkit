@@ -124,7 +124,7 @@ Add to `Deployment.json`:
 "Install PSGallery": { "Script": "\\Applications\\PSGallery\\install.ps1" }
 ```
 
-Add to a deployment group in `DeploymentGroups.json`:
+Add to a deployment group in `DeploymentSteps.json`:
 ```jsonc
 "PSGallery Server": {
   "Step1": { "Description": "Install PSGallery", "Reference": "Install PSGallery" }

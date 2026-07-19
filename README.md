@@ -47,7 +47,7 @@ The machine PXE-boots from WDS and loads `Boot/boot2026.wim`.
 `Install-NDT.ps1` runs under PowerShell 7 and drives all post-deployment work:
 
 1. Reads the machine's deployment groups from `CustomSettings.json` (matched by MAC address).
-2. Loads the ordered steps for each group from `DeploymentGroups.json`; resolves each step's action from `Deployment.json`.
+2. Loads the ordered steps for each group from `DeploymentSteps.json`; resolves each step's action from `Deployment.json`.
 3. Tracks completed steps in `C:\temp\install-steps.json` so deployment can resume after a reboot exactly where it left off.
 4. Supports five step types:
    - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe.
@@ -73,7 +73,7 @@ Deploy2026/
 ├── Control/
 │   ├── CustomSettings.json       # Per-machine config (keyed by MAC address only)
 │   ├── Sections.json             # Shared named sections (locale, network, AD, deploy creds)
-│   ├── DeploymentGroups.json     # Named groups of ordered steps referencing Deployment.json keys
+│   ├── DeploymentSteps.json      # Named groups of ordered steps referencing Deployment.json keys
 │   ├── Deployment.json           # Action definitions: scripts, Reboot, AutoLogon, etc.
 │   └── OS.json                   # OS image catalog (WIM path + index per OS key)
 ├── Operating Systems/            # WIM files for each OS
@@ -122,7 +122,7 @@ Shared named sections referenced from MAC blocks. Merged into a machine's effect
 "Deploy": { "Share": "\\\\server\\Deploy2026", "Username": "...", "Password": "..." }
 ```
 
-### DeploymentGroups.json
+### DeploymentSteps.json
 
 Named groups of ordered steps. Each step has a `Reference` key into `Deployment.json`:
 ```json
