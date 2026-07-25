@@ -174,6 +174,7 @@ foreach ($d in @($bootX64, $bootX86)) {
 
 $binaries = @(
     @{ Src = 'snponly.efi'; Dst = (Join-Path $bootX64 'snponly.efi') },  # x64 UEFI chainload (preferred)
+    @{ Src = 'snponly.efi'; Dst = (Join-Path $bootX64 'wdsmgfw.efi') },  # x64 UEFI: WDS hands out wdsmgfw.efi unconditionally (BootProgram is ignored for UEFI), so it MUST be iPXE
     @{ Src = 'ipxe.efi';    Dst = (Join-Path $bootX64 'ipxe.efi')    },  # x64 UEFI (full driver, fallback)
     @{ Src = 'ipxe.pxe';    Dst = (Join-Path $bootX86 'ipxe.pxe')    }   # legacy BIOS
 )
@@ -201,6 +202,10 @@ function Set-WdsBootProgram {
 }
 
 # x64 UEFI clients (DHCP arch 7/9) -> snponly.efi (firmware SNP/UNDI - best for chainload)
+# NOTE: For UEFI, WDS ignores this BootProgram setting and always hands clients
+# boot\x64\wdsmgfw.efi. That file is staged as a copy of snponly.efi in step 2,
+# so this setting is belt-and-suspenders only. If wdsmgfw.efi is missing, UEFI
+# clients get "NBP filesize is 0 Bytes" / PXE-E23.
 Set-WdsBootProgram -Arch 'x64uefi' -Program 'boot\x64\snponly.efi'
 
 # Legacy BIOS clients (DHCP arch 0) -> ipxe.pxe
