@@ -21,5 +21,11 @@ if (Get-Service -Name DHCPServer -ErrorAction SilentlyContinue) {
 # TFTP block size: 1024 bytes (requires service restart to take effect)
 wdsutil.exe /Set-Server /Transport /TftpMaximumBlockSize:1024
 
+# Disable TFTP variable window extension.
+# The variable window causes intermittent 0xc0000001 boot failures on Hyper-V virtual networks
+# (virtual switch drops/reorders the TFTP bursts). Disabling it forces simple stop-and-wait TFTP
+# which is completely reliable. The throughput difference is negligible for a ~3 MB boot image.
+wdsutil.exe /Set-Server /Transport /EnableTFTPVariableWindowExtension:No
+
 "Restart WDS service to apply all settings"
 Restart-Service -Name WDSServer -Force

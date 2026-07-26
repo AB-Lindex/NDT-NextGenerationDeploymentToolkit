@@ -127,6 +127,10 @@
     "Step30": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
+    },
+    "Step40": {
+      "Description": "Install iPXE bootloader",
+      "Reference": "Install iPXE"
     }
   },
   "NPP": {
