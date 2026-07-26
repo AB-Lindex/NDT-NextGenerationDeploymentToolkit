@@ -29,3 +29,15 @@ wdsutil.exe /Set-Server /Transport /EnableTFTPVariableWindowExtension:No
 
 "Restart WDS service to apply all settings"
 Restart-Service -Name WDSServer -Force
+
+<#
+    NOTE: after adding the WinPE boot image via:
+        wdsutil /Add-Image /ImageFile:"C:\Deploy2026\Boot\boot2026.wim" /ImageType:Boot /Name:"NDT PE Boot 2026"
+
+    Set it as the default boot image for BOTH x64 (BIOS) and x64uefi (UEFI) clients.
+    Without this, UEFI clients get 0xc0000001 "Windows failed to start" because WDS
+    finds no default boot image for the x64uefi architecture and aborts the session.
+
+    wdsutil /Set-Server /BootImage:boot2026.wim /Architecture:x64uefi
+    wdsutil /Set-Server /BootImage:boot2026.wim /Architecture:x64
+#>
