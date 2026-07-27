@@ -79,8 +79,8 @@
   },
   "00:15:5D:02:40:50": {
     "OS": "WIN2025DCG",
-    "Computername": "NDT01",
-    "IPAddress": "10.0.3.16/24",
+    "Computername": "NDT02",
+    "IPAddress": "10.0.3.15/24",
     "AdminPassword": "Qantas-777",
     "Sections": {
       "Locale": "Sweden",
