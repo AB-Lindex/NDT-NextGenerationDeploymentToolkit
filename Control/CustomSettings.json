@@ -77,6 +77,22 @@
       "iPXE"
     ]
   },
+  "00:15:5D:02:40:50": {
+    "OS": "WIN2025DCG",
+    "Computername": "NDT01",
+    "IPAddress": "10.0.3.16/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentSteps": [
+      "General Settings",
+      "SMC",
+      "Deployment"
+    ]
+  },
   "00:15:5D:02:40:1C": {
     "OS": "WIN2025DCG",
     "Computername": "NDT01",
