@@ -5,11 +5,14 @@
 
 # Exclude a folder at the root of the repository
 Applications2026/
-Operating Systems/
+Operating Systems/*
 Scratch/
 
 # Keep folder placeholders even when parent folder is ignored
 !Operating Systems/.gitkeep
+!Operating Systems/*/
+Operating Systems/*/*
+!Operating Systems/*/.gitkeep
 !Scratch/.gitkeep
 
 # User-specific files
