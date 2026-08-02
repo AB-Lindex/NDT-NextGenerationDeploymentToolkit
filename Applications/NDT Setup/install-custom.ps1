@@ -9,6 +9,10 @@
       - the untracked Applications2026\ folder (site-specific installers)
       - every .pfx certificate present in the local working copy
 
+    It then installs the NDT Monitor, which install.ps1 skips (-SkipMonitor)
+    because the stock repo has no HTTPS certificate. The monitor's PFX is now in
+    place from the copy step above, so the IIS progress web service can be built.
+
     Run this from your local repo (it copies from the folder this script ships in).
 #>
 
@@ -23,20 +27,22 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot      = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $LocalPathFull = (Resolve-Path $LocalPath).Path
 
-# Applications2026 : site-specific installers
+# Only run for a custom dev setup. No Applications2026 folder means this is a
+# stock NDT deploy - nothing custom to add, so exit.
 $app2026Src = Join-Path $RepoRoot 'Applications2026'
-if (Test-Path $app2026Src) {
-    $app2026Dst = Join-Path $LocalPathFull 'Applications2026'
-    if ($app2026Dst -ne (Resolve-Path $app2026Src).Path) {
-        Write-Host "Copying Applications2026 -> $app2026Dst" -ForegroundColor Cyan
-        Copy-Item -Path $app2026Src -Destination $LocalPathFull -Recurse -Force
-    }
-    else {
-        Write-Host 'Applications2026 already in place (local repo is the deploy path).' -ForegroundColor DarkGray
-    }
+if (-not (Test-Path $app2026Src)) {
+    Write-Host "Applications2026 not found at '$app2026Src' - stock deploy, nothing to do." -ForegroundColor DarkGray
+    return
+}
+
+# Applications2026 : site-specific installers
+$app2026Dst = Join-Path $LocalPathFull 'Applications2026'
+if ($app2026Dst -ne (Resolve-Path $app2026Src).Path) {
+    Write-Host "Copying Applications2026 -> $app2026Dst" -ForegroundColor Cyan
+    Copy-Item -Path $app2026Src -Destination $LocalPathFull -Recurse -Force
 }
 else {
-    Write-Warning "Applications2026 not found at '$app2026Src' - skipping."
+    Write-Host 'Applications2026 already in place (local repo is the deploy path).' -ForegroundColor DarkGray
 }
 
 # .pfx certificates : preserve their relative folder layout under LocalPath
@@ -55,3 +61,7 @@ if ($pfxFiles) {
 else {
     Write-Warning "No .pfx files found under '$RepoRoot'."
 }
+
+# NDT Monitor : install.ps1 skips it (-SkipMonitor); the PFX is now in place, so build it here
+Write-Host "`nInstalling NDT Monitor..." -ForegroundColor Cyan
+Install-NDTMonitor -LocalPath $LocalPathFull
