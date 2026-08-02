@@ -71,7 +71,8 @@
   },
   "Install iPXE": {
     "Script": "\\Applications\\iPXE\\install.ps1",
-    "Description": "Install iPXE bootloader"
+    "Description": "Install iPXE bootloader",
+    "powershell": "powershell5"
   },
   "Install NDT": {
     "Script": "\\Applications\\NDT Setup\\install.ps1",

@@ -172,7 +172,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "deploymentSteps": [
+    "DeploymentSteps": [
       "SMC",
       "IIS"
     ]

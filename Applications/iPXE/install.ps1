@@ -81,6 +81,28 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Relaunch under Windows PowerShell 5.1 if started from PowerShell 7+.
+# This script installs and configures IIS; the WebAdministration IIS:\ provider
+# and the ServerManager module are unreliable under PS7. Forward all bound params.
+if ($PSVersionTable.PSVersion.Major -ge 6) {
+    $ps5 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path $ps5)) {
+        throw 'Windows PowerShell 5.1 (powershell.exe) not found - required for the IIS provider.'
+    }
+    Write-Host 'iPXE install requires Windows PowerShell 5.1 (IIS provider) - relaunching under powershell.exe...' -ForegroundColor Yellow
+
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    foreach ($kv in $PSBoundParameters.GetEnumerator()) {
+        if ($kv.Value -is [switch]) {
+            if ($kv.Value.IsPresent) { $argList += "-$($kv.Key)" }
+        } else {
+            $argList += "-$($kv.Key)"; $argList += [string]$kv.Value
+        }
+    }
+    & $ps5 @argList
+    exit $LASTEXITCODE
+}
+
 function Write-Step  { param($m) Write-Host "`n==> $m" -ForegroundColor Cyan }
 function Write-Ok    { param($m) Write-Host "    [ok]   $m" -ForegroundColor Green }
 function Write-Info  { param($m) Write-Host "    [info] $m" -ForegroundColor DarkGray }
