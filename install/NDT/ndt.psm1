@@ -1323,7 +1323,7 @@ function Add-NDTServer {
     .PARAMETER Sections
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
     .PARAMETER DeploymentSteps
-        Ordered array of deployment group names from Deployment.json.
+        Ordered array of deployment group names from DeploymentGroups.json.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
     .EXAMPLE
@@ -1757,9 +1757,9 @@ function Test-NDTDeployment {
           - Each referenced section exists as a top-level key in CustomSettings.json
           - OS key exists in OS.json
           - WIM file exists on disk
-          - Each DeploymentSteps group exists in DeploymentSteps.json
-          - Each step's Reference key exists in Deployment.json
-          - Each script file referenced in Deployment.json exists on disk
+          - Each DeploymentSteps group exists in DeploymentGroups.json
+          - Each step's Reference key exists in DeploymentActions.json
+          - Each script file referenced in DeploymentActions.json exists on disk
         No changes are made  -  this is a read-only validation.
         Returns \$true if all checks passed, \$false if any check failed.
     .PARAMETER MAC
@@ -1810,16 +1810,16 @@ function Test-NDTDeployment {
     # -- Control file paths ------------------------------------------------------
     $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
     $snPath = Join-Path $LocalPath 'Control\Sections.json'
-    $djPath = Join-Path $LocalPath 'Control\Deployment.json'
-    $dgPath = Join-Path $LocalPath 'Control\DeploymentSteps.json'
+    $djPath = Join-Path $LocalPath 'Control\DeploymentActions.json'
+    $dgPath = Join-Path $LocalPath 'Control\DeploymentGroups.json'
     $osPath = Join-Path $LocalPath 'Control\OS.json'
 
     # -- [1] Control files -------------------------------------------------------
     Write-Host "`n[1] Control files" -ForegroundColor White
     $csOk = Test-Path $csPath; Write-Check 'CustomSettings.json'   $csOk $csPath
     $snOk = Test-Path $snPath; Write-Check 'Sections.json'         $snOk $snPath
-    $djOk = Test-Path $djPath; Write-Check 'Deployment.json'       $djOk $djPath
-    $dgOk = Test-Path $dgPath; Write-Check 'DeploymentSteps.json'  $dgOk $dgPath
+    $djOk = Test-Path $djPath; Write-Check 'DeploymentActions.json'  $djOk $djPath
+    $dgOk = Test-Path $dgPath; Write-Check 'DeploymentGroups.json'   $dgOk $dgPath
     $osOk = Test-Path $osPath; Write-Check 'OS.json'               $osOk $osPath
 
     if (-not ($csOk -and $snOk -and $djOk -and $dgOk -and $osOk)) {

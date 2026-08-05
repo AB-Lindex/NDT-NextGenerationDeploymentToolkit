@@ -32,8 +32,8 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ├── Control/
 │   ├── CustomSettings.json        ← per-machine config keyed by MAC address only
 │   ├── Sections.json              ← shared named sections (locale, network, AD, deploy credentials)
-│   ├── DeploymentSteps.json       ← named groups: ordered steps referencing Deployment.json keys
-│   ├── Deployment.json            ← action definitions: scripts, Reboot, AutoLogon
+│   ├── DeploymentGroups.json      ← named groups: ordered steps referencing DeploymentActions.json keys
+│   ├── DeploymentActions.json     ← action definitions: scripts, Reboot, AutoLogon
 │   └── OS.json                    ← OS catalog: key → WIM path + index
 ├── Operating Systems/             ← WIM files
 ├── Applications/                  ← generic app installers (PS scripts)
@@ -106,7 +106,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 
 1. Read machine's `DeploymentSteps` from `CustomSettings.json` (matched by MAC).
    - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentSteps`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
-2. Load ordered steps from `DeploymentSteps.json` for each group; resolve each step's action from `Deployment.json`.
+2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `DeploymentActions.json`.
 3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
 4. Execute steps by type:
    - **Script** — run `.ps1` (default: pwsh/PS 7), `.ps1` with `"PowerShell": "powershell5"` (PS 5.1), or `.cmd`/`.bat` (cmd.exe). Optional `Parameters` array names keys to pull from `CustomSettings.json`.
@@ -153,13 +153,13 @@ Shared named sections, referenced by name from MAC blocks. Merged into effective
 "Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999" },
 "ADLogon-AD01": { "Username": "Corp\\ADLogon",   "Password": "..." },
 "ADLogon-AD02": { "Username": "Dev\\ADLogon",    "Password": "..." }
-// The key name must match the "Reference" value used in DeploymentSteps.json.
+// The key name must match the "Reference" value used in DeploymentGroups.json.
 // MonitorUrl (on the deploy section) is optional — enables NDT Monitor progress reporting; stamped by Install-NDT.
 ```
 
-### DeploymentSteps.json
+### DeploymentGroups.json
 
-Named groups of ordered steps. Each step has a `Reference` key into `Deployment.json`:
+Named groups of ordered steps. Each step has a `Reference` key into `DeploymentActions.json`:
 ```jsonc
 "General Settings": {
   "Step1": { "Description": "Admin password never expires", "Reference": "Admin password never expires" },
@@ -167,7 +167,7 @@ Named groups of ordered steps. Each step has a `Reference` key into `Deployment.
 }
 ```
 
-### Deployment.json
+### DeploymentActions.json
 
 Action definitions only — what to run (three forms):
 ```jsonc
@@ -220,7 +220,7 @@ Also exported by the module (see `ndt.psd1`):
 - `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.
-- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentSteps.json groups, Deployment.json references, and script file paths. Returns `$true` / `$false`.
+- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentGroups.json groups, DeploymentActions.json references, and script file paths. Returns `$true` / `$false`.
 
 ---
 

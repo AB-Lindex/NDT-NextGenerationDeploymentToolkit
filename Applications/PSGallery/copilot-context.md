@@ -119,12 +119,12 @@ Install-Module -Name MyModule -Repository PSGallery2026
 
 ## NDT integration
 
-Add to `Deployment.json`:
+Add to `DeploymentActions.json`:
 ```jsonc
 "Install PSGallery": { "Script": "\\Applications\\PSGallery\\install.ps1" }
 ```
 
-Add to a deployment group in `DeploymentSteps.json`:
+Add to a deployment group in `DeploymentGroups.json`:
 ```jsonc
 "PSGallery Server": {
   "Step1": { "Description": "Install PSGallery", "Reference": "Install PSGallery" }

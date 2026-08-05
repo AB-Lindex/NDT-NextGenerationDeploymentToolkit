@@ -1,8 +1,12 @@
 # NDT  - Next Deployment Tool for 2026 Unattended Deployment.
-# This script is designed to run on the deployed machine after the initial Windows PE phase, and will execute deployment steps defined in Deployment.json based on the machine's MAC address.
+# This script is designed to run on the deployed machine after the initial Windows PE phase, and will execute deployment steps defined in DeploymentActions.json based on the machine's MAC address.
 # It supports executing scripts, configuring autologon, and handling reboots as part of the deployment process.
 
 $LogPath = 'C:\temp\install-NDT.log'
+
+# Control file paths (single source of truth)
+$deploymentGroupsPath = 'Z:\Control\DeploymentGroups.json'    # groups → ordered steps with References
+$deploymentActionsPath = 'Z:\Control\DeploymentActions.json'  # actions → scripts / Reboot / AutoLogon entries
 
 function Write-Log {
     param(
@@ -75,13 +79,11 @@ $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 $sectionsPath = "Z:\Control\Sections.json"
 $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 
-# Load DeploymentSteps.json (groups → ordered steps with References)
-$deploymentGroupsPath = "Z:\Control\DeploymentSteps.json"
+# Load DeploymentGroups.json (groups → ordered steps with References)
 $deploymentGroups = Get-Content -Path $deploymentGroupsPath -Raw | ConvertFrom-Json
 
-# Load Deployment.json (actions → scripts / Reboot / AutoLogon entries)
-$deploymentPath = "Z:\Control\Deployment.json"
-$deployment = Get-Content -Path $deploymentPath -Raw | ConvertFrom-Json
+# Load DeploymentActions.json (actions → scripts / Reboot / AutoLogon entries)
+$deployment = Get-Content -Path $deploymentActionsPath -Raw | ConvertFrom-Json
 
 # Get machine configuration by MAC address
 $machineConfig = $customSettings.$macAddress
@@ -206,7 +208,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     $deploymentGroup = $deploymentGroups.$deploymentGroupName
 
     if (-not $deploymentGroup) {
-        Write-Log "Deployment group '$deploymentGroupName' not found in DeploymentSteps.json" -Level WARN
+        Write-Log "Deployment group '$deploymentGroupName' not found in DeploymentGroups.json" -Level WARN
         continue
     }
     
@@ -233,10 +235,10 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     Write-Log "`n[$stepName] $description" -ForegroundColor Cyan
     Send-NDTProgress -Status 'Running' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
     
-    # Get the referenced section from Deployment.json
+    # Get the referenced section from DeploymentActions.json
     $stepSection = $deployment.$stepReference
     if (-not $stepSection) {
-        Write-Log "Step reference '$stepReference' not found in Deployment.json" -Level WARN
+        Write-Log "Step reference '$stepReference' not found in DeploymentActions.json" -Level WARN
         continue
     }
     
@@ -447,7 +449,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     Write-Log "Script: $scriptPath" -ForegroundColor Gray
     Write-Log "PowerShell: $psVersion" -ForegroundColor Gray
     
-    # Build script parameters if defined in Deployment.json.
+    # Build script parameters if defined in DeploymentActions.json.
     # Look up each parameter from $effectiveSettings, which merges the machine's
     # direct properties with all values from its referenced Sections blocks.
     $scriptParams = @{}
