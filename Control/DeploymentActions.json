@@ -79,7 +79,7 @@
     "Description": "Install NDT deployment toolkit"
   },
   "Install NDT Customization": {
-    "Script": "\\Applications\\NDT Setup\\install-customization.ps1",
+    "Script": "\\Applications\\NDT Setup\\install-custom.ps1",
     "Description": "Install NDT customization scripts"
   },
   "CopyRef": {
