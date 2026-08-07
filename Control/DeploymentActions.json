@@ -78,6 +78,10 @@
     "Script": "\\Applications\\NDT Setup\\install.ps1",
     "Description": "Install NDT deployment toolkit"
   },
+  "Install NDT Customization": {
+    "Script": "\\Applications\\NDT Setup\\install-customization.ps1",
+    "Description": "Install NDT customization scripts"
+  },
   "CopyRef": {
     "Script": "\\Applications2026\\Copy Ref\\install.ps1",
     "Description": "Copy reference images"

@@ -104,6 +104,10 @@
       "Description": "Install NDT",
       "Reference": "Install NDT"
     },
+    "Step45": {
+      "Description": "Install NDT Customization",
+      "Reference": "Install NDT Customization"
+    },
     "Step50": {
       "Description": "Setup copy of Reference images",
       "Reference": "CopyRef"
