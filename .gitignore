@@ -279,6 +279,10 @@ ServiceFabricBackup/
 *.msi
 *.pfx
 
+# Keep the ADK online bootstrappers (needed on the deploy share)
+!Applications/ADK/adksetup.exe
+!Applications/ADK/adkwinpesetup.exe
+
 
 # SQL Server files
 *.mdf

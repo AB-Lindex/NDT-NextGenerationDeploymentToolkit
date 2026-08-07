@@ -227,21 +227,36 @@ exit
 
 $diskpartScript | diskpart
 
-<# this gave some errors so I switched to diskpart cmdlets, but keeping this here for reference
-#$disk = Get-Disk -Number 0
+<# Storage-module equivalent - kept for reference only; we stay on diskpart (above).
+   The cmdlets work in WinPE but are less forgiving than diskpart, so if you ever
+   switch, mind these points learned the hard way:
+     - Assign the drive letter directly on New-Partition (-DriveLetter S / C) instead
+       of -AssignDriveLetter + Set-Partition. Reassigning to C: fails if C: is taken.
+     - Format-Volume is the fragile step in WinPE (races the storage stack right after
+       New-Partition). Add a short retry if it throws.
+     - MBR/BIOS needs Set-Partition -IsActive $true to replace diskpart's "active".
+     - Clear-Disk -RemoveOEM also wipes recovery/OEM partitions (diskpart "clean" does).
 
-Clear-Disk -Number 0 -RemoveData -Confirm:$false
-Initialize-Disk -Number 0 -PartitionStyle GPT
+if ($isUEFI) {
+    Clear-Disk -Number 0 -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
+    Initialize-Disk -Number 0 -PartitionStyle GPT
 
-$efiPartition = New-Partition -DiskNumber 0 -Size 100MB -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
-Format-Volume -Partition $efiPartition -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false
-Set-Partition -DiskNumber 0 -PartitionNumber $efiPartition.PartitionNumber -NewDriveLetter S
+    $efi = New-Partition -DiskNumber 0 -Size 100MB -DriveLetter S -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
+    Format-Volume -Partition $efi -FileSystem FAT32 -NewFileSystemLabel "System" -Confirm:$false
 
-New-Partition -DiskNumber 0 -Size 16MB -GptType '{e3c9e316-0b5c-4db8-817d-f92df00215ae}'
+    New-Partition -DiskNumber 0 -Size 16MB -GptType '{e3c9e316-0b5c-4db8-817d-f92df00215ae}' | Out-Null  # MSR - not formatted
 
-$windowsPartition = New-Partition -DiskNumber 0 -UseMaximumSize -AssignDriveLetter
-Format-Volume -DriveLetter $windowsPartition.DriveLetter -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false
-Set-Partition -DriveLetter $windowsPartition.DriveLetter -NewDriveLetter C
+    $win = New-Partition -DiskNumber 0 -UseMaximumSize -DriveLetter C
+    Format-Volume -Partition $win -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false
+} else {
+    # Gen 1 / BIOS: MBR with a single active primary partition
+    Clear-Disk -Number 0 -RemoveData -RemoveOEM -Confirm:$false -ErrorAction SilentlyContinue
+    Initialize-Disk -Number 0 -PartitionStyle MBR
+
+    $win = New-Partition -DiskNumber 0 -UseMaximumSize -DriveLetter C
+    Format-Volume -Partition $win -FileSystem NTFS -NewFileSystemLabel "Windows" -Confirm:$false
+    Set-Partition -DriveLetter C -IsActive $true
+}
 #>
 
 # ------------------------------------------------------------------
