@@ -226,6 +226,7 @@ Also exported by the module (see `ndt.psd1`):
 
 ## Key conventions
 
+- **Always use standard ASCII characters in `.ps1`/`.psm1` files** — never em dashes (—), en dashes (–), curly quotes, arrows, or any codepoint > 0x7F, even in comments or string literals. Windows PowerShell 5.1 reads no-BOM files as Windows-1252 and mangles multibyte UTF-8 into parser errors. Use plain substitutes: em/en dash → `-` or ` - `, arrows → `->`.
 - All paths inside JSON files use **backslash**, rooted at the deploy share root (e.g. `\Applications\App2026\install01.ps1`).
 - MAC addresses in `CustomSettings.json` are **colon-separated, uppercase**.
 - Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` contains MAC address blocks only.
