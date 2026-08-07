@@ -554,9 +554,9 @@ function Install-NDTMonitor {
         [Parameter()]
         [string]$AppPoolName = 'NDTMonitor',
         [Parameter()]
-        [string]$CertificatePath,
+        [string]$CertificatePath = (Join-Path $LocalPath 'install\NDTMonitor\ndt01.corp.dev.pfx'),
         [Parameter()]
-        [SecureString]$CertificatePassword
+        [SecureString]$CertificatePassword = (ConvertTo-SecureString '1q2w3e4r' -AsPlainText -Force)
     )
 
     # -- Verify Administrator ----------------------------------------------------
@@ -592,16 +592,27 @@ function Install-NDTMonitor {
     }
 
     if (-not $LogRoot) { $LogRoot = Join-Path $LocalPath 'Logs\progress' }
-    if (-not $CertificatePath) { $CertificatePath = Join-Path $LocalPath 'install\NDTMonitor\ndt01.corp.dev.pfx' }
-    if (-not $CertificatePassword) {
-        $CertificatePassword = ConvertTo-SecureString '1q2w3e4r' -AsPlainText -Force
-    }
     $sourceDir = Join-Path $LocalPath 'install\NDTMonitor'
     if (-not (Test-Path $sourceDir)) {
         throw "NDT Monitor source content not found at: $sourceDir"
     }
     if (-not (Test-Path $CertificatePath)) {
-        throw "Certificate not found at: $CertificatePath -- place the PFX file there before running Install-NDTMonitor."
+        # No PFX supplied/found: generate a self-signed certificate for this host's
+        # FQDN and export it to CertificatePath so the standard import path below works.
+        $certFqdn = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
+        Write-Verbose "Certificate not found at: $CertificatePath"
+        Write-Verbose "Creating a self-signed certificate for '$certFqdn' instead..."
+        $certDir = Split-Path $CertificatePath -Parent
+        if ($certDir -and -not (Test-Path $certDir)) {
+            New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+        }
+        $selfSigned = New-SelfSignedCertificate -DnsName $certFqdn `
+            -CertStoreLocation 'Cert:\LocalMachine\My' `
+            -FriendlyName "NDT Monitor ($certFqdn)" `
+            -KeyExportPolicy Exportable `
+            -NotAfter (Get-Date).AddYears(5)
+        Export-PfxCertificate -Cert $selfSigned -FilePath $CertificatePath -Password $CertificatePassword | Out-Null
+        Write-Verbose "Self-signed certificate created for '$certFqdn' and exported to: $CertificatePath (thumbprint: $($selfSigned.Thumbprint))"
     }
 
     Write-Host "`nInstalling NDT Monitor (IIS)..." -ForegroundColor Cyan
