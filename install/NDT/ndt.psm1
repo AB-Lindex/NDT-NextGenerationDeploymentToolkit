@@ -491,15 +491,18 @@ function Install-NDTMonitor {
           3. Deploys the site content (web.config, App_Code\ProgressHandler.cs,
              Default.htm dashboard) from install\NDTMonitor into the site path,
              stamping the real log-folder path into web.config.
-          4. Imports the PFX certificate into LocalMachine\My (idempotent by thumbprint).
+          4. Resolves and imports the PFX certificate that matches this host's FQDN
+             (by file name, subject CN, or SAN) into LocalMachine\My (idempotent
+             by thumbprint). No self-signed certificate is ever generated.
           5. Creates / updates a dedicated application pool (.NET v4.0, Integrated).
-          6. Creates / updates the HTTPS website bound to the requested port, removes
-             any existing HTTP bindings, and attaches the imported certificate.
+          6. Removes the IIS Default Web Site, then creates / updates the monitor
+             website: HTTPS on the requested port when a certificate was found,
+             otherwise plain HTTP on port 80.
           7. Grants the app-pool identity Modify rights on the log folder.
           8. Opens the inbound firewall port.
           9. Starts the app pool and website.
 
-        Endpoints (served on https://<host>:<Port>):
+        Endpoints (served on https://<host>:<Port>, or http://<host>:80 with no cert):
           POST /progress          receive a progress update (JSON body)
           GET  /progress          all machine states as a JSON array
           GET  /progress?mac=..   a single machine's latest state
@@ -526,8 +529,10 @@ function Install-NDTMonitor {
         IIS application pool name. Default: NDTMonitor
 
     .PARAMETER CertificatePath
-        Path to the PFX certificate file to bind to the HTTPS site.
-        Default: <LocalPath>\install\NDTMonitor\ndt01.corp.dev.pfx
+        Path to a PFX certificate file to bind to the HTTPS site. If omitted, a PFX
+        matching this host's FQDN (by file name, subject CN, or SAN) is located in
+        <LocalPath>\install\NDTMonitor. If none is found the site is published over
+        plain HTTP on port 80 (no self-signed certificate is ever generated).
 
     .PARAMETER CertificatePassword
         Password for the PFX certificate as a SecureString.
@@ -554,7 +559,7 @@ function Install-NDTMonitor {
         [Parameter()]
         [string]$AppPoolName = 'NDTMonitor',
         [Parameter()]
-        [string]$CertificatePath = (Join-Path $LocalPath 'install\NDTMonitor\ndt01.corp.dev.pfx'),
+        [string]$CertificatePath,
         [Parameter()]
         [SecureString]$CertificatePassword = (ConvertTo-SecureString '1q2w3e4r' -AsPlainText -Force)
     )
@@ -596,23 +601,50 @@ function Install-NDTMonitor {
     if (-not (Test-Path $sourceDir)) {
         throw "NDT Monitor source content not found at: $sourceDir"
     }
-    if (-not (Test-Path $CertificatePath)) {
-        # No PFX supplied/found: generate a self-signed certificate for this host's
-        # FQDN and export it to CertificatePath so the standard import path below works.
-        $certFqdn = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
-        Write-Verbose "Certificate not found at: $CertificatePath"
-        Write-Verbose "Creating a self-signed certificate for '$certFqdn' instead..."
-        $certDir = Split-Path $CertificatePath -Parent
-        if ($certDir -and -not (Test-Path $certDir)) {
-            New-Item -ItemType Directory -Path $certDir -Force | Out-Null
+
+    # -- Resolve the certificate for THIS host -----------------------------------
+    # Never generate a self-signed certificate (modern browsers reject them). When
+    # no explicit -CertificatePath is supplied, locate a PFX that matches the local
+    # FQDN: first the conventional <fqdn>.pfx, then any *.pfx whose subject CN or
+    # SAN (Subject Alternative Name) covers the local FQDN. If none is found the
+    # site is published over plain HTTP (port 80) instead of HTTPS.
+    $localFqdn = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
+    if (-not $CertificatePath) {
+        $candidate = Join-Path $sourceDir "$localFqdn.pfx"
+        if (Test-Path $candidate) {
+            $CertificatePath = $candidate
+        } else {
+            foreach ($pfx in (Get-ChildItem -Path $sourceDir -Filter '*.pfx' -File -ErrorAction SilentlyContinue)) {
+                try {
+                    $probe = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+                        $pfx.FullName, $CertificatePassword,
+                        [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::DefaultKeySet)
+                } catch { continue }
+
+                $certNames = @()
+                if ($probe.Subject -match 'CN=([^,]+)') { $certNames += $Matches[1].Trim() }
+                $sanExt = $probe.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' } | Select-Object -First 1
+                if ($sanExt) {
+                    foreach ($m in [regex]::Matches($sanExt.Format($false), 'DNS Name=([^,]+)')) {
+                        $certNames += $m.Groups[1].Value.Trim()
+                    }
+                }
+                $probe.Dispose()
+
+                if ($certNames -contains $localFqdn) {
+                    $CertificatePath = $pfx.FullName
+                    Write-Verbose "Matched certificate '$($pfx.Name)' to local FQDN '$localFqdn' (subject/SAN)."
+                    break
+                }
+            }
         }
-        $selfSigned = New-SelfSignedCertificate -DnsName $certFqdn `
-            -CertStoreLocation 'Cert:\LocalMachine\My' `
-            -FriendlyName "NDT Monitor ($certFqdn)" `
-            -KeyExportPolicy Exportable `
-            -NotAfter (Get-Date).AddYears(5)
-        Export-PfxCertificate -Cert $selfSigned -FilePath $CertificatePath -Password $CertificatePassword | Out-Null
-        Write-Verbose "Self-signed certificate created for '$certFqdn' and exported to: $CertificatePath (thumbprint: $($selfSigned.Thumbprint))"
+    }
+
+    if ($CertificatePath -and (Test-Path $CertificatePath)) {
+        Write-Verbose "Using certificate: $CertificatePath"
+    } else {
+        Write-Warning "No certificate found for '$localFqdn' in $sourceDir - the monitor will be published over plain HTTP (port 80)."
+        $CertificatePath = $null
     }
 
     Write-Host "`nInstalling NDT Monitor (IIS)..." -ForegroundColor Cyan
@@ -679,7 +711,9 @@ function Install-NDTMonitor {
     # -- Step 4: Import SSL certificate ------------------------------------------
     Write-Host 'Step 4: Importing SSL certificate...' -ForegroundColor Cyan
     $thumbprint = $null
-    if ($PSCmdlet.ShouldProcess($CertificatePath, 'Import PFX certificate into LocalMachine\My store')) {
+    if (-not $CertificatePath) {
+        Write-Host '  [--] No certificate resolved - skipping (HTTP fallback)' -ForegroundColor Yellow
+    } elseif ($PSCmdlet.ShouldProcess($CertificatePath, 'Import PFX certificate into LocalMachine\My store')) {
         # Read the thumbprint from the PFX without importing first so the import is idempotent.
         $certObj = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
             $CertificatePath,
@@ -717,51 +751,61 @@ function Install-NDTMonitor {
         Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name startMode            -Value 'AlwaysRunning'
     }
 
-    # -- Step 6: Website (HTTPS) --------------------------------------------------
-    Write-Host 'Step 6: Configuring website (HTTPS)...' -ForegroundColor Cyan
-    if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $Port (HTTPS)")) {
+    # -- Step 6: Website ----------------------------------------------------------
+    # HTTPS on $Port when a certificate was resolved; otherwise plain HTTP on 80.
+    if ($thumbprint) {
+        $useHttps  = $true
+        $sitePort  = $Port
+        $siteProto = 'https'
+    } else {
+        $useHttps  = $false
+        $sitePort  = 80
+        $siteProto = 'http'
+    }
+
+    Write-Host "Step 6: Configuring website ($($siteProto.ToUpper()) port $sitePort)..." -ForegroundColor Cyan
+    if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $sitePort ($($siteProto.ToUpper()))")) {
+        # Always remove the IIS Default Web Site so it never shadows our bindings
+        # (and never squats on port 80 when we fall back to HTTP).
+        $defaultSite = Get-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue
+        if ($defaultSite) {
+            Remove-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue
+            Write-Host '  [OK] Removed IIS Default Web Site' -ForegroundColor Green
+        }
+
         $existingSite = Get-Website -Name $SiteName -ErrorAction SilentlyContinue
         if (-not $existingSite) {
-            # New-Website creates an HTTP binding by default; remove it, then add HTTPS.
-            New-Website -Name $SiteName -Port $Port -PhysicalPath $SitePath `
+            New-Website -Name $SiteName -Port $sitePort -PhysicalPath $SitePath `
                 -ApplicationPool $AppPoolName -Force | Out-Null
-            Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
-                Remove-WebBinding -ErrorAction SilentlyContinue
             Write-Host "  [OK] Created website: $SiteName" -ForegroundColor Green
         } else {
             Set-ItemProperty "IIS:\Sites\$SiteName" -Name physicalPath    -Value $SitePath
             Set-ItemProperty "IIS:\Sites\$SiteName" -Name applicationPool -Value $AppPoolName
-            # Remove any stale HTTP bindings (idempotent transition from HTTP to HTTPS).
-            Get-WebBinding -Name $SiteName -Protocol http -ErrorAction SilentlyContinue |
-                Remove-WebBinding -ErrorAction SilentlyContinue
             Write-Host "  [OK] Website updated: $SiteName" -ForegroundColor Green
         }
 
-        # Ensure an HTTPS binding exists on the requested port.
-        $hasHttpsBinding = Get-WebBinding -Name $SiteName -Protocol https -ErrorAction SilentlyContinue |
-            Where-Object { $_.bindingInformation -like "*:${Port}:*" }
-        if (-not $hasHttpsBinding) {
-            New-WebBinding -Name $SiteName -Protocol https -Port $Port -IPAddress '*' -SslFlags 0 | Out-Null
-            Write-Host "  [OK] HTTPS binding added (port $Port)" -ForegroundColor Green
-        } else {
-            Write-Host "  [OK] HTTPS binding exists (port $Port)" -ForegroundColor Gray
-        }
+        # Reset bindings to exactly the one protocol/port we want (idempotent).
+        Get-WebBinding -Name $SiteName -ErrorAction SilentlyContinue | Remove-WebBinding -ErrorAction SilentlyContinue
 
-        # Bind the SSL certificate to the port (idempotent: only replace if thumbprint differs).
-        if ($thumbprint) {
-            $sslBind = Get-Item "IIS:\SslBindings\0.0.0.0!$Port" -ErrorAction SilentlyContinue
+        if ($useHttps) {
+            New-WebBinding -Name $SiteName -Protocol https -Port $sitePort -IPAddress '*' -SslFlags 0 | Out-Null
+            Write-Host "  [OK] HTTPS binding added (port $sitePort)" -ForegroundColor Green
+
+            # Bind the SSL certificate to the port (idempotent: replace only if it differs).
+            $sslBind = Get-Item "IIS:\SslBindings\0.0.0.0!$sitePort" -ErrorAction SilentlyContinue
             if ($sslBind -and $sslBind.Thumbprint -eq $thumbprint) {
                 Write-Host "  [OK] SSL certificate already bound (thumbprint: $thumbprint)" -ForegroundColor Gray
             } else {
-                if ($sslBind) { Remove-Item "IIS:\SslBindings\0.0.0.0!$Port" -ErrorAction SilentlyContinue }
+                if ($sslBind) { Remove-Item "IIS:\SslBindings\0.0.0.0!$sitePort" -ErrorAction SilentlyContinue }
                 $httpsWebBinding = Get-WebBinding -Name $SiteName -Protocol https |
-                    Where-Object { $_.bindingInformation -like "*:${Port}:*" } |
+                    Where-Object { $_.bindingInformation -like "*:${sitePort}:*" } |
                     Select-Object -First 1
                 $httpsWebBinding.AddSslCertificate($thumbprint, 'MY')
                 Write-Host "  [OK] SSL certificate bound (thumbprint: $thumbprint)" -ForegroundColor Green
             }
         } else {
-            Write-Warning "  SSL thumbprint unavailable (ShouldProcess skipped step 4) -- HTTPS binding has no certificate."
+            New-WebBinding -Name $SiteName -Protocol http -Port $sitePort -IPAddress '*' | Out-Null
+            Write-Host "  [OK] HTTP binding added (port $sitePort) - no certificate available" -ForegroundColor Yellow
         }
     }
 
@@ -775,12 +819,12 @@ function Install-NDTMonitor {
 
     # -- Step 8: Firewall rule (idempotent) --------------------------------------
     Write-Host 'Step 8: Ensuring firewall rule...' -ForegroundColor Cyan
-    $ruleName = "NDT Monitor $Port"
+    $ruleName = "NDT Monitor $sitePort"
     if ($PSCmdlet.ShouldProcess($ruleName, 'Create inbound firewall rule')) {
         $existingRule = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
         if (-not $existingRule) {
             New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow `
-                -Protocol TCP -LocalPort $Port | Out-Null
+                -Protocol TCP -LocalPort $sitePort | Out-Null
             Write-Host "  [OK] Firewall rule created: $ruleName" -ForegroundColor Green
         } else {
             Write-Host "  [OK] Firewall rule exists: $ruleName" -ForegroundColor Gray
@@ -801,8 +845,8 @@ function Install-NDTMonitor {
 
     $hostName = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
     Write-Host "`nNDT Monitor installed." -ForegroundColor Green
-    Write-Host "  Dashboard : https://${hostName}:$Port/" -ForegroundColor White
-    Write-Host "  Endpoint  : https://${hostName}:$Port/progress" -ForegroundColor White
+    Write-Host "  Dashboard : ${siteProto}://${hostName}:$sitePort/" -ForegroundColor White
+    Write-Host "  Endpoint  : ${siteProto}://${hostName}:$sitePort/progress" -ForegroundColor White
     Write-Host "  Log folder: $LogRoot" -ForegroundColor Gray
 }
 
