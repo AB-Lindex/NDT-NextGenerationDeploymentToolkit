@@ -1,3 +1,26 @@
+function Remove-NDTBootstrapArtefact {
+    # Private helper (not exported). NDT runs from the PSGallery module install,
+    # never from the share, so the module copy and publish helper that ship inside
+    # the repo ZIP are bootstrap-only artefacts - remove them from a live share.
+    # install\NDTMonitor is intentionally KEPT (Install-NDTMonitor deploys its site
+    # content from there).
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter(Mandatory)]
+        [string]$LocalPath
+    )
+
+    $installDir = Join-Path $LocalPath 'install'
+    foreach ($artefact in @((Join-Path $installDir 'NDT'), (Join-Path $installDir 'Publish-NDT.ps1'))) {
+        if (Test-Path $artefact) {
+            if ($PSCmdlet.ShouldProcess($artefact, 'Remove bootstrap-only artefact from share')) {
+                Remove-Item -Path $artefact -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Verbose "  Removed bootstrap artefact: $artefact"
+            }
+        }
+    }
+}
+
 function Install-NDT {
     <#
     .SYNOPSIS
@@ -218,6 +241,10 @@ function Install-NDT {
             Write-Warning 'The deployment share is still usable. Re-run Install-NDTMonitor to retry.'
         }
     }
+    #endregion
+
+    #region -- Clean up bootstrap-only artefacts from the share ------------------
+    Remove-NDTBootstrapArtefact -LocalPath $LocalPath
     #endregion
 
     Write-Host "NDT deployment share installed successfully." -ForegroundColor Green
@@ -458,13 +485,17 @@ function Update-NDT {
     }
     #endregion
 
+    #region -- Clean up bootstrap-only artefacts from the share ------------------
+    Remove-NDTBootstrapArtefact -LocalPath $LocalPath
+    #endregion
+
     Write-Host "`nNDT upgrade complete." -ForegroundColor Green
     Write-Host "  Local path : $LocalPath"
     if (-not $NoBackup) { Write-Host "  Backup     : $BackupPath" }
     Write-Host ''
     Write-Host 'Post-upgrade notes:' -ForegroundColor Cyan
-    Write-Host '  * Re-import the module to load the new commands into this session:' -ForegroundColor White
-    Write-Host "      Import-Module '$([System.IO.Path]::Combine($LocalPath,'install','NDT','ndt.psd1'))' -Force" -ForegroundColor Gray
+    Write-Host '  * The NDT module itself updates from PSGallery, not the share:' -ForegroundColor White
+    Write-Host '      Update-Module NDT' -ForegroundColor Gray
     Write-Host '  * If WinPE scripts changed, rebuild the boot image:' -ForegroundColor White
     Write-Host '      New-NDTPEImage' -ForegroundColor Gray
     if (-not $UpdateMonitor) {
@@ -576,8 +607,14 @@ function Install-NDTMonitor {
         Write-Host 'Install-NDTMonitor requires Windows PowerShell 5.1 (IIS provider) - relaunching under powershell.exe...' -ForegroundColor Yellow
         $ps5 = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
         if (-not (Test-Path $ps5)) { throw 'Windows PowerShell 5.1 (powershell.exe) not found - cannot install the IIS monitor.' }
-        $manifest = Join-Path $LocalPath 'install\NDT\ndt.psd1'
-        if (-not (Test-Path $manifest)) { throw "NDT module manifest not found at: $manifest" }
+        # Import the module from the location it is ACTUALLY loaded from ($PSScriptRoot -
+        # the PSGallery install under Program Files\...\Modules\NDT). The module is never
+        # required to live on the deployment share: the PS5 child imports it by full path,
+        # so this works regardless of PSModulePath and whether the share holds any copy.
+        $manifest = Join-Path $PSScriptRoot 'ndt.psd1'
+        if (-not (Test-Path $manifest)) {
+            throw "NDT module manifest not found at '$manifest'. Install the module from PSGallery (Install-Module NDT) and re-run."
+        }
 
         $inner = "Import-Module '$manifest' -Force; Install-NDTMonitor -LocalPath '$LocalPath' -Port $Port -SitePath '$SitePath' -SiteName '$SiteName' -AppPoolName '$AppPoolName'"
         if ($PSBoundParameters.ContainsKey('LogRoot') -and $LogRoot) { $inner += " -LogRoot '$LogRoot'" }
