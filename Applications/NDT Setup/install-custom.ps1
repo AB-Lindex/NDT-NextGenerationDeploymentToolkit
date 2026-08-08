@@ -45,8 +45,12 @@ else {
     Write-Host 'Applications2026 already in place (local repo is the deploy path).' -ForegroundColor DarkGray
 }
 
-# .pfx certificates : preserve their relative folder layout under LocalPath
-$pfxFiles = Get-ChildItem -Path $RepoRoot -Filter '*.pfx' -Recurse -File -ErrorAction SilentlyContinue
+# .pfx certificates : preserve their relative folder layout under LocalPath.
+# Exclude the Backup folder, which Update-NDT may have created (it backs up
+# install\, so it can contain stale copies of the monitor .pfx).
+$backupRoot = Join-Path $RepoRoot 'Backup'
+$pfxFiles = Get-ChildItem -Path $RepoRoot -Filter '*.pfx' -Recurse -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.FullName -notlike "$backupRoot\*" }
 if ($pfxFiles) {
     foreach ($pfx in $pfxFiles) {
         $relative = $pfx.FullName.Substring($RepoRoot.Length).TrimStart('\')
