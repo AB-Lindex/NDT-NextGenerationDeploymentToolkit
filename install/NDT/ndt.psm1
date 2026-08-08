@@ -765,6 +765,16 @@ function Install-NDTMonitor {
 
     Write-Host "Step 6: Configuring website ($($siteProto.ToUpper()) port $sitePort)..." -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($SiteName, "Create/update website on port $sitePort ($($siteProto.ToUpper()))")) {
+        # Stop the app pool before touching the site. On an idempotent redeploy
+        # where the site was deleted but the pool left running, the old worker
+        # process retains a mapping to the now-deleted site root and ASP.NET
+        # throws "Failed to map the path '/'". Stopping it first (and recycling
+        # in Step 9) forces a clean reload of the freshly-created site config.
+        if ((Get-WebAppPoolState -Name $AppPoolName -ErrorAction SilentlyContinue).Value -eq 'Started') {
+            Stop-WebAppPool -Name $AppPoolName -ErrorAction SilentlyContinue
+            Write-Host '  [OK] Stopped app pool for reconfiguration' -ForegroundColor Gray
+        }
+
         # Always remove the IIS Default Web Site so it never shadows our bindings
         # (and never squats on port 80 when we fall back to HTTP).
         $defaultSite = Get-Website -Name 'Default Web Site' -ErrorAction SilentlyContinue
@@ -834,13 +844,18 @@ function Install-NDTMonitor {
     # -- Step 9: Start app pool + site -------------------------------------------
     Write-Host 'Step 9: Starting monitor...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($SiteName, 'Start app pool and website')) {
-        if ((Get-WebAppPoolState -Name $AppPoolName).Value -ne 'Started') {
+        # Recycle (never just "start if stopped") so the worker always loads the
+        # current site config. This prevents a stale worker from a previously
+        # deleted site causing "Failed to map the path '/'" on redeploy.
+        if ((Get-WebAppPoolState -Name $AppPoolName).Value -eq 'Started') {
+            Restart-WebAppPool -Name $AppPoolName
+        } else {
             Start-WebAppPool -Name $AppPoolName
         }
         if ((Get-WebsiteState -Name $SiteName).Value -ne 'Started') {
             Start-Website -Name $SiteName
         }
-        Write-Host '  [OK] Monitor started' -ForegroundColor Green
+        Write-Host '  [OK] Monitor started (app pool recycled)' -ForegroundColor Green
     }
 
     $hostName = [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName
