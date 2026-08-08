@@ -5,7 +5,7 @@
     Author            = 'NDT'
     CompanyName       = 'NDT'
     Copyright         = '(c) 2026 NDT. All rights reserved.'
-    Description       = 'NDT Deployment Toolkit — installs and configures an NDT deployment share.'
+    Description       = 'NDT Deployment Toolkit - installs and configures an NDT deployment share.'
 
     # Minimum PowerShell version required
     PowerShellVersion = '5.1'
