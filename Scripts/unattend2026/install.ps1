@@ -11,6 +11,40 @@
 # Must be checked BEFORE diskpart to avoid wiping the reference system
 
 # ------------------------------------------------------------------
+# Logging. C:\temp does not exist yet (the disk is not partitioned), so we start
+# logging to the WinPE RAM drive (X:) and relocate the log onto C:\temp once the
+# disk is partitioned (see "Log relocated" below). This mirrors the Write-Log used
+# by install2026.ps1 / Install-NDT.ps1 so all three phases log the same way.
+# ------------------------------------------------------------------
+$script:LogPath = 'X:\install.log'
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$ForegroundColor = 'White',
+        [string]$Level = 'INFO'
+    )
+    $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    if ($script:LogPath) {
+        try { Add-Content -Path $script:LogPath -Value "$ts [$Level] $Message" -ErrorAction Stop } catch { }
+    }
+    switch ($Level) {
+        'WARN'  { Write-Warning $Message }
+        'ERROR' { Write-Host $Message -ForegroundColor Red }
+        default { Write-Host $Message -ForegroundColor $ForegroundColor }
+    }
+}
+
+try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
+Write-Log 'install.ps1 (WinPE) started' -ForegroundColor Cyan
+Write-Log '-----------------------------------' -ForegroundColor Cyan
+Write-Log "Hostname : $env:COMPUTERNAME"
+Write-Log "User     : $(whoami)"
+Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
+Write-Log "IP       : $sysIP"
+Write-Log "Log file : $script:LogPath (WinPE RAM drive - relocated to C:\temp after partitioning)"
+Write-Log '-----------------------------------' -ForegroundColor Cyan
+
+# ------------------------------------------------------------------
 # WinPE progress reporting to the NDT Monitor (best-effort, never blocks).
 # $script:MonitorUrl / PEMac / PEComputername are populated after the MAC is
 # validated below. Until then these calls are no-ops.
@@ -50,7 +84,7 @@ function Send-PEProgress {
     }
 }
 
-Write-Host "Checking for capture mode..." -ForegroundColor Cyan
+Write-Log "Checking for capture mode..." -ForegroundColor Cyan
 $captureMode = $false
 $captureConfig = $null
 $referenceDrive = $null
@@ -59,7 +93,7 @@ $volumes = Get-Volume | Where-Object {$_.DriveLetter -and $_.FileSystemLabel -ne
 foreach ($vol in $volumes) {
     $flagFile = "$($vol.DriveLetter):\DeployCapture.flag"
     if (Test-Path $flagFile) {
-        Write-Host "Capture mode detected on drive $($vol.DriveLetter):" -ForegroundColor Yellow
+        Write-Log "Capture mode detected on drive $($vol.DriveLetter):" -ForegroundColor Yellow
         $captureConfig = Get-Content $flagFile -Raw | ConvertFrom-Json
         $referenceDrive = $vol.DriveLetter
         $captureMode = $true
@@ -68,11 +102,11 @@ foreach ($vol in $volumes) {
 }
 
 if ($captureMode) {
-    Write-Host "Running in CAPTURE mode - creating reference image" -ForegroundColor Green
-    Write-Host "Reference Drive: $referenceDrive" -ForegroundColor Cyan
-    Write-Host "Image Name: $($captureConfig.ImageName)" -ForegroundColor Cyan
-    Write-Host "Output Path: $($captureConfig.OutputPath)" -ForegroundColor Cyan
-    Write-Host ""
+    Write-Log "Running in CAPTURE mode - creating reference image" -ForegroundColor Green
+    Write-Log "Reference Drive: $referenceDrive" -ForegroundColor Cyan
+    Write-Log "Image Name: $($captureConfig.ImageName)" -ForegroundColor Cyan
+    Write-Log "Output Path: $($captureConfig.OutputPath)" -ForegroundColor Cyan
+    Write-Log ""
 
     $captureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 
@@ -80,34 +114,34 @@ if ($captureMode) {
         # Remove the capture flag before capturing so it is not baked into the WIM.
         # If left in place, any future deployment using this image would incorrectly
         # enter capture mode again.
-        Write-Host "Removing DeployCapture.flag from reference drive..." -ForegroundColor Yellow
+        Write-Log "Removing DeployCapture.flag from reference drive..." -ForegroundColor Yellow
         Remove-Item "${referenceDrive}:\DeployCapture.flag" -Force -ErrorAction SilentlyContinue
 
         # Clean C:\temp on the reference drive so deployment logs are not appended
         # when the WIM is applied to a new machine.
         $tempPath = "${referenceDrive}:\temp"
         if (Test-Path $tempPath) {
-            Write-Host "Cleaning $tempPath before capture..." -ForegroundColor Yellow
+            Write-Log "Cleaning $tempPath before capture..." -ForegroundColor Yellow
             Remove-Item -Path "$tempPath\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
 
-        Write-Host "Executing capture script..." -ForegroundColor Green
+        Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"
-        Write-Host "Capture complete!" -ForegroundColor Green
+        Write-Log "Capture complete!" -ForegroundColor Green
     } else {
-        Write-Host "ERROR: Capture script not found at: $captureScriptPath" -ForegroundColor Red
+        Write-Log "ERROR: Capture script not found at: $captureScriptPath" -Level ERROR
     }
     exit 0
 }
 
-Write-Host "Running normal deployment..." -ForegroundColor Cyan
+Write-Log "Running normal deployment..." -ForegroundColor Cyan
 # read-host "Press Enter to start deployment..."
 
 # Detect firmware type: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2)
 # Done early so we can report it, but disk is NOT touched until all validations pass.
 $firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name "PEFirmwareType" -ErrorAction SilentlyContinue).PEFirmwareType
 $isUEFI = ($firmwareType -eq 2)
-Write-Host "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
+Write-Log "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
 
 # ------------------------------------------------------------------
 # STEP 1 - Validate MAC address
@@ -118,10 +152,10 @@ $customSettingsPath = "Z:\Control\CustomSettings.json"
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 
 while (-not $customSettings.$macAddress) {
-    Write-Host "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -ForegroundColor Red
-    Write-Host "Available MAC addresses in configuration:" -ForegroundColor Yellow
+    Write-Log "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -Level ERROR
+    Write-Log "Available MAC addresses in configuration:" -ForegroundColor Yellow
     $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
-        Write-Host "  $($_.Name)" -ForegroundColor Gray
+        Write-Log "  $($_.Name)" -ForegroundColor Gray
     }
     Read-Host "Press Enter to retry"
     $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
@@ -133,8 +167,8 @@ $machineConfig = $customSettings.$macAddress
 # SAFETY CHECK - Install:NO prevents accidental disk wipe
 # ------------------------------------------------------------------
 if ($machineConfig.Install -eq "NO") {
-    Write-Host "Install is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
-    Write-Host "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
+    Write-Log "Install is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
+    Write-Log "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 10
     wpeutil Reboot
     exit 0
@@ -151,7 +185,7 @@ try {
     $peDeploySection = if ($machineConfig.Deploy -and $machineConfig.Deploy -notmatch '^(yes|no)$') { $machineConfig.Deploy } else { 'Deploy' }
     if ($peSections.$peDeploySection -and $peSections.$peDeploySection.MonitorUrl) {
         $script:MonitorUrl = $peSections.$peDeploySection.MonitorUrl.TrimEnd('/')
-        Write-Host "NDT Monitor: $script:MonitorUrl" -ForegroundColor Gray
+        Write-Log "NDT Monitor: $script:MonitorUrl" -ForegroundColor Gray
     }
 } catch {
     # Sections.json missing MonitorUrl or unreadable - PE reporting stays disabled.
@@ -163,8 +197,8 @@ try {
 $osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
 
 if (-not $osInfo -or -not $osInfo.Path -or -not $osInfo.Index) {
-    Write-Host "ERROR: Could not resolve OS for MAC address: $macAddress" -ForegroundColor Red
-    Write-Host "Ensure an OS key is set in the MAC block or a referenced section, and exists in OS.json" -ForegroundColor Yellow
+    Write-Log "ERROR: Could not resolve OS for MAC address: $macAddress" -Level ERROR
+    Write-Log "Ensure an OS key is set in the MAC block or a referenced section, and exists in OS.json" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
@@ -173,28 +207,28 @@ $wimPath  = $osInfo.Path
 $wimIndex = $osInfo.Index
 $osKey    = $osInfo.OsKey
 
-Write-Host "Configuration validated for MAC: $macAddress" -ForegroundColor Green
-Write-Host "  OS          : $osKey" -ForegroundColor Cyan
-Write-Host "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
+Write-Log "Configuration validated for MAC: $macAddress" -ForegroundColor Green
+Write-Log "  OS          : $osKey" -ForegroundColor Cyan
+Write-Log "  Computername: $($machineConfig.Computername)" -ForegroundColor Cyan
 
 if (-not (Test-Path $wimPath)) {
-    Write-Host "ERROR: WIM file not found at: $wimPath" -ForegroundColor Red
-    Write-Host "  OS key   : $osKey" -ForegroundColor Yellow
-    Write-Host "  Path     : $wimPath" -ForegroundColor Yellow
-    Write-Host "  Index    : $wimIndex" -ForegroundColor Yellow
+    Write-Log "ERROR: WIM file not found at: $wimPath" -Level ERROR
+    Write-Log "  OS key   : $osKey" -ForegroundColor Yellow
+    Write-Log "  Path     : $wimPath" -ForegroundColor Yellow
+    Write-Log "  Index    : $wimIndex" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit 1
 }
 
-Write-Host "  WIM Path : $wimPath" -ForegroundColor Cyan
-Write-Host "  WIM Index: $wimIndex" -ForegroundColor Cyan
+Write-Log "  WIM Path : $wimPath" -ForegroundColor Cyan
+Write-Log "  WIM Index: $wimIndex" -ForegroundColor Cyan
 
 Send-PEProgress -Description 'Configuration validated' -Percent 5
 
 # ------------------------------------------------------------------
 # STEP 3 - All validations passed - safe to wipe and partition disk
 # ------------------------------------------------------------------
-Write-Host "All pre-flight checks passed - partitioning disk 0..." -ForegroundColor Green
+Write-Log "All pre-flight checks passed - partitioning disk 0..." -ForegroundColor Green
 Send-PEProgress -Description 'Partitioning disk' -Percent 10
 
 if ($isUEFI) {
@@ -226,6 +260,21 @@ exit
 }
 
 $diskpartScript | diskpart
+
+# Disk is now partitioned - C: exists. Relocate the WinPE log off the X: RAM drive
+# onto C:\temp so it survives the reboot into Windows and lands on the deployed
+# machine alongside install2026.log / install-NDT.log.
+try {
+    $null = New-Item -ItemType Directory -Path 'C:\temp' -Force
+    $newLogPath = 'C:\temp\install.log'
+    if (Test-Path $script:LogPath) {
+        Copy-Item -Path $script:LogPath -Destination $newLogPath -Force -ErrorAction SilentlyContinue
+    }
+    $script:LogPath = $newLogPath
+    Write-Log "Log relocated to $newLogPath (C: partition available)" -ForegroundColor Gray
+} catch {
+    Write-Log "Could not relocate log to C:\temp - continuing on $script:LogPath" -Level WARN
+}
 
 <# Storage-module equivalent - kept for reference only; we stay on diskpart (above).
    The cmdlets work in WinPE but are less forgiving than diskpart, so if you ever
@@ -265,9 +314,9 @@ if ($isUEFI) {
 Send-PEProgress -Description 'Applying OS image' -Percent 20
 Dism.exe /Apply-Image /ImageFile:"$wimPath" /Index:$wimIndex /ApplyDir:C:\
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: DISM /Apply-Image failed with exit code $LASTEXITCODE" -ForegroundColor Red
-    Write-Host "  WIM Path : $wimPath" -ForegroundColor Yellow
-    Write-Host "  WIM Index: $wimIndex" -ForegroundColor Yellow
+    Write-Log "ERROR: DISM /Apply-Image failed with exit code $LASTEXITCODE" -Level ERROR
+    Write-Log "  WIM Path : $wimPath" -ForegroundColor Yellow
+    Write-Log "  WIM Index: $wimIndex" -ForegroundColor Yellow
     Read-Host "Press Enter to exit"
     exit $LASTEXITCODE
 }
@@ -279,11 +328,11 @@ Send-PEProgress -Description 'OS image applied' -Percent 45
 if ($machineConfig.PostPEScript) {
     $postScript = "Z:$($machineConfig.PostPEScript)"
     if (Test-Path $postScript) {
-        Write-Host "Running PostPEScript: $postScript" -ForegroundColor Cyan
+        Write-Log "Running PostPEScript: $postScript" -ForegroundColor Cyan
         powershell.exe -ExecutionPolicy Bypass -File $postScript
-        Write-Host "PostPEScript completed with exit code $LASTEXITCODE" -ForegroundColor Cyan
+        Write-Log "PostPEScript completed with exit code $LASTEXITCODE" -ForegroundColor Cyan
     } else {
-        Write-Host "WARNING: PostPEScript not found: $postScript" -ForegroundColor Yellow
+        Write-Log "WARNING: PostPEScript not found: $postScript" -Level WARN
     }
 }
 
@@ -306,6 +355,6 @@ if ($isUEFI) {
 }
 BCDEdit.exe /timeout 0
 
-Write-Host "Rebooting..." -ForegroundColor Green
+Write-Log "Rebooting..." -ForegroundColor Green
 Send-PEProgress -Description 'Rebooting to Windows' -Percent 50
 wpeutil Reboot
