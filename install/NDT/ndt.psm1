@@ -1078,6 +1078,16 @@ To skip WDS and build the WIM only:
 
     try {
         if (-not $RegisterOnly) {
+        # -- Pre-flight: exclude the mount + staging trees from Defender ---------
+        # Microsoft Defender real-time scanning of the files DISM writes into the
+        # mount tree is the usual cause of unmount error 0xc1420117 (open handle).
+        # Add best-effort path exclusions; never fail the build if Defender is not
+        # manageable on this host.
+        foreach ($excl in @($MountDir, $IsoStagingDir)) {
+            try { Add-MpPreference -ExclusionPath $excl -ErrorAction Stop }
+            catch { Write-Verbose "  Could not add Defender exclusion for '$excl': $_" }
+        }
+
         # -- Step 1: Generate settings.json -------------------------------------
         Write-Host 'Step 1: Generating settings.json...' -ForegroundColor Cyan
 
@@ -1124,6 +1134,21 @@ To skip WDS and build the WIM only:
 
         if (-not (Test-Path $MountDir)) {
             New-Item -Path $MountDir -ItemType Directory -Force | Out-Null
+        }
+
+        # Pre-flight cleanup: a previous run may have failed to unmount (0xc1420117)
+        # and left a stale image mounted at $MountDir, which would make the mount
+        # below fail. Clear any orphaned mount points, discard a mount still bound to
+        # this dir, and ensure the directory is empty before mounting.
+        dism /Cleanup-Mountpoints 2>&1 | Out-Null
+        $stale = dism /Get-MountedWimInfo 2>&1 | Select-String -SimpleMatch $MountDir
+        if ($stale) {
+            Write-Warning "  Stale WIM mount found at $MountDir - discarding before remount..."
+            dism /Unmount-Wim /MountDir:"$MountDir" /Discard 2>&1 | Out-Null
+            dism /Cleanup-Mountpoints 2>&1 | Out-Null
+        }
+        if (Get-ChildItem -Path $MountDir -Force -ErrorAction SilentlyContinue) {
+            Remove-Item -Path (Join-Path $MountDir '*') -Recurse -Force -ErrorAction SilentlyContinue
         }
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Mount staging boot.wim')) {
@@ -1252,8 +1277,29 @@ cmd.exe /k
         Write-Host "`nStep 6: Committing WIM..." -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($MountDir, 'Commit and unmount WIM')) {
-            dism /Unmount-Wim /MountDir:"$MountDir" /Commit
-            if ($LASTEXITCODE -ne 0) { throw "DISM unmount/commit failed (exit $LASTEXITCODE)" }
+            # DISM unmount fails with 0xc1420117 when any process still holds a handle
+            # inside the mount directory (antivirus/Search indexer scanning the files
+            # just written in Step 5, an open Explorer window, or a lingering .NET
+            # file handle). Move the session's working directory out of the mount tree,
+            # force a GC to release managed handles, then retry the commit a few times.
+            if ((Get-Location).Path -like "$MountDir*") { Set-Location $LocalPath }
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+
+            $maxAttempts   = 5
+            $unmountCommit = $false
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                dism /Unmount-Wim /MountDir:"$MountDir" /Commit
+                if ($LASTEXITCODE -eq 0) { $unmountCommit = $true; break }
+
+                if ($attempt -lt $maxAttempts) {
+                    Write-Warning "  Unmount attempt $attempt failed (exit $LASTEXITCODE, likely an open handle) - retrying in 10s..."
+                    Start-Sleep -Seconds 10
+                }
+            }
+            if (-not $unmountCommit) {
+                throw "DISM unmount/commit failed after $maxAttempts attempts (exit $LASTEXITCODE). Close any Explorer window, antivirus scan, or process using '$MountDir' and re-run."
+            }
             Write-Host '  [OK] WIM committed and unmounted' -ForegroundColor Green
 
             $bootDir = Split-Path $wimFile -Parent
@@ -1352,10 +1398,20 @@ cmd.exe /k
     } catch {
         Write-Error "New-NDTPEImage failed: $_"
 
-        # Attempt to discard a still-mounted WIM
+        # Attempt to discard a still-mounted WIM. Move out of the mount tree and
+        # release managed handles first; if the discard is refused (open handle),
+        # fall back to Cleanup-Mountpoints to clear the stale mount registration.
         if (Test-Path $MountDir) {
+            if ((Get-Location).Path -like "$MountDir*") { Set-Location $LocalPath }
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+
             Write-Warning 'Attempting to discard WIM mount...'
             dism /Unmount-Wim /MountDir:"$MountDir" /Discard 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'Discard failed - clearing stale mount points (dism /Cleanup-Mountpoints)...'
+                dism /Cleanup-Mountpoints 2>&1 | Out-Null
+            }
         }
 
         throw

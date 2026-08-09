@@ -38,7 +38,7 @@ try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Objec
 Write-Log 'install.ps1 (WinPE) started' -ForegroundColor Cyan
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 Write-Log "Hostname : $env:COMPUTERNAME"
-Write-Log "User     : $(whoami)"
+Write-Log "User     : $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
 Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
 Write-Log "IP       : $sysIP"
 Write-Log "Log file : $script:LogPath (WinPE RAM drive - relocated to C:\temp after partitioning)"
