@@ -98,7 +98,6 @@
     "Computername": "NDT01",
     "IPAddress": "10.0.3.16/24",
     "AdminPassword": "Qantas-777",
-    "Deploy": "DeployDC01",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
