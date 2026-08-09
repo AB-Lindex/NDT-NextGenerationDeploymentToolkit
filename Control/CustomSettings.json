@@ -172,8 +172,7 @@
       "ADSettings": "ADJoinCorp"
     },
     "DeploymentSteps": [
-      "SMC",
-      "IIS"
+      "SMC"
     ]
   },
   "00:15:5D:02:40:17": {
