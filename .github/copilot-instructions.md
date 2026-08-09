@@ -217,7 +217,7 @@ Downloads the repository ZIP from GitHub → extracts into `LocalPath` → remov
 Also exported by the module (see `ndt.psd1`):
 - `Install-NDTMonitor` — installs the NDT Monitor IIS progress web service (idempotent). Installs IIS roles/features (ASP.NET 4.x), deploys `install/NDTMonitor` content, creates the app pool + site on the port (default 9999), grants the app-pool identity write access to `Logs\progress`, and opens the firewall. **Must run under Windows PowerShell 5.1** — it self-relaunches under `powershell.exe` if called from PS 7 (the IIS: provider is unreliable in PS 7). Called automatically by `Install-NDT` (skip with `-SkipMonitor`, port via `-MonitorPort`).
 - `New-NDTPEImage` (alias `Build-NDTPEImage`) — builds the WinPE WIM + optional ISO; updates WDS boot image.
-- `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer`
+- `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.
 - `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentGroups.json groups, DeploymentActions.json references, and script file paths. Returns `$true` / `$false`.

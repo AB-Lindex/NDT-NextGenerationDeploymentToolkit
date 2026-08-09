@@ -36,7 +36,7 @@ New-NDTPEImage
 Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\ref-w2025dcg\w2025dcg.wim' -Index 1
 
 # 4. Register a machine to deploy (keyed by MAC address)
-Add-NDTServer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
+Add-NDTComputer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
     -IPAddress '10.0.3.25/24' -DeploymentSteps 'General Settings','SMC'
 
 # 5. Validate the configuration before booting
@@ -51,7 +51,7 @@ Test-NDTDeployment -MAC '00:15:5D:02:56:05'
 | `Update-NDT` | In-place upgrade that refreshes code while preserving Control config, credentials, WIMs, certificates, and logs. |
 | `Install-NDTMonitor` | Install the NDT Monitor IIS progress web service (idempotent). |
 | `New-NDTPEImage` | Build the WinPE boot WIM (and optional ISO) and update the WDS boot image. |
-| `Get-NDTServer` / `Add-NDTServer` / `Set-NDTServer` / `Remove-NDTServer` | Manage per-machine entries in `CustomSettings.json`. |
+| `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer` | Manage per-machine entries in `CustomSettings.json`. |
 | `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs` | Manage the OS catalog in `OS.json`. |
 | `Move-NDTReferenceImage` | Move captured reference WIMs from `Reference\` into `Operating Systems\`. |
 | `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration. |

@@ -1418,12 +1418,12 @@ cmd.exe /k
     }
 }
 
-#region -- Server management (CustomSettings.json) ---------------------------
+#region -- Computer management (CustomSettings.json) -------------------------
 
-function Get-NDTServer {
+function Get-NDTComputer {
     <#
     .SYNOPSIS
-        Retrieves server entries from CustomSettings.json.
+        Retrieves computer entries from CustomSettings.json.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
@@ -1431,11 +1431,11 @@ function Get-NDTServer {
     .PARAMETER Computername
         Return only entries matching this computer name.
     .EXAMPLE
-        Get-NDTServer
+        Get-NDTComputer
     .EXAMPLE
-        Get-NDTServer -MAC '00:15:5D:02:56:01'
+        Get-NDTComputer -MAC '00:15:5D:02:56:01'
     .EXAMPLE
-        Get-NDTServer -Computername srv02
+        Get-NDTComputer -Computername srv02
     #>
     [CmdletBinding()]
     param (
@@ -1467,14 +1467,14 @@ function Get-NDTServer {
     $entries
 }
 
-function Add-NDTServer {
+function Add-NDTComputer {
     <#
     .SYNOPSIS
-        Adds a new server entry to CustomSettings.json.
+        Adds a new computer entry to CustomSettings.json.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
-        MAC address of the server (colon-separated, any case).
+        MAC address of the computer (colon-separated, any case).
     .PARAMETER Computername
         Target computer name.
     .PARAMETER OS
@@ -1489,20 +1489,32 @@ function Add-NDTServer {
         Ordered array of deployment group names from DeploymentGroups.json.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
+    .PARAMETER InputObject
+        An existing entry (as returned by Get-NDTComputer) to clone. All of its
+        values are copied to the new entry; any explicitly supplied parameter
+        (e.g. -MAC, -Computername, -IPAddress) overrides the cloned value.
     .EXAMPLE
-        Add-NDTServer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
+        Add-NDTComputer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
             -IPAddress '10.0.3.25/24' -DeploymentSteps 'General Settings','SMC' `
             -Sections @{ Locale = 'Sweden'; NetworkSettings = 'NicAuto'; ADSettings = 'ADJoinCorp' }
+    .EXAMPLE
+        Get-NDTComputer -MAC '00:15:5D:02:40:1C' |
+            Add-NDTComputer -MAC '00:15:5D:02:40:99' -Computername NDT03 -IPAddress '10.0.3.99/24'
+        Clones the NDT01 entry into a new machine, replacing only the unique fields.
     #>
-    [CmdletBinding(SupportsShouldProcess)]
+    [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Manual')]
     param (
         [Parameter()]
         [string]$LocalPath = 'C:\Deploy2026',
         [Parameter(Mandatory)]
         [string]$MAC,
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ValueFromPipeline, ParameterSetName = 'Clone')]
+        [psobject]$InputObject,
+        [Parameter(Mandatory, ParameterSetName = 'Manual')]
+        [Parameter(ParameterSetName = 'Clone')]
         [string]$Computername,
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory, ParameterSetName = 'Manual')]
+        [Parameter(ParameterSetName = 'Clone')]
         [string]$OS,
         [Parameter()]
         [string]$IPAddress,
@@ -1516,47 +1528,58 @@ function Add-NDTServer {
         [hashtable]$Properties
     )
 
-    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
-    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+    process {
+        $path = Join-Path $LocalPath 'Control\CustomSettings.json'
+        if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
 
-    $normalMAC = $MAC.ToUpper()
-    $settings  = Get-Content $path -Raw | ConvertFrom-Json
+        $normalMAC = $MAC.ToUpper()
+        $settings  = Get-Content $path -Raw | ConvertFrom-Json
 
-    if ($settings.PSObject.Properties[$normalMAC]) {
-        throw "Server '$normalMAC' already exists. Use Set-NDTServer to update it."
-    }
+        if ($settings.PSObject.Properties[$normalMAC]) {
+            throw "Computer '$normalMAC' already exists. Use Set-NDTComputer to update it."
+        }
 
-    $entry = [ordered]@{ OS = $OS; Computername = $Computername }
-    if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
-    if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
-    if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
-    if ($PSBoundParameters.ContainsKey('DeploymentSteps')) { $entry.DeploymentSteps = $DeploymentSteps }
-    if ($PSBoundParameters.ContainsKey('Properties')) {
-        foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
-    }
+        $entry = [ordered]@{}
+        if ($InputObject) {
+            foreach ($prop in $InputObject.PSObject.Properties) {
+                if ($prop.Name -eq 'MAC') { continue }   # MAC is the key, never a value
+                $entry[$prop.Name] = $prop.Value
+            }
+        }
+        if ($PSBoundParameters.ContainsKey('OS'))              { $entry.OS              = $OS }
+        if ($PSBoundParameters.ContainsKey('Computername'))    { $entry.Computername    = $Computername }
+        if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
+        if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
+        if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
+        if ($PSBoundParameters.ContainsKey('DeploymentSteps')) { $entry.DeploymentSteps = $DeploymentSteps }
+        if ($PSBoundParameters.ContainsKey('Properties')) {
+            foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
+        }
 
-    if ($PSCmdlet.ShouldProcess($normalMAC, 'Add server entry')) {
-        $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
-        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
-        Write-Verbose "Added server '$normalMAC' ($Computername)."
+        if ($PSCmdlet.ShouldProcess($normalMAC, 'Add computer entry')) {
+            $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
+            $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+            Write-Verbose "Added computer '$normalMAC' ($($entry.Computername))."
+            Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
+        }
     }
 }
 
-function Set-NDTServer {
+function Set-NDTComputer {
     <#
     .SYNOPSIS
-        Updates an existing server entry in CustomSettings.json.
+        Updates an existing computer entry in CustomSettings.json.
         Only parameters that are explicitly supplied are changed.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
-        MAC address of the server entry to update.
+        MAC address of the computer entry to update.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
-        Set-NDTServer -MAC '00:15:5D:02:56:01' -DeploymentSteps 'General Settings','SMC','SQL2025'
+        Set-NDTComputer -MAC '00:15:5D:02:56:01' -DeploymentSteps 'General Settings','SMC','SQL2025'
     .EXAMPLE
-        Set-NDTServer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
+        Set-NDTComputer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -1587,9 +1610,9 @@ function Set-NDTServer {
     $settings  = Get-Content $path -Raw | ConvertFrom-Json
     $entry     = $settings.PSObject.Properties[$normalMAC]
 
-    if (-not $entry) { throw "Server '$normalMAC' not found in CustomSettings.json." }
+    if (-not $entry) { throw "Computer '$normalMAC' not found in CustomSettings.json." }
 
-    if ($PSCmdlet.ShouldProcess($normalMAC, 'Update server entry')) {
+    if ($PSCmdlet.ShouldProcess($normalMAC, 'Update computer entry')) {
         if ($PSBoundParameters.ContainsKey('Computername'))   { $entry.Value.Computername   = $Computername }
         if ($PSBoundParameters.ContainsKey('OS'))             { $entry.Value.OS             = $OS }
         if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
@@ -1606,22 +1629,23 @@ function Set-NDTServer {
             }
         }
         $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
-        Write-Verbose "Updated server '$normalMAC'."
+        Write-Verbose "Updated computer '$normalMAC'."
+        Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
     }
 }
 
-function Remove-NDTServer {
+function Remove-NDTComputer {
     <#
     .SYNOPSIS
-        Removes a server entry from CustomSettings.json.
+        Removes a computer entry from CustomSettings.json.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
-        MAC address of the server entry to remove.
+        MAC address of the computer entry to remove.
     .EXAMPLE
-        Remove-NDTServer -MAC '00:15:5D:02:56:01'
+        Remove-NDTComputer -MAC '00:15:5D:02:56:01'
     .EXAMPLE
-        Get-NDTServer -Computername srv02 | Remove-NDTServer
+        Get-NDTComputer -Computername srv02 | Remove-NDTComputer
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param (
@@ -1638,13 +1662,13 @@ function Remove-NDTServer {
     $settings  = Get-Content $path -Raw | ConvertFrom-Json
 
     if (-not $settings.PSObject.Properties[$normalMAC]) {
-        throw "Server '$normalMAC' not found in CustomSettings.json."
+        throw "Computer '$normalMAC' not found in CustomSettings.json."
     }
 
-    if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove server entry')) {
+    if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove computer entry')) {
         $settings.PSObject.Properties.Remove($normalMAC)
         $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
-        Write-Verbose "Removed server '$normalMAC'."
+        Write-Verbose "Removed computer '$normalMAC'."
     }
 }
 
@@ -1731,6 +1755,7 @@ function Add-NDTOs {
         $catalog | Add-Member -MemberType NoteProperty -Name $Key -Value ([PSCustomObject]@{ Path = $Path; Index = $Index })
         $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Added OS '$Key'."
+        Get-NDTOs -LocalPath $LocalPath -Key $Key
     }
 }
 
@@ -1777,6 +1802,7 @@ function Set-NDTOs {
         if ($PSBoundParameters.ContainsKey('Index')) { $entry.Value.Index = $Index }
         $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Updated OS '$Key'."
+        Get-NDTOs -LocalPath $LocalPath -Key $Key
     }
 }
 

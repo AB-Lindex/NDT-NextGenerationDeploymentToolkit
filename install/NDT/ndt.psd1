@@ -1,6 +1,6 @@
 @{
     # Module identity
-    ModuleVersion     = '1.0.49'
+    ModuleVersion     = '1.0.51'
     GUID              = 'a3f2c841-7d5e-4b1a-9e3f-0c2d8f6a1b4e'
     Author            = 'NDT'
     CompanyName       = 'NDT'
@@ -19,7 +19,7 @@
         'Update-NDT',
         'Install-NDTMonitor',
         'New-NDTPEImage',
-        'Get-NDTServer', 'Add-NDTServer', 'Set-NDTServer', 'Remove-NDTServer',
+        'Get-NDTComputer', 'Add-NDTComputer', 'Set-NDTComputer', 'Remove-NDTComputer',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
         'Move-NDTReferenceImage',
         'Test-NDTDeployment'
@@ -36,7 +36,7 @@
         PSData = @{
             Tags        = @('NDT', 'Deployment', 'MDT', 'LiteTouch')
             ProjectUri  = 'https://github.com/AB-Lindex/NDT-NextGenerationDeploymentToolkit'
-            ReleaseNotes = '1.0.42 - Adds Update-NDT (in-place upgrade that refreshes code while preserving Control config, credentials, WIMs, certificates, and logs; optional -UpdateMonitor and pre-upgrade backup). 1.0.41 - Adds Install-NDTMonitor (IIS HTTPS progress web service), Move-NDTReferenceImage, Test-NDTDeployment; Install-NDT gains -MonitorPort/-SkipMonitor.'
+            ReleaseNotes = '1.0.50 - Renames Get/Add/Set/Remove-NDTServer to Get/Add/Set/Remove-NDTComputer to reflect that NDT deploys any computer, not just servers. 1.0.42 - Adds Update-NDT (in-place upgrade that refreshes code while preserving Control config, credentials, WIMs, certificates, and logs; optional -UpdateMonitor and pre-upgrade backup). 1.0.41 - Adds Install-NDTMonitor (IIS HTTPS progress web service), Move-NDTReferenceImage, Test-NDTDeployment; Install-NDT gains -MonitorPort/-SkipMonitor.'
         }
     }
 }
