@@ -1508,6 +1508,10 @@ function Add-NDTComputer {
         OS key from OS.json to deploy.
     .PARAMETER IPAddress
         Static IP in CIDR notation (e.g. 10.0.3.22/24), or 'DHCP'.
+    .PARAMETER DefaultGateway
+        Default gateway IP. Overrides any value from the NetworkSettings section.
+    .PARAMETER DNSServers
+        DNS server IP(s), comma- or semicolon-separated. Overrides the NetworkSettings section.
     .PARAMETER LocalAdmin
         Local administrator password (stored as plain text in CustomSettings.json).
     .PARAMETER Sections
@@ -1546,6 +1550,10 @@ function Add-NDTComputer {
         [Parameter()]
         [string]$IPAddress,
         [Parameter()]
+        [string]$DefaultGateway,
+        [Parameter()]
+        [string]$DNSServers,
+        [Parameter()]
         [string]$LocalAdmin,
         [Parameter()]
         [hashtable]$Sections,
@@ -1576,6 +1584,8 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('OS'))              { $entry.OS              = $OS }
         if ($PSBoundParameters.ContainsKey('Computername'))    { $entry.Computername    = $Computername }
         if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
+        if ($PSBoundParameters.ContainsKey('DefaultGateway'))  { $entry.DefaultGateway  = $DefaultGateway }
+        if ($PSBoundParameters.ContainsKey('DNSServers'))      { $entry.DNSServers      = $DNSServers }
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
@@ -1601,6 +1611,12 @@ function Set-NDTComputer {
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
         MAC address of the computer entry to update.
+    .PARAMETER IPAddress
+        Static IP in CIDR notation (e.g. 10.0.3.22/24), or 'DHCP'.
+    .PARAMETER DefaultGateway
+        Default gateway IP. Overrides any value from the NetworkSettings section.
+    .PARAMETER DNSServers
+        DNS server IP(s), comma- or semicolon-separated. Overrides the NetworkSettings section.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
@@ -1620,6 +1636,10 @@ function Set-NDTComputer {
         [string]$OS,
         [Parameter()]
         [string]$IPAddress,
+        [Parameter()]
+        [string]$DefaultGateway,
+        [Parameter()]
+        [string]$DNSServers,
         [Parameter()]
         [string]$LocalAdmin,
         [Parameter()]
@@ -1646,6 +1666,14 @@ function Set-NDTComputer {
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { $entry.Value.AdminPassword  = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('DefaultGateway')) {
+            if ($entry.Value.PSObject.Properties['DefaultGateway']) { $entry.Value.DefaultGateway = $DefaultGateway }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'DefaultGateway' -Value $DefaultGateway }
+        }
+        if ($PSBoundParameters.ContainsKey('DNSServers')) {
+            if ($entry.Value.PSObject.Properties['DNSServers']) { $entry.Value.DNSServers = $DNSServers }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'DNSServers' -Value $DNSServers }
+        }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) {
                 if ($entry.Value.PSObject.Properties[$kv.Key]) {

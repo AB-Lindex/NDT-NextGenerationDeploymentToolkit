@@ -1,6 +1,6 @@
 @{
     # Module identity
-    ModuleVersion     = '1.0.53'
+    ModuleVersion     = '1.0.54'
     GUID              = 'a3f2c841-7d5e-4b1a-9e3f-0c2d8f6a1b4e'
     Author            = 'NDT'
     CompanyName       = 'NDT'
