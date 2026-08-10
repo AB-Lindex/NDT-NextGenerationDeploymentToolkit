@@ -131,6 +131,6 @@ Add to a deployment group in `DeploymentGroups.json`:
 }
 ```
 
-Assign the group to the target machine's `DeploymentSteps` in `CustomSettings.json`.
+Assign the group to the target machine's `DeploymentGroups` in `CustomSettings.json`.
 The script exits `3010` if a reboot is needed after IIS feature installation;
 the NDT step engine will restart the machine and resume at this step automatically.

@@ -42,7 +42,7 @@ if ($machineConfig.Sections) {
 # Build merged effective settings (machine config takes precedence over sections)
 $effectiveSettings = @{}
 foreach ($property in $machineConfig.PSObject.Properties) {
-    if ($property.Name -notin @('Sections', 'DeploymentSteps')) {
+    if ($property.Name -notin @('Sections', 'DeploymentGroups')) {
         $effectiveSettings[$property.Name] = $property.Value
     }
 }

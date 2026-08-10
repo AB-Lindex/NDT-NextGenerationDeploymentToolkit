@@ -1485,7 +1485,7 @@ function Add-NDTComputer {
         Local administrator password (stored as plain text in CustomSettings.json).
     .PARAMETER Sections
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
-    .PARAMETER DeploymentSteps
+    .PARAMETER DeploymentGroups
         Ordered array of deployment group names from DeploymentGroups.json.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
@@ -1495,7 +1495,7 @@ function Add-NDTComputer {
         (e.g. -MAC, -Computername, -IPAddress) overrides the cloned value.
     .EXAMPLE
         Add-NDTComputer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
-            -IPAddress '10.0.3.25/24' -DeploymentSteps 'General Settings','SMC' `
+            -IPAddress '10.0.3.25/24' -DeploymentGroups 'General Settings','SMC' `
             -Sections @{ Locale = 'Sweden'; NetworkSettings = 'NicAuto'; ADSettings = 'ADJoinCorp' }
     .EXAMPLE
         Get-NDTComputer -MAC '00:15:5D:02:40:1C' |
@@ -1523,7 +1523,7 @@ function Add-NDTComputer {
         [Parameter()]
         [hashtable]$Sections,
         [Parameter()]
-        [string[]]$DeploymentSteps,
+        [string[]]$DeploymentGroups,
         [Parameter()]
         [hashtable]$Properties
     )
@@ -1551,7 +1551,7 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
-        if ($PSBoundParameters.ContainsKey('DeploymentSteps')) { $entry.DeploymentSteps = $DeploymentSteps }
+        if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
         }
@@ -1577,7 +1577,7 @@ function Set-NDTComputer {
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
-        Set-NDTComputer -MAC '00:15:5D:02:56:01' -DeploymentSteps 'General Settings','SMC','SQL2025'
+        Set-NDTComputer -MAC '00:15:5D:02:56:01' -DeploymentGroups 'General Settings','SMC','SQL2025'
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
     #>
@@ -1598,7 +1598,7 @@ function Set-NDTComputer {
         [Parameter()]
         [hashtable]$Sections,
         [Parameter()]
-        [string[]]$DeploymentSteps,
+        [string[]]$DeploymentGroups,
         [Parameter()]
         [hashtable]$Properties
     )
@@ -1618,7 +1618,7 @@ function Set-NDTComputer {
         if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { $entry.Value.AdminPassword  = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
-        if ($PSBoundParameters.ContainsKey('DeploymentSteps')){ $entry.Value.DeploymentSteps = $DeploymentSteps }
+        if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) {
                 if ($entry.Value.PSObject.Properties[$kv.Key]) {
@@ -1942,11 +1942,11 @@ function Test-NDTDeployment {
     .DESCRIPTION
         Performs a dry-run check of all configuration references for a specific machine:
           - MAC entry exists in CustomSettings.json
-          - Required fields are present (Computername, OS, DeploymentSteps)
+          - Required fields are present (Computername, OS, DeploymentGroups)
           - Each referenced section exists as a top-level key in CustomSettings.json
           - OS key exists in OS.json
           - WIM file exists on disk
-          - Each DeploymentSteps group exists in DeploymentGroups.json
+          - Each DeploymentGroups group exists in DeploymentGroups.json
           - Each step's Reference key exists in DeploymentActions.json
           - Each script file referenced in DeploymentActions.json exists on disk
         No changes are made  -  this is a read-only validation.
@@ -2041,7 +2041,7 @@ function Test-NDTDeployment {
     Write-Check 'Computername'    ([bool]$machine.Computername)    $machine.Computername
     Write-Check 'OS'              ([bool]$machine.OS)               $machine.OS
     Write-Check 'AdminPassword'   ([bool]$machine.AdminPassword)   '(set)'
-    Write-Check 'DeploymentSteps' ([bool]$machine.DeploymentSteps) ($machine.DeploymentSteps -join ', ')
+    Write-Check 'DeploymentGroups' ([bool]$machine.DeploymentGroups) ($machine.DeploymentGroups -join ', ')
 
     # -- [4] Sections ------------------------------------------------------------
     if ($machine.Sections) {
@@ -2069,11 +2069,11 @@ function Test-NDTDeployment {
     }
 
     # -- [6] Deployment groups ---------------------------------------------------
-    if ($machine.DeploymentSteps) {
+    if ($machine.DeploymentGroups) {
         Write-Host "`n[6] Deployment groups" -ForegroundColor White
         $resolvedRefs = [System.Collections.Generic.List[string]]::new()
 
-        foreach ($groupName in $machine.DeploymentSteps) {
+        foreach ($groupName in $machine.DeploymentGroups) {
             $groupEntry = $groups.PSObject.Properties[$groupName]
             Write-Check "Group '$groupName'" ([bool]$groupEntry)
 

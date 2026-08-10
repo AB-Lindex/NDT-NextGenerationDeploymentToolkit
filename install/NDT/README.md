@@ -37,7 +37,7 @@ Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\ref-w2025dcg\w2025dcg.wim' -I
 
 # 4. Register a machine to deploy (keyed by MAC address)
 Add-NDTComputer -MAC '00:15:5D:02:56:05' -Computername srv05 -OS WIN2025DCG `
-    -IPAddress '10.0.3.25/24' -DeploymentSteps 'General Settings','SMC'
+    -IPAddress '10.0.3.25/24' -DeploymentGroups 'General Settings','SMC'
 
 # 5. Validate the configuration before booting
 Test-NDTDeployment -MAC '00:15:5D:02:56:05'

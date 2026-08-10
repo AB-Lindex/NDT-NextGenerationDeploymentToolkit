@@ -109,7 +109,7 @@ The central configuration file. Contains one entry per machine, keyed by MAC add
     "NetworkSettings": "NicAuto",
     "ADSettings": "ADJoinCorp"
   },
-  "DeploymentSteps": ["General Settings", "SMC"]
+  "DeploymentGroups": ["General Settings", "SMC"]
 }
 ```
 

@@ -107,8 +107,8 @@ if (Test-Path $earlySettingsPath) {
     }
 }
 
-# Check if DeploymentSteps reference exists
-if (-not $machineConfig.DeploymentSteps) {
+# Check if DeploymentGroups reference exists
+if (-not $machineConfig.DeploymentGroups) {
     Write-Log 'No deployment steps defined for this machine' -ForegroundColor Yellow
     # OS-only deployment - nothing further to run. Report complete so the monitor
     # does not stay stuck on the last WinPE update.
@@ -121,7 +121,7 @@ if (-not $machineConfig.DeploymentSteps) {
 # This allows script Parameters to be resolved from shared sections (e.g. SQLAO).
 $effectiveSettings = @{}
 foreach ($prop in $machineConfig.PSObject.Properties) {
-    if ($prop.Name -notin @('Sections', 'DeploymentSteps', 'DeploymentSteps_legacy')) {
+    if ($prop.Name -notin @('Sections', 'DeploymentGroups', 'DeploymentGroups_legacy')) {
         $effectiveSettings[$prop.Name] = $prop.Value
     }
 }
@@ -154,7 +154,7 @@ foreach ($key in @($effectiveSettings.Keys)) {
 Write-Log "Effective settings keys: $($effectiveSettings.Keys -join ', ')" -ForegroundColor Gray
 
 # Get the deployment group reference(s) - can be string or array
-$deploymentGroupRefs = $machineConfig.DeploymentSteps
+$deploymentGroupRefs = $machineConfig.DeploymentGroups
 if ($deploymentGroupRefs -is [string]) {
     $deploymentGroupRefs = @($deploymentGroupRefs)
 }

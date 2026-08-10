@@ -104,8 +104,8 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
-1. Read machine's `DeploymentSteps` from `CustomSettings.json` (matched by MAC).
-   - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentSteps`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
+1. Read machine's `DeploymentGroups` from `CustomSettings.json` (matched by MAC).
+   - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentGroups`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
 2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `DeploymentActions.json`.
 3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
 4. Execute steps by type:
@@ -138,7 +138,7 @@ MAC address blocks only — one per machine:
     "NetworkSettings": "NicAuto",
     "ADSettings": "ADJoinCorp"
   },
-  "DeploymentSteps": ["General Settings", "SMC"]
+  "DeploymentGroups": ["General Settings", "SMC"]
 }
 ```
 

@@ -13,7 +13,7 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "SQL2025"
     ]
   },
@@ -27,7 +27,7 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "SQL2025"
     ]
   },
@@ -41,7 +41,7 @@
       "ADSettings": "ADJoinCorp",
       "SQLAO": "SQLAO"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "SQL2025"
     ]
   },
@@ -58,7 +58,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "SQL2025"
     ]
   },
@@ -72,7 +72,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "iPXE"
     ]
@@ -87,7 +87,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "SMC",
       "Deployment"
@@ -103,7 +103,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "SMC",
       "Deployment"
@@ -119,7 +119,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "SMC",
       "NPP"
@@ -140,7 +140,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "SMC",
       "PSGallery"
@@ -154,7 +154,7 @@
       "Locale": "Sweden",
       "RefSettings": "RefSettings"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "CreateReferenceImage"
     ]
   },
@@ -171,7 +171,7 @@
       "NetworkSettings": "NicAuto",
       "ADSettings": "ADJoinCorp"
     },
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "SMC"
     ]
   },
@@ -185,7 +185,7 @@
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "RootCA"
     ],
@@ -203,7 +203,7 @@
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "ADDS",
       "DHCPServer",
@@ -244,7 +244,7 @@
     "JoinDomain": "WORKGROUP",
     "Locale": "Sweden",
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentSteps": [
+    "DeploymentGroups": [
       "General Settings",
       "ADCS Enterprise Roles and Features",
       "AD Join",
