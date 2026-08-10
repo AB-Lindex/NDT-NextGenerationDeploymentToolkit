@@ -163,8 +163,6 @@
     "Computername": "srv03",
     "IPAddress": "10.0.3.23/24",
     "AdminPassword": "Qantas-777",
-    "SQLServer": "SQL2025",
-    "AlwaysOn": "AO2025",
     "Install": "yes",
     "Sections": {
       "Locale": "Sweden",
