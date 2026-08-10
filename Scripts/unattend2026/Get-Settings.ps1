@@ -71,6 +71,23 @@ foreach ($key in @($effectiveSettings.Keys)) {
 # Read the template
 $unattendContent = Get-Content -Path $templatePath -Raw
 
+# Expand DNSServers (comma/semicolon separated) into one <IpAddress> element per
+# server before the generic placeholder pass runs. The template ships a single
+# keyValue="1" entry holding !DNSSERVERS!; rebuild that line for any server count.
+if ($effectiveSettings.ContainsKey('DNSServers')) {
+    $dnsList = @($effectiveSettings['DNSServers'] -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($dnsList.Count -gt 0) {
+        $indent = '                        '
+        $dnsLines = for ($i = 0; $i -lt $dnsList.Count; $i++) {
+            "<IpAddress wcm:action=`"add`" wcm:keyValue=`"$($i + 1)`">$($dnsList[$i])</IpAddress>"
+        }
+        $dnsBlock = $dnsLines -join "`r`n$indent"
+        $unattendContent = $unattendContent -replace '<IpAddress wcm:action="add" wcm:keyValue="1">!DNSSERVERS!</IpAddress>', $dnsBlock
+        # Value already substituted; drop the key so the generic pass skips it.
+        $effectiveSettings.Remove('DNSServers')
+    }
+}
+
 # Replace placeholders from effective settings
 foreach ($entry in $effectiveSettings.GetEnumerator()) {
     $propertyName = $entry.Key.ToUpper()
