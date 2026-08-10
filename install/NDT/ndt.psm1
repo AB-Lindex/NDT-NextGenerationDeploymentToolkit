@@ -921,8 +921,11 @@ function New-NDTPEImage {
              Unattend.xml (wpeinit + install.ps1 autorun) into the mounted image.
           6. Commits the WIM and copies it to Boot\boot2026.wim.
           7. Updates the WDS boot image (unless -SkipWDS is specified).
-          8. Creates a hybrid BIOS/EFI bootable ISO using MakeWinPEMedia
-             (unless -SkipISO is specified).
+          8. Creates two bootable ISOs (unless -SkipISO is specified):
+               - Boot\boot2026.iso      : hybrid BIOS/EFI via MakeWinPEMedia
+                 (Gen 1 VMs and reference-image capture; press-any-key prompt).
+               - Boot\boot2026-uefi.iso : UEFI-only, no-prompt via oscdimg with
+                 efisys_noprompt.bin (Gen 2 VMs; boots unattended, no keypress).
 
         Requires the Windows ADK and WinPE Add-on:
           https://learn.microsoft.com/windows-hardware/get-started/adk-install
@@ -1032,6 +1035,7 @@ To skip WDS and build the WIM only:
     # -- Resolve paths -----------------------------------------------------------
     $wimFile        = Join-Path $LocalPath 'Boot\boot2026.wim'
     $isoFile        = Join-Path $LocalPath 'Boot\boot2026.iso'
+    $isoFileUefi    = Join-Path $LocalPath 'Boot\boot2026-uefi.iso'
     $sectionsPath   = Join-Path $LocalPath 'Control\Sections.json'
     $winPEScriptDir = Join-Path $LocalPath 'Scripts\unattend2026\WindowsPE'
     $deploySource       = Join-Path $winPEScriptDir 'Deploy'
@@ -1369,23 +1373,46 @@ cmd.exe /k
             Write-Verbose 'Step 7: WDS update skipped (-SkipWDS).'
         }
 
-        # -- Step 8: Create bootable ISO -----------------------------------------
+        # -- Step 8: Create bootable ISOs ----------------------------------------
         if (-not $SkipISO -and -not $RegisterOnly) {
-            Write-Host "`nStep 8: Creating bootable ISO..." -ForegroundColor Cyan
+            Write-Host "`nStep 8: Creating bootable ISOs..." -ForegroundColor Cyan
 
-            if ($PSCmdlet.ShouldProcess($isoFile, 'Build bootable ISO with MakeWinPEMedia')) {
+            if ($PSCmdlet.ShouldProcess($isoFile, 'Build Gen 1 hybrid and Gen 2 UEFI no-prompt ISOs')) {
+                # -- 8a: Hybrid BIOS/EFI ISO (Gen 1 + reference-image capture) ----
+                # MakeWinPEMedia builds a hybrid ISO whose EFI boot sector
+                # (efisys.bin) prompts "Press any key to boot from CD". Fine for
+                # interactive Gen 1 boots, but the keypress blocks Gen 2 automation.
                 if (Test-Path $isoFile) { Remove-Item -Path $isoFile -Force }
 
                 cmd.exe /c "cd /d `"$winPERoot`" && MakeWinPEMedia.cmd /iso `"$IsoStagingDir`" `"$isoFile`""
                 if ($LASTEXITCODE -ne 0) { throw "MakeWinPEMedia.cmd failed (exit $LASTEXITCODE)" }
-                Write-Host "  [OK] ISO created: $isoFile" -ForegroundColor Green
+                Write-Host "  [OK] Gen 1 ISO created: $isoFile" -ForegroundColor Green
+
+                # -- 8b: UEFI-only no-prompt ISO (Gen 2 automation) ---------------
+                # Hyper-V Gen 2 is UEFI-only. efisys_noprompt.bin skips the
+                # "Press any key to boot from CD" prompt so an unattended Gen 2 VM
+                # boots straight into WinPE. Built with oscdimg because
+                # MakeWinPEMedia always uses the prompting efisys.bin.
+                if (Test-Path $isoFileUefi) { Remove-Item -Path $isoFileUefi -Force }
+
+                $noPromptEfi = Join-Path $env:OSCDImgRoot 'efisys_noprompt.bin'
+                if (-not (Test-Path $noPromptEfi)) {
+                    throw "efisys_noprompt.bin not found at: $noPromptEfi"
+                }
+                $oscdimgExe = Join-Path $env:OSCDImgRoot 'oscdimg.exe'
+                $mediaRoot  = Join-Path $IsoStagingDir 'media'
+                & $oscdimgExe -m -o -u2 -udfver102 "-bootdata:1#pEF,e,b$noPromptEfi" "$mediaRoot" "$isoFileUefi"
+                if ($LASTEXITCODE -ne 0) { throw "oscdimg (UEFI no-prompt ISO) failed (exit $LASTEXITCODE)" }
+                Write-Host "  [OK] Gen 2 ISO created: $isoFileUefi" -ForegroundColor Green
 
                 Remove-Item -Path $IsoStagingDir -Recurse -Force -ErrorAction SilentlyContinue
                 Write-Host '  [OK] Staging directory cleaned up' -ForegroundColor Gray
 
                 Write-Host ''
-                Write-Host '  Mount this ISO to a Gen 1 VM DVD drive before booting:' -ForegroundColor Yellow
+                Write-Host '  Gen 1 VM (hybrid ISO, press-any-key prompt):' -ForegroundColor Yellow
                 Write-Host "    Set-VMDvdDrive -VMName '<vmname>' -Path '$isoFile'" -ForegroundColor Yellow
+                Write-Host '  Gen 2 VM (UEFI no-prompt ISO, unattended):' -ForegroundColor Yellow
+                Write-Host "    Set-VMDvdDrive -VMName '<vmname>' -Path '$isoFileUefi'" -ForegroundColor Yellow
             }
         } else {
             Write-Verbose 'Step 8: ISO creation skipped (-SkipISO).'
