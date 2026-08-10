@@ -2182,6 +2182,177 @@ function Test-NDTDeployment {
 
 #endregion
 
+#region -- Deployment monitoring ---------------------------------------------
+
+function Watch-NDTDeployment {
+    <#
+    .SYNOPSIS
+        Watches a machine's deployment progress via the NDT Monitor and waits
+        until it reports 100% / Done.
+    .DESCRIPTION
+        Polls the NDT Monitor HTTP service (GET /progress?mac=..) for a single
+        machine and renders a live progress bar plus a status line each time the
+        state changes. Blocks until the machine reports Status 'Done' (or 100%),
+        the optional timeout elapses, or you press Ctrl+C.
+
+        The same progress data is written by install.ps1 (Phase 'WinPE') and
+        Install-NDT.ps1 (Phase 'Windows') during deployment.
+
+        Returns \$true when the deployment completes, \$false on timeout.
+    .PARAMETER MAC
+        MAC address of the machine to watch (colon- or dash-separated, any case).
+    .PARAMETER MonitorUrl
+        Base URL of the NDT Monitor (e.g. https://ndt01:443). If omitted, it is
+        resolved from the Deploy section (MonitorUrl) of Control\Sections.json.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share, used to locate Sections.json when
+        MonitorUrl is not supplied. Default: C:\Deploy2026
+    .PARAMETER PollSeconds
+        Seconds between polls. Default: 5
+    .PARAMETER TimeoutMinutes
+        Give up after this many minutes. 0 (default) waits indefinitely.
+    .PARAMETER SkipCertificateCheck
+        Ignore TLS certificate validation (internal CA / self-signed monitor).
+        Works on both Windows PowerShell 5.1 and PowerShell 7.
+    .EXAMPLE
+        Watch-NDTDeployment -MAC '00:15:5D:02:56:01'
+    .EXAMPLE
+        Watch-NDTDeployment -MAC '00:15:5D:02:56:01' -TimeoutMinutes 90 -SkipCertificateCheck
+    .EXAMPLE
+        Get-NDTComputer -Computername srv02 | Watch-NDTDeployment
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [string]$MAC,
+        [Parameter()]
+        [string]$MonitorUrl,
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter()]
+        [int]$PollSeconds = 5,
+        [Parameter()]
+        [int]$TimeoutMinutes = 0,
+        [Parameter()]
+        [switch]$SkipCertificateCheck
+    )
+
+    process {
+        $normalMAC = $MAC.ToUpper().Replace('-', ':')
+
+        # Resolve MonitorUrl from the Deploy section of Sections.json if not supplied.
+        if (-not $MonitorUrl) {
+            $sectionsPath = Join-Path $LocalPath 'Control\Sections.json'
+            if (Test-Path $sectionsPath) {
+                try {
+                    $sections = Get-Content $sectionsPath -Raw | ConvertFrom-Json
+                    if ($sections.Deploy -and $sections.Deploy.MonitorUrl) {
+                        $MonitorUrl = $sections.Deploy.MonitorUrl
+                    }
+                } catch {
+                    # Fall through to the throw below.
+                }
+            }
+        }
+        if (-not $MonitorUrl) {
+            throw "MonitorUrl not supplied and could not be resolved from Sections.json (Deploy.MonitorUrl)."
+        }
+        $MonitorUrl = $MonitorUrl.TrimEnd('/')
+
+        # Windows PowerShell 5.1 Invoke-RestMethod has no -SkipCertificateCheck;
+        # fall back to a per-process certificate validation callback there.
+        $irmArgs      = @{}
+        $prevCallback = $null
+        $usedCallback = $false
+        if ($SkipCertificateCheck) {
+            if ($PSVersionTable.PSEdition -eq 'Core') {
+                $irmArgs['SkipCertificateCheck'] = $true
+            } else {
+                $prevCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+                $usedCallback = $true
+            }
+        }
+
+        $uri      = "$MonitorUrl/progress?mac=$normalMAC"
+        $activity = "NDT deployment $normalMAC"
+        Write-Host "Watching deployment: $normalMAC" -ForegroundColor Cyan
+        Write-Host "Monitor: $uri" -ForegroundColor DarkGray
+
+        $deadline = if ($TimeoutMinutes -gt 0) { (Get-Date).AddMinutes($TimeoutMinutes) } else { $null }
+        $lastKey  = ''
+        $final    = $null
+
+        try {
+            while ($true) {
+                if ($deadline -and (Get-Date) -gt $deadline) {
+                    Write-Progress -Activity $activity -Completed
+                    Write-Warning "Timed out after $TimeoutMinutes minute(s) waiting for deployment to finish."
+                    return $false
+                }
+
+                try {
+                    $state = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 10 -ErrorAction Stop @irmArgs
+                } catch {
+                    # 404 (no report yet) or transient network error - keep waiting.
+                    $state = $null
+                }
+
+                if (-not $state -or -not $state.Status) {
+                    Write-Progress -Activity $activity -Status 'Waiting for first progress report...' -PercentComplete 0
+                } else {
+                    $pct    = [int]$state.Percent
+                    $status = [string]$state.Status
+                    $phase  = [string]$state.Phase
+                    $desc   = [string]$state.Description
+                    $group  = [string]$state.Group
+
+                    $line = "[$phase/$status] $pct%"
+                    if ($group) { $line += "  $group" }
+                    if ($desc)  { $line += " - $desc" }
+
+                    $name = if ($state.Computername) { " ($($state.Computername))" } else { '' }
+                    Write-Progress -Activity "$activity$name" -Status $line `
+                        -PercentComplete ([Math]::Min(100, [Math]::Max(0, $pct)))
+
+                    # Log to the console only when the state changes.
+                    $key = "$status|$pct|$group|$desc"
+                    if ($key -ne $lastKey) {
+                        $color = switch ($status) {
+                            'Done'      { 'Green' }
+                            'Completed' { 'Green' }
+                            'Failed'    { 'Red' }
+                            'Paused'    { 'Yellow' }
+                            'Rebooting' { 'Yellow' }
+                            default     { 'Gray' }
+                        }
+                        Write-Host "  $(Get-Date -Format 'HH:mm:ss')  $line" -ForegroundColor $color
+                        $lastKey = $key
+                    }
+
+                    if ($status -eq 'Done' -or $pct -ge 100) {
+                        $final = $state
+                        break
+                    }
+                }
+
+                Start-Sleep -Seconds $PollSeconds
+            }
+        } finally {
+            Write-Progress -Activity $activity -Completed
+            if ($usedCallback) {
+                [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $prevCallback
+            }
+        }
+
+        $doneName = if ($final.Computername) { " ($($final.Computername))" } else { '' }
+        Write-Host "`nDeployment complete: $normalMAC$doneName - 100%" -ForegroundColor Green
+        return $true
+    }
+}
+
+#endregion
+
 # Backward-compatible alias for the former command name (Build- is not an
 # approved verb under Windows PowerShell 5.1). Exported via ndt.psd1.
 New-Alias -Name Build-NDTPEImage -Value New-NDTPEImage -Force -ErrorAction SilentlyContinue
