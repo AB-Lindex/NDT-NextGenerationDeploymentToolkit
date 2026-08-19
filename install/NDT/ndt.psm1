@@ -1617,10 +1617,15 @@ function Set-NDTComputer {
         Default gateway IP. Overrides any value from the NetworkSettings section.
     .PARAMETER DNSServers
         DNS server IP(s), comma- or semicolon-separated. Overrides the NetworkSettings section.
+    .PARAMETER Install
+        Deployment safeguard: 'no' disables imaging for this machine (WinPE reboots without
+        touching the disk); 'yes' deploys normally. Valid values: yes, no.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -DeploymentGroups 'General Settings','SMC','SQL2025'
+    .EXAMPLE
+        Set-NDTComputer -MAC '00:15:5D:02:56:01' -Install no
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
     #>
@@ -1643,6 +1648,9 @@ function Set-NDTComputer {
         [Parameter()]
         [string]$LocalAdmin,
         [Parameter()]
+        [ValidateSet('yes', 'no')]
+        [string]$Install,
+        [Parameter()]
         [hashtable]$Sections,
         [Parameter()]
         [string[]]$DeploymentGroups,
@@ -1664,6 +1672,10 @@ function Set-NDTComputer {
         if ($PSBoundParameters.ContainsKey('OS'))             { $entry.Value.OS             = $OS }
         if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { $entry.Value.AdminPassword  = $LocalAdmin }
+        if ($PSBoundParameters.ContainsKey('Install')) {
+            if ($entry.Value.PSObject.Properties['Install']) { $entry.Value.Install = $Install }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'Install' -Value $Install }
+        }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
         if ($PSBoundParameters.ContainsKey('DefaultGateway')) {
