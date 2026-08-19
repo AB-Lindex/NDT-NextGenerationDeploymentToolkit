@@ -107,6 +107,14 @@ foreach ($entry in $effectiveSettings.GetEnumerator()) {
     }
 }
 
+# Blank any placeholders that had no matching setting so a missing key (e.g. OU)
+# never leaves a literal !TOKEN! in the answer file. Matches !UPPERCASE_TOKENS!.
+$leftover = [regex]::Matches($unattendContent, '!([A-Z0-9_]+)!') | ForEach-Object { $_.Value } | Select-Object -Unique
+foreach ($token in $leftover) {
+    $unattendContent = $unattendContent -replace [regex]::Escape($token), ''
+    Write-Host "Cleared unmatched placeholder $token" -ForegroundColor DarkYellow
+}
+
 # Post-process unattend.xml for special configurations
 # $needsPostProcessing = $false
 
