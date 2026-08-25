@@ -445,9 +445,20 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     if (-not $psVersion) {
         $psVersion = "pwsh"
     }
-    
+
+    # Determine the actual runtime from the script extension so the log reflects
+    # where the script will really run (cmd.exe for .cmd/.bat, otherwise the PS host).
+    $scriptExtension = [System.IO.Path]::GetExtension($scriptPath).ToLower()
+    if ($scriptExtension -eq ".cmd" -or $scriptExtension -eq ".bat") {
+        $runtime = "cmd.exe"
+    } elseif ($psVersion -eq "powershell5") {
+        $runtime = "Windows PowerShell 5.1"
+    } else {
+        $runtime = "PowerShell 7"
+    }
+
     Write-Log "Script: $scriptPath" -ForegroundColor Gray
-    Write-Log "PowerShell: $psVersion" -ForegroundColor Gray
+    Write-Log "Runtime: $runtime" -ForegroundColor Gray
     
     # Build script parameters if defined in DeploymentActions.json.
     # Look up each parameter from $effectiveSettings, which merges the machine's
@@ -473,10 +484,7 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
         try {
             Write-Log 'Executing...' -ForegroundColor Yellow
             
-            # Check file extension to determine execution method
-            $fileExtension = [System.IO.Path]::GetExtension($fullScriptPath).ToLower()
-            
-            if ($fileExtension -eq ".cmd" -or $fileExtension -eq ".bat") {
+            if ($scriptExtension -eq ".cmd" -or $scriptExtension -eq ".bat") {
                 # Run with cmd.exe (no parameter support for batch files)
                 cmd.exe /c $fullScriptPath
             } elseif ($psVersion -eq "powershell5") {
