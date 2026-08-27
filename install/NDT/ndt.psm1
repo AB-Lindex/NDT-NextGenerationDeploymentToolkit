@@ -1445,6 +1445,476 @@ cmd.exe /k
     }
 }
 
+function New-NDTPEImagePS7 {
+    <#
+    .SYNOPSIS
+        POC: builds an NDT WinPE boot WIM that ALSO carries PowerShell 7.
+
+    .DESCRIPTION
+        EXPERIMENTAL / proof-of-concept. Identical pipeline to New-NDTPEImage,
+        but additionally injects a self-contained PowerShell 7 (win-x64) build
+        into the image so pwsh.exe is available inside WinPE.
+
+        PowerShell 7 in WinPE is NOT supported by Microsoft. It works because PS7
+        ships as a self-contained .NET application: the runtime lives inside the
+        zip, so once the standard WinPE optional components are present (WMI,
+        NetFx, Scripting, PowerShell) pwsh.exe generally runs. Some hosts also
+        need the Visual C++ runtime DLLs (vcruntime140*.dll, msvcp140.dll); those
+        are copied from this machine's System32 best-effort.
+
+        To avoid clobbering the production boot image this POC writes to separate
+        files by default:
+          Boot\boot2026-ps7.wim
+          Boot\boot2026-ps7.iso        (Gen 1 hybrid)
+          Boot\boot2026-ps7-uefi.iso   (Gen 2 UEFI no-prompt)
+        and registers a distinct WDS boot image name.
+
+        Pipeline:
+          1. Prepare settings.json from the Deploy section of Sections.json.
+          2. copype -> fresh WinPE staging tree.
+          3. Mount the staging boot.wim.
+          4. Add WinPE optional packages (same set as New-NDTPEImage).
+          4b. Inject PowerShell 7 (from -PS7ZipPath, or downloaded from -PS7ZipUrl)
+              into X:\PowerShell7 and copy VC++ runtime DLLs best-effort.
+          5. Inject the Deploy folder + launcher (StartDeploy.cmd prefers pwsh.exe).
+          6. Commit the WIM and copy to Boot\boot2026-ps7.wim.
+          7. Update the WDS boot image (unless -SkipWDS).
+          8. Create the two ISOs (unless -SkipISO).
+
+        Requires the Windows ADK and WinPE Add-on:
+          https://learn.microsoft.com/windows-hardware/get-started/adk-install
+
+    .PARAMETER LocalPath
+        Root of the NDT deployment share on this machine. Default: C:\Deploy2026
+
+    .PARAMETER MountDir
+        Temporary directory used to mount the WIM. Default: C:\WinPE_Mount
+
+    .PARAMETER IsoStagingDir
+        Temporary directory used by copype. Default: C:\WinPE_ISO_Staging
+
+    .PARAMETER PS7ZipPath
+        Path to a PowerShell-7.x.x-win-x64.zip already on disk. If omitted, the
+        zip is downloaded from -PS7ZipUrl.
+
+    .PARAMETER PS7ZipUrl
+        URL of the PowerShell 7 win-x64 zip to download when -PS7ZipPath is not
+        supplied. Default: the v7.4.6 release asset on GitHub.
+
+    .PARAMETER SkipWDS
+        Skip the WDS boot-image update step (Step 7).
+
+    .PARAMETER SkipISO
+        Skip ISO creation (Step 8).
+
+    .PARAMETER DeploySection
+        Top-level key in Sections.json to read share credentials from. Default: Deploy
+
+    .EXAMPLE
+        New-NDTPEImagePS7 -SkipWDS -SkipISO -Verbose
+
+    .EXAMPLE
+        New-NDTPEImagePS7 -PS7ZipPath C:\Temp\PowerShell-7.4.6-win-x64.zip
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+
+        [Parameter()]
+        [string]$MountDir = 'C:\WinPE_Mount',
+
+        [Parameter()]
+        [string]$IsoStagingDir = 'C:\WinPE_ISO_Staging',
+
+        [Parameter()]
+        [string]$PS7ZipPath,
+
+        [Parameter()]
+        [string]$PS7ZipUrl = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/PowerShell-7.4.6-win-x64.zip',
+
+        [Parameter()]
+        [switch]$SkipWDS,
+
+        [Parameter()]
+        [switch]$SkipISO,
+
+        [Parameter()]
+        [string]$DeploySection = 'Deploy'
+    )
+
+    # -- Verify Administrator ----------------------------------------------------
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    if (-not $isAdmin) { throw 'New-NDTPEImagePS7 must be run as Administrator.' }
+
+    Write-Host 'New-NDTPEImagePS7 is an EXPERIMENTAL proof-of-concept (PowerShell 7 in WinPE is unsupported by Microsoft).' -ForegroundColor Yellow
+
+    # -- Pre-flight: verify WDS is configured (skip if -SkipWDS) ----------------
+    if (-not $SkipWDS) {
+        $wdsSvc  = Get-Service -Name 'WDSServer' -ErrorAction SilentlyContinue
+        $wdsReady = $false
+        if ($wdsSvc) {
+            wdsutil /get-server /show:config 2>&1 | Out-Null
+            $wdsReady = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $wdsReady) {
+            Write-Warning 'WDS is not configured - Step 7 will fail. Use -SkipWDS to build the WIM only.'
+        }
+    }
+
+    # -- Resolve paths (distinct -ps7 outputs so production is never clobbered) --
+    $wimFile        = Join-Path $LocalPath 'Boot\boot2026-ps7.wim'
+    $isoFile        = Join-Path $LocalPath 'Boot\boot2026-ps7.iso'
+    $isoFileUefi    = Join-Path $LocalPath 'Boot\boot2026-ps7-uefi.iso'
+    $sectionsPath   = Join-Path $LocalPath 'Control\Sections.json'
+    $winPEScriptDir = Join-Path $LocalPath 'Scripts\unattend2026\WindowsPE'
+    $deploySource   = Join-Path $winPEScriptDir 'Deploy'
+    $unattendSource = Join-Path $winPEScriptDir 'Unattend.xml'
+
+    # -- Locate Windows ADK ------------------------------------------------------
+    $adkRoot    = $null
+    $adkRegPath = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows Kits\Installed Roots'
+    if (Test-Path $adkRegPath) {
+        $kitsRoot = (Get-ItemProperty -Path $adkRegPath -Name 'KitsRoot10' -ErrorAction SilentlyContinue).KitsRoot10
+        if ($kitsRoot) { $adkRoot = Join-Path $kitsRoot 'Assessment and Deployment Kit' }
+    }
+    if (-not $adkRoot -or -not (Test-Path $adkRoot)) {
+        $adkRoot = 'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit'
+    }
+
+    $winPERoot = Join-Path $adkRoot 'Windows Preinstallation Environment'
+    $copypeCmd = Join-Path $winPERoot 'copype.cmd'
+    $winPEArch = Join-Path $winPERoot 'amd64'
+    $winPEOCs  = Join-Path $winPERoot 'amd64\WinPE_OCs'
+
+    $env:WinPERoot   = $winPERoot
+    $env:OSCDImgRoot = Join-Path $adkRoot 'Deployment Tools\amd64\Oscdimg'
+    $env:DISMRoot    = Join-Path $adkRoot 'Deployment Tools\amd64\DISM'
+    if ($env:PATH -notlike "*$($env:OSCDImgRoot)*") {
+        $env:PATH = $env:OSCDImgRoot + ';' + $env:PATH
+    }
+
+    if (-not (Test-Path $copypeCmd)) {
+        throw "copype.cmd not found at: $copypeCmd`nInstall the Windows ADK + WinPE Add-on: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+    }
+    if (-not (Test-Path $winPEArch)) {
+        throw "WinPE amd64 files not found at: $winPEArch`nThe WinPE Add-on is a separate download from the ADK: https://learn.microsoft.com/windows-hardware/get-started/adk-install"
+    }
+
+    # -- Resolve the PowerShell 7 zip (download if no local path given) ----------
+    $ps7TempZip = $null
+    if ($PS7ZipPath) {
+        if (-not (Test-Path $PS7ZipPath)) { throw "PS7ZipPath not found: $PS7ZipPath" }
+        Write-Host "Using local PowerShell 7 zip: $PS7ZipPath" -ForegroundColor Gray
+    } else {
+        $ps7TempZip = Join-Path $env:TEMP 'ndt-ps7-winpe.zip'
+        Write-Host "Downloading PowerShell 7 zip from: $PS7ZipUrl" -ForegroundColor Gray
+        if ($PSCmdlet.ShouldProcess($PS7ZipUrl, 'Download PowerShell 7 zip')) {
+            Invoke-WebRequest -Uri $PS7ZipUrl -OutFile $ps7TempZip -UseBasicParsing
+            $PS7ZipPath = $ps7TempZip
+        }
+    }
+
+    try {
+        # -- Pre-flight: exclude the mount + staging trees from Defender ---------
+        foreach ($excl in @($MountDir, $IsoStagingDir)) {
+            try { Add-MpPreference -ExclusionPath $excl -ErrorAction Stop }
+            catch { Write-Verbose "  Could not add Defender exclusion for '$excl': $_" }
+        }
+
+        # -- Step 1: Generate settings.json -------------------------------------
+        Write-Host 'Step 1: Generating settings.json...' -ForegroundColor Cyan
+        if (-not (Test-Path $sectionsPath)) { throw "Sections.json not found at: $sectionsPath" }
+
+        $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
+        if (-not $sections.$DeploySection) { throw "Deploy section '$DeploySection' not found in Sections.json." }
+
+        $deployCfg   = $sections.$DeploySection
+        $settingsObj = [ordered]@{
+            Share    = $deployCfg.Share
+            Username = $deployCfg.Username
+            Password = $deployCfg.Password
+        }
+        Write-Host '  [OK] settings.json prepared (will be written into WIM in Step 5)' -ForegroundColor Green
+
+        # -- Step 2: Create fresh WinPE staging tree with copype -----------------
+        Write-Host "`nStep 2: Creating fresh WinPE staging tree..." -ForegroundColor Cyan
+        if ($PSCmdlet.ShouldProcess($IsoStagingDir, 'Run copype to create fresh ADK base')) {
+            if (Test-Path $IsoStagingDir) {
+                Write-Host '  Removing old staging directory...' -ForegroundColor Gray
+                Remove-Item -Path $IsoStagingDir -Recurse -Force
+            }
+            cmd.exe /c "cd /d `"$winPERoot`" && copype.cmd amd64 `"$IsoStagingDir`""
+            if ($LASTEXITCODE -ne 0) { throw "copype.cmd failed (exit $LASTEXITCODE)" }
+            Write-Host "  [OK] Fresh staging tree created: $IsoStagingDir" -ForegroundColor Green
+        }
+
+        $stagingBootWim = Join-Path $IsoStagingDir 'media\sources\boot.wim'
+
+        # -- Step 3: Mount the fresh base WIM ------------------------------------
+        Write-Host "`nStep 3: Mounting base WIM..." -ForegroundColor Cyan
+        if (-not (Test-Path $MountDir)) { New-Item -Path $MountDir -ItemType Directory -Force | Out-Null }
+
+        dism /Cleanup-Mountpoints 2>&1 | Out-Null
+        $stale = dism /Get-MountedWimInfo 2>&1 | Select-String -SimpleMatch $MountDir
+        if ($stale) {
+            Write-Warning "  Stale WIM mount found at $MountDir - discarding before remount..."
+            dism /Unmount-Wim /MountDir:"$MountDir" /Discard 2>&1 | Out-Null
+            dism /Cleanup-Mountpoints 2>&1 | Out-Null
+        }
+        if (Get-ChildItem -Path $MountDir -Force -ErrorAction SilentlyContinue) {
+            Remove-Item -Path (Join-Path $MountDir '*') -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        if ($PSCmdlet.ShouldProcess($MountDir, 'Mount staging boot.wim')) {
+            dism /Mount-Wim /WimFile:"$stagingBootWim" /Index:1 /MountDir:"$MountDir"
+            if ($LASTEXITCODE -ne 0) { throw "DISM mount failed (exit $LASTEXITCODE)" }
+            Write-Host "  [OK] WIM mounted at: $MountDir" -ForegroundColor Green
+        }
+
+        # -- Step 4: Add required WinPE optional packages -------------------------
+        Write-Host "`nStep 4: Adding WinPE optional packages..." -ForegroundColor Cyan
+        $packages = @(
+            'WinPE-WMI',
+            'WinPE-NetFx',
+            'WinPE-Scripting',
+            'WinPE-PowerShell',
+            'WinPE-StorageWMI',
+            'WinPE-DismCmdlets'
+        )
+        if ($PSCmdlet.ShouldProcess($MountDir, 'Add WinPE optional packages')) {
+            foreach ($pkg in $packages) {
+                $cabPath = Join-Path $winPEOCs "$pkg.cab"
+                if (-not (Test-Path $cabPath)) {
+                    Write-Warning "  Package not found, skipping: $cabPath"
+                    continue
+                }
+                Write-Host "  Adding $pkg ..." -ForegroundColor Gray
+                dism /Image:"$MountDir" /Add-Package /PackagePath:"$cabPath"
+                if ($LASTEXITCODE -ne 0) { throw "DISM Add-Package failed for ${pkg} (exit $LASTEXITCODE)" }
+            }
+            Write-Host '  [OK] All optional packages added' -ForegroundColor Green
+        }
+
+        # -- Step 4b: Inject PowerShell 7 ----------------------------------------
+        # PS7 is self-contained: extract the win-x64 zip into X:\PowerShell7.
+        Write-Host "`nStep 4b: Injecting PowerShell 7 (POC)..." -ForegroundColor Cyan
+        if ($PSCmdlet.ShouldProcess($MountDir, 'Inject PowerShell 7')) {
+            $ps7Dest = Join-Path $MountDir 'PowerShell7'
+            if (Test-Path $ps7Dest) { Remove-Item -Path $ps7Dest -Recurse -Force }
+            New-Item -Path $ps7Dest -ItemType Directory -Force | Out-Null
+
+            Expand-Archive -Path $PS7ZipPath -DestinationPath $ps7Dest -Force
+            if (-not (Test-Path (Join-Path $ps7Dest 'pwsh.exe'))) {
+                throw "pwsh.exe not found after extracting '$PS7ZipPath' - is this a PowerShell 7 win-x64 zip?"
+            }
+            Write-Host '  [OK] PowerShell 7 extracted -> X:\PowerShell7\pwsh.exe' -ForegroundColor Green
+
+            # Copy the VC++ runtime DLLs PS7 may need, best-effort, from this host.
+            $sysNative = Join-Path $env:SystemRoot 'System32'
+            $peSystem  = Join-Path $MountDir 'Windows\System32'
+            foreach ($dll in @('vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll')) {
+                $src = Join-Path $sysNative $dll
+                if (Test-Path $src) {
+                    Copy-Item -Path $src -Destination $peSystem -Force -ErrorAction SilentlyContinue
+                    Write-Host "  [OK] Copied VC++ runtime: $dll" -ForegroundColor Gray
+                } else {
+                    Write-Verbose "  VC++ runtime not present on host, skipping: $dll"
+                }
+            }
+        }
+
+        # -- Step 5: Inject Deploy folder and Unattend.xml -----------------------
+        Write-Host "`nStep 5: Injecting Deploy folder into WIM..." -ForegroundColor Cyan
+        if ($PSCmdlet.ShouldProcess($MountDir, 'Inject Deploy folder and Unattend.xml')) {
+            $wimDeployDir = Join-Path $MountDir 'Deploy'
+            if (-not (Test-Path $wimDeployDir)) { New-Item -Path $wimDeployDir -ItemType Directory -Force | Out-Null }
+
+            foreach ($file in (Get-ChildItem -Path $deploySource -File)) {
+                if ($file.Name -eq 'settings.json') { continue }
+                Copy-Item -Path $file.FullName -Destination $wimDeployDir -Force
+                Write-Host "  [OK] Copied: $($file.Name)" -ForegroundColor Gray
+            }
+
+            $settingsDestPath = Join-Path $wimDeployDir 'settings.json'
+            $settingsObj | ConvertTo-Json | Set-Content -Path $settingsDestPath -Encoding UTF8
+            Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json' -ForegroundColor Gray
+
+            # StartDeploy.cmd: prepend PS7 to PATH and prefer pwsh.exe when present,
+            # falling back to Windows PowerShell if pwsh is somehow missing.
+            $startDeployContent = @'
+@echo off
+wpeinit
+wpeutil WaitForNetwork
+set "PATH=X:\PowerShell7;%PATH%"
+if exist X:\PowerShell7\pwsh.exe (
+    start "NDT Deploy" X:\PowerShell7\pwsh.exe -NoLogo -ExecutionPolicy Bypass -File X:\Deploy\install.ps1
+) else (
+    start "NDT Deploy" powershell.exe -NoLogo -ExecutionPolicy Bypass -File X:\Deploy\install.ps1
+)
+echo.
+echo *** NDT debug shell - deployment is running in the other window ***
+echo pwsh is on PATH (PowerShell 7). Type EXIT to close this window.
+cmd.exe /k
+'@
+            $startDeployDest = Join-Path $wimDeployDir 'StartDeploy.cmd'
+            Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
+            Write-Host '  [OK] StartDeploy.cmd generated (prefers pwsh.exe) -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
+
+            $winpeshlContent = @'
+[LaunchApps]
+%SYSTEMDRIVE%\Deploy\StartDeploy.cmd
+'@
+            $winpeshlDest = Join-Path $MountDir 'Windows\System32\winpeshl.ini'
+            Set-Content -Path $winpeshlDest -Value $winpeshlContent -Encoding ASCII
+            Write-Host '  [OK] winpeshl.ini generated' -ForegroundColor Gray
+
+            $startnetContent = "@echo off`r`nwpeinit`r`n"
+            $startnetDest    = Join-Path $MountDir 'Windows\System32\startnet.cmd'
+            Set-Content -Path $startnetDest -Value $startnetContent -Encoding ASCII
+            Write-Host '  [OK] startnet.cmd (fallback) generated' -ForegroundColor Gray
+
+            $unattendDest = Join-Path $MountDir 'Unattend.xml'
+            if (Test-Path $unattendSource) {
+                Copy-Item -Path $unattendSource -Destination $unattendDest -Force
+                Write-Host '  [OK] Unattend.xml -> X:\Unattend.xml (WIM root)' -ForegroundColor Gray
+            } else {
+                Write-Warning "Unattend.xml not found at: $unattendSource"
+            }
+        }
+
+        # -- Step 6: Commit WIM and copy to Boot\boot2026-ps7.wim ----------------
+        Write-Host "`nStep 6: Committing WIM..." -ForegroundColor Cyan
+        if ($PSCmdlet.ShouldProcess($MountDir, 'Commit and unmount WIM')) {
+            if ((Get-Location).Path -like "$MountDir*") { Set-Location $LocalPath }
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+
+            $maxAttempts   = 5
+            $unmountCommit = $false
+            for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+                dism /Unmount-Wim /MountDir:"$MountDir" /Commit
+                if ($LASTEXITCODE -eq 0) { $unmountCommit = $true; break }
+                if ($attempt -lt $maxAttempts) {
+                    Write-Warning "  Unmount attempt $attempt failed (exit $LASTEXITCODE, likely an open handle) - retrying in 10s..."
+                    Start-Sleep -Seconds 10
+                }
+            }
+            if (-not $unmountCommit) {
+                throw "DISM unmount/commit failed after $maxAttempts attempts (exit $LASTEXITCODE). Close any Explorer window, antivirus scan, or process using '$MountDir' and re-run."
+            }
+            Write-Host '  [OK] WIM committed and unmounted' -ForegroundColor Green
+
+            $bootDir = Split-Path $wimFile -Parent
+            if (-not (Test-Path $bootDir)) { New-Item -Path $bootDir -ItemType Directory -Force | Out-Null }
+            Copy-Item -Path $stagingBootWim -Destination $wimFile -Force
+            Write-Host "  [OK] boot2026-ps7.wim updated: $wimFile" -ForegroundColor Green
+        }
+
+        # -- Step 7: Update WDS --------------------------------------------------
+        if (-not $SkipWDS) {
+            Write-Host "`nStep 7: Updating WDS..." -ForegroundColor Cyan
+            if ($PSCmdlet.ShouldProcess('WDSServer', 'Stop service, replace boot image, start service')) {
+                $wdsImageName = 'NDT PE Boot 2026 (PS7 POC)'
+                $wimLeaf      = Split-Path $wimFile -Leaf
+
+                Write-Host '  Checking for existing boot image...' -ForegroundColor Gray
+                $existingImageName = $null
+                $wdsRawOutput = (wdsutil /Get-AllImages /ImageType:Boot 2>&1) -join "`n"
+                foreach ($block in ($wdsRawOutput -split '(?m)(?=^ {4}Image Name:)')) {
+                    if ($block -match '(?m)^ {4,}File Name:\s*(\S+)' -and $Matches[1].Trim() -eq $wimLeaf) {
+                        if ($block -match '(?m)^ {4}Image Name:\s*(.+)') {
+                            $existingImageName = $Matches[1].Trim()
+                        }
+                    }
+                }
+
+                if ($existingImageName) {
+                    Write-Host "  Found existing boot image: '$existingImageName' - removing database entry..." -ForegroundColor Gray
+                    wdsutil /Remove-Image /Image:"$existingImageName" /ImageType:Boot /Architecture:x64 2>&1 | Out-Null
+                } else {
+                    Write-Host '  No existing database entry found for this WIM.' -ForegroundColor Gray
+                }
+
+                Write-Host '  Stopping WDS service...' -ForegroundColor Gray
+                Stop-Service WDSServer -Force
+
+                $wdsRoot = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\WDSServer\Parameters' `
+                    -Name RootDirectory -ErrorAction SilentlyContinue).RootDirectory
+                if (-not $wdsRoot) { $wdsRoot = 'C:\RemoteInstall' }
+                $physicalWim = Join-Path $wdsRoot "Boot\x64\Images\$wimLeaf"
+                if (Test-Path $physicalWim) {
+                    Remove-Item $physicalWim -Force
+                    Write-Host "  Deleted physical WIM from store: $physicalWim" -ForegroundColor Gray
+                }
+
+                Write-Host '  Adding new boot image...' -ForegroundColor Gray
+                $result = wdsutil /Verbose /Add-Image /ImageFile:"$wimFile" /ImageType:Boot /Name:"$wdsImageName" 2>&1
+                if ($LASTEXITCODE -ne 0) { throw "wdsutil Add-Image failed: $result" }
+                Write-Host '  [OK] Boot image updated in WDS' -ForegroundColor Green
+
+                Write-Host '  Starting WDS service...' -ForegroundColor Gray
+                Start-Service WDSServer
+                Write-Host '  [OK] WDS started' -ForegroundColor Green
+            }
+        } else {
+            Write-Verbose 'Step 7: WDS update skipped (-SkipWDS).'
+        }
+
+        # -- Step 8: Create bootable ISOs ----------------------------------------
+        if (-not $SkipISO) {
+            Write-Host "`nStep 8: Creating bootable ISOs..." -ForegroundColor Cyan
+            if ($PSCmdlet.ShouldProcess($isoFile, 'Build Gen 1 hybrid and Gen 2 UEFI no-prompt ISOs')) {
+                if (Test-Path $isoFile) { Remove-Item -Path $isoFile -Force }
+                cmd.exe /c "cd /d `"$winPERoot`" && MakeWinPEMedia.cmd /iso `"$IsoStagingDir`" `"$isoFile`""
+                if ($LASTEXITCODE -ne 0) { throw "MakeWinPEMedia.cmd failed (exit $LASTEXITCODE)" }
+                Write-Host "  [OK] Gen 1 ISO created: $isoFile" -ForegroundColor Green
+
+                if (Test-Path $isoFileUefi) { Remove-Item -Path $isoFileUefi -Force }
+                $noPromptEfi = Join-Path $env:OSCDImgRoot 'efisys_noprompt.bin'
+                if (-not (Test-Path $noPromptEfi)) { throw "efisys_noprompt.bin not found at: $noPromptEfi" }
+                $oscdimgExe = Join-Path $env:OSCDImgRoot 'oscdimg.exe'
+                $mediaRoot  = Join-Path $IsoStagingDir 'media'
+                & $oscdimgExe -m -o -u2 -udfver102 "-bootdata:1#pEF,e,b$noPromptEfi" "$mediaRoot" "$isoFileUefi"
+                if ($LASTEXITCODE -ne 0) { throw "oscdimg (UEFI no-prompt ISO) failed (exit $LASTEXITCODE)" }
+                Write-Host "  [OK] Gen 2 ISO created: $isoFileUefi" -ForegroundColor Green
+
+                Remove-Item -Path $IsoStagingDir -Recurse -Force -ErrorAction SilentlyContinue
+                Write-Host '  [OK] Staging directory cleaned up' -ForegroundColor Gray
+            }
+        } else {
+            Write-Verbose 'Step 8: ISO creation skipped (-SkipISO).'
+        }
+
+        Write-Host "`n========================================" -ForegroundColor Green
+        Write-Host 'PS7 POC PE build complete!' -ForegroundColor Green
+        Write-Host '  Inside WinPE, pwsh.exe is at X:\PowerShell7\pwsh.exe (and on PATH).' -ForegroundColor Gray
+        Write-Host "========================================`n" -ForegroundColor Green
+
+    } catch {
+        Write-Error "New-NDTPEImagePS7 failed: $_"
+
+        if (Test-Path $MountDir) {
+            if ((Get-Location).Path -like "$MountDir*") { Set-Location $LocalPath }
+            [System.GC]::Collect()
+            [System.GC]::WaitForPendingFinalizers()
+
+            Write-Warning 'Attempting to discard WIM mount...'
+            dism /Unmount-Wim /MountDir:"$MountDir" /Discard 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'Discard failed - clearing stale mount points (dism /Cleanup-Mountpoints)...'
+                dism /Cleanup-Mountpoints 2>&1 | Out-Null
+            }
+        }
+
+        throw
+    } finally {
+        if ($ps7TempZip -and (Test-Path $ps7TempZip)) {
+            Remove-Item -Path $ps7TempZip -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 #region -- Computer management (CustomSettings.json) -------------------------
 
 function Get-NDTComputer {

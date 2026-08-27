@@ -19,6 +19,7 @@
         'Update-NDT',
         'Install-NDTMonitor',
         'New-NDTPEImage',
+        'New-NDTPEImagePS7',
         'Get-NDTComputer', 'Add-NDTComputer', 'Set-NDTComputer', 'Remove-NDTComputer',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
         'Move-NDTReferenceImage',
