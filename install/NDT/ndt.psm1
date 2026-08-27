@@ -902,6 +902,54 @@ function Install-NDTMonitor {
     Write-Host "  Log folder: $LogRoot" -ForegroundColor Gray
 }
 
+function Add-NDTRootCertToImage {
+    # Private helper (not exported). Exports root CA cert(s) whose subject matches -Name
+    # from the build host's LocalMachine\Root store into the image's Deploy folder as
+    # rootca-<thumbprint>.cer, and writes Import-RootCerts.ps1. That script is run at PE
+    # boot to import the certs into the live WinPE Root store via .NET X509Store, so it
+    # works under both Windows PowerShell 5.1 and PowerShell 7 (no certutil / PKI module
+    # dependency). WinPE is ephemeral, so re-importing on every boot is harmless.
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [string]$DeployDir
+    )
+
+    $certs = Get-ChildItem Cert:\LocalMachine\Root -ErrorAction SilentlyContinue |
+        Where-Object { $_.Subject -like "*$Name*" } |
+        Sort-Object Thumbprint -Unique
+    if (-not $certs) {
+        throw "No root certificate matching '$Name' found in Cert:\LocalMachine\Root."
+    }
+
+    foreach ($cert in $certs) {
+        $cerPath = Join-Path $DeployDir "rootca-$($cert.Thumbprint).cer"
+        [System.IO.File]::WriteAllBytes($cerPath, $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+        Write-Host "  [OK] Exported root cert: $($cert.Subject) -> $(Split-Path $cerPath -Leaf)" -ForegroundColor Gray
+    }
+
+    $importScript = @'
+# Imports NDT root CA certificate(s) into the live WinPE machine Root store.
+# Uses .NET X509Store directly so it works under Windows PowerShell 5.1 and PowerShell 7
+# (no dependency on certutil.exe or the PKI module being present in WinPE).
+$store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+$store.Open('ReadWrite')
+foreach ($f in (Get-ChildItem -Path (Join-Path $PSScriptRoot 'rootca-*.cer') -ErrorAction SilentlyContinue)) {
+    try {
+        $store.Add([System.Security.Cryptography.X509Certificates.X509Certificate2]::new($f.FullName))
+        Write-Host "Imported root cert: $($f.Name)"
+    } catch {
+        Write-Warning "Failed to import $($f.Name): $_"
+    }
+}
+$store.Close()
+'@
+    Set-Content -Path (Join-Path $DeployDir 'Import-RootCerts.ps1') -Value $importScript -Encoding ASCII
+    Write-Host '  [OK] Import-RootCerts.ps1 generated -> X:\Deploy\Import-RootCerts.ps1' -ForegroundColor Gray
+}
+
 function New-NDTPEImage {
     <#
     .SYNOPSIS
@@ -958,6 +1006,12 @@ function New-NDTPEImage {
         Default: Deploy. Use this when the NDT server being built uses an alternate
         deploy section (e.g. DeployDC01).
 
+    .PARAMETER RootCACertName
+        Subject-name substring of the internal root CA certificate to inject. When
+        supplied, the matching cert is exported from this host's LocalMachine\Root
+        store into the image and imported into the WinPE Root store at boot, so PE
+        trusts internal HTTPS (e.g. the NDT Monitor) without -SkipCertificateCheck.
+
     .EXAMPLE
         New-NDTPEImage
 
@@ -991,7 +1045,10 @@ function New-NDTPEImage {
         [switch]$RegisterOnly,
 
         [Parameter()]
-        [string]$DeploySection = 'Deploy'
+        [string]$DeploySection = 'Deploy',
+
+        [Parameter()]
+        [string]$RootCACertName
     )
 
     # -- Verify Administrator ----------------------------------------------------
@@ -1220,6 +1277,14 @@ To skip WDS and build the WIM only:
             $settingsObj | ConvertTo-Json | Set-Content -Path $settingsDestPath -Encoding UTF8
             Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json (from CustomSettings.json)' -ForegroundColor Gray
 
+            # Optionally export the internal root CA cert(s) into the image and
+            # generate Import-RootCerts.ps1 so WinPE trusts internal HTTPS at boot.
+            $rootCertImportLine = ''
+            if ($RootCACertName) {
+                Add-NDTRootCertToImage -Name $RootCACertName -DeployDir $wimDeployDir
+                $rootCertImportLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File X:\Deploy\Import-RootCerts.ps1'
+            }
+
             # Generate StartDeploy.cmd directly into X:\Deploy\ inside the WIM.
             #
             # The MDT pattern: launch the deployment script in a NEW window with
@@ -1228,16 +1293,17 @@ To skip WDS and build the WIM only:
             #   Window 1 (this cmd)  -  free debug shell, Z: already mapped
             #   Window 2             -  the running install.ps1
             # No F8 polling, no HTA, no bddrun.exe needed.
-            $startDeployContent = @'
+            $startDeployContent = @"
 @echo off
 wpeinit
 wpeutil WaitForNetwork
+$rootCertImportLine
 start "NDT Deploy" powershell.exe -NoLogo -ExecutionPolicy Bypass -File X:\Deploy\install.ps1
 echo.
 echo *** NDT debug shell - deployment is running in the other window ***
 echo Type EXIT to close this window (deployment will continue unaffected)
 cmd.exe /k
-'@
+"@
             $startDeployDest = Join-Path $wimDeployDir 'StartDeploy.cmd'
             Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
             Write-Host '  [OK] StartDeploy.cmd generated -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
@@ -1511,6 +1577,12 @@ function New-NDTPEImagePS7 {
     .PARAMETER DeploySection
         Top-level key in Sections.json to read share credentials from. Default: Deploy
 
+    .PARAMETER RootCACertName
+        Subject-name substring of the internal root CA certificate to inject. When
+        supplied, the matching cert is exported from this host's LocalMachine\Root
+        store into the image and imported into the WinPE Root store at boot, so PE
+        trusts internal HTTPS (e.g. the NDT Monitor) without -SkipCertificateCheck.
+
     .EXAMPLE
         New-NDTPEImagePS7 -SkipWDS -SkipISO -Verbose
 
@@ -1541,7 +1613,10 @@ function New-NDTPEImagePS7 {
         [switch]$SkipISO,
 
         [Parameter()]
-        [string]$DeploySection = 'Deploy'
+        [string]$DeploySection = 'Deploy',
+
+        [Parameter()]
+        [string]$RootCACertName
     )
 
     # -- Verify Administrator ----------------------------------------------------
@@ -1751,13 +1826,22 @@ function New-NDTPEImagePS7 {
             $settingsObj | ConvertTo-Json | Set-Content -Path $settingsDestPath -Encoding UTF8
             Write-Host '  [OK] settings.json generated -> X:\Deploy\settings.json' -ForegroundColor Gray
 
+            # Optionally export the internal root CA cert(s) into the image and
+            # generate Import-RootCerts.ps1 so WinPE trusts internal HTTPS at boot.
+            $rootCertImportLine = ''
+            if ($RootCACertName) {
+                Add-NDTRootCertToImage -Name $RootCACertName -DeployDir $wimDeployDir
+                $rootCertImportLine = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File X:\Deploy\Import-RootCerts.ps1'
+            }
+
             # StartDeploy.cmd: prepend PS7 to PATH and prefer pwsh.exe when present,
             # falling back to Windows PowerShell if pwsh is somehow missing.
-            $startDeployContent = @'
+            $startDeployContent = @"
 @echo off
 wpeinit
 wpeutil WaitForNetwork
 set "PATH=X:\PowerShell7;%PATH%"
+$rootCertImportLine
 if exist X:\PowerShell7\pwsh.exe (
     start "NDT Deploy" X:\PowerShell7\pwsh.exe -NoLogo -ExecutionPolicy Bypass -File X:\Deploy\install.ps1
 ) else (
@@ -1767,7 +1851,7 @@ echo.
 echo *** NDT debug shell - deployment is running in the other window ***
 echo pwsh is on PATH (PowerShell 7). Type EXIT to close this window.
 cmd.exe /k
-'@
+"@
             $startDeployDest = Join-Path $wimDeployDir 'StartDeploy.cmd'
             Set-Content -Path $startDeployDest -Value $startDeployContent -Encoding ASCII
             Write-Host '  [OK] StartDeploy.cmd generated (prefers pwsh.exe) -> X:\Deploy\StartDeploy.cmd' -ForegroundColor Gray
