@@ -1499,7 +1499,8 @@ function New-NDTPEImagePS7 {
 
     .PARAMETER PS7ZipUrl
         URL of the PowerShell 7 win-x64 zip to download when -PS7ZipPath is not
-        supplied. Default: the v7.4.6 release asset on GitHub.
+        supplied. If omitted, the latest release's win-x64.zip asset is resolved
+        from the GitHub releases API.
 
     .PARAMETER SkipWDS
         Skip the WDS boot-image update step (Step 7).
@@ -1531,7 +1532,7 @@ function New-NDTPEImagePS7 {
         [string]$PS7ZipPath,
 
         [Parameter()]
-        [string]$PS7ZipUrl = 'https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/PowerShell-7.4.6-win-x64.zip',
+        [string]$PS7ZipUrl,
 
         [Parameter()]
         [switch]$SkipWDS,
@@ -1607,6 +1608,16 @@ function New-NDTPEImagePS7 {
         if (-not (Test-Path $PS7ZipPath)) { throw "PS7ZipPath not found: $PS7ZipPath" }
         Write-Host "Using local PowerShell 7 zip: $PS7ZipPath" -ForegroundColor Gray
     } else {
+        # No explicit URL: ask the GitHub releases API for the latest win-x64.zip.
+        if (-not $PS7ZipUrl) {
+            Write-Host 'Resolving latest PowerShell 7 release from GitHub...' -ForegroundColor Gray
+            $latest   = Invoke-RestMethod -Uri 'https://api.github.com/repos/PowerShell/PowerShell/releases/latest' -Headers @{ 'User-Agent' = 'NDT' }
+            $zipAsset = $latest.assets | Where-Object { $_.name -match 'win-x64\.zip$' } | Select-Object -First 1
+            if (-not $zipAsset) { throw 'Could not find a win-x64.zip asset in the latest PowerShell release.' }
+            $PS7ZipUrl = $zipAsset.browser_download_url
+            Write-Host "  Latest PowerShell 7: $($latest.tag_name) ($($zipAsset.name))" -ForegroundColor Gray
+        }
+
         $ps7TempZip = Join-Path $env:TEMP 'ndt-ps7-winpe.zip'
         Write-Host "Downloading PowerShell 7 zip from: $PS7ZipUrl" -ForegroundColor Gray
         if ($PSCmdlet.ShouldProcess($PS7ZipUrl, 'Download PowerShell 7 zip')) {

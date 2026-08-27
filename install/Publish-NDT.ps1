@@ -24,6 +24,10 @@
     Name of the registered PSRepository to publish to.
     Default: PSGallery
 
+.PARAMETER SkipNewVersionNumber
+    Do not auto-increment the module version. By default this script bumps the
+    last component of ModuleVersion in ndt.psd1 before publishing.
+
 .PARAMETER WhatIf
     Show what would be published without actually publishing.
 
@@ -46,7 +50,10 @@ param (
     [string]$ModulePath = (Join-Path $PSScriptRoot 'NDT'),
 
     [Parameter()]
-    [string]$Repository = 'PSGallery'
+    [string]$Repository = 'PSGallery',
+
+    [Parameter()]
+    [switch]$SkipNewVersionNumber
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +71,29 @@ if (-not (Test-Path $manifestPath)) {
 }
 
 Write-Host "Validating manifest: $manifestPath"
+
+# 1b. Auto-increment the module version (last component) unless suppressed.
+if ($SkipNewVersionNumber) {
+    Write-Host '  Version bump skipped (-SkipNewVersionNumber).' -ForegroundColor DarkYellow
+} else {
+    $rawManifest = Get-Content -Path $manifestPath -Raw
+    if ($rawManifest -notmatch "(?m)^\s*ModuleVersion\s*=\s*'([^']+)'") {
+        throw "Could not find ModuleVersion in manifest: $manifestPath"
+    }
+    $oldVersion = [version]$Matches[1]
+    if ($oldVersion.Revision -ge 0) {
+        $newVersion = [version]::new($oldVersion.Major, $oldVersion.Minor, $oldVersion.Build, $oldVersion.Revision + 1)
+    } else {
+        $build = if ($oldVersion.Build -ge 0) { $oldVersion.Build } else { 0 }
+        $newVersion = [version]::new($oldVersion.Major, $oldVersion.Minor, $build + 1)
+    }
+    if ($PSCmdlet.ShouldProcess($manifestPath, "Bump ModuleVersion $oldVersion -> $newVersion")) {
+        $updated = [regex]::Replace($rawManifest, "(?m)^(\s*ModuleVersion\s*=\s*')[^']+(')", "`${1}$newVersion`${2}")
+        Set-Content -Path $manifestPath -Value $updated -Encoding UTF8 -NoNewline
+        Write-Host "  Version bumped: $oldVersion -> $newVersion" -ForegroundColor Green
+    }
+}
+
 $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
 Write-Host "  Module  : $($manifest.Name)"
 Write-Host "  Version : $($manifest.Version)"
