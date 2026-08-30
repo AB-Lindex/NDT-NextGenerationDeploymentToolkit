@@ -69,6 +69,11 @@
     "Description": "Install Nuget provider for PowerShell",
     "Powershell": "powershell5"
   },
+  "Install VMware Tools": {
+    "Script": "\\Applications\\VMware Tools\\install.ps1",
+    "Description": "Install VMware Tools",
+    "Powershell": "powershell5"
+  },
   "Install iPXE": {
     "Script": "\\Applications\\iPXE\\install.ps1",
     "Description": "Install iPXE bootloader",

@@ -137,7 +137,8 @@
       "ADSettings": "ADJoinCorp"
     },
     "DeploymentGroups": [
-      "SMC"
+      "SMC",
+      "VMware Tools"
     ]
   },
   "00:15:5D:02:40:42": {

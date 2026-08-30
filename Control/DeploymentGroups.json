@@ -17,6 +17,12 @@
       "Reference": "IESkipSettings"
     }
   },
+  "VMware Tools": {
+    "Step10": {
+      "Description": "Install VMware Tools",
+      "Reference": "Install VMware Tools"
+    }
+  },
   "SMC": {
     "Step10": {
       "Description": "Install SMC",
