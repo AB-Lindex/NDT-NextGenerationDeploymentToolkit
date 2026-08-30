@@ -50,7 +50,26 @@ if ($deploySettings) {
         $settings.Deploy['MonitorUrl'] = $deploySettings.MonitorUrl
     }
 
-    $settings | ConvertTo-Json -Depth 3 | Set-Content -Path "C:\temp\settings.json" -Encoding UTF8
+    # Detect hardware (physical/virtual, vendor, model) and persist for later phases -
+    # app installers query this (e.g. VMware Tools) after settings.json exists.
+    $hardware = & "Z:\Scripts\unattend2026\Get-Hardware.ps1"
+    if ($hardware) {
+        $settings['Hardware'] = @{
+            Make             = $hardware.Make
+            Model            = $hardware.Model
+            SerialNumber     = $hardware.SerialNumber
+            BiosVersion      = $hardware.BiosVersion
+            IsVM             = $hardware.IsVM
+            Platform         = $hardware.Platform
+            DetectionMethod  = $hardware.DetectionMethod
+            IsLaptop         = $hardware.IsLaptop
+            IsDesktop        = $hardware.IsDesktop
+            IsServer         = $hardware.IsServer
+        }
+        Write-Host "Detected hardware: $($hardware.Platform) (IsVM=$($hardware.IsVM)) - $($hardware.Make) / $($hardware.Model)" -ForegroundColor Green
+    }
+
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -Path "C:\temp\settings.json" -Encoding UTF8
     Write-Host "Created settings.json with deployment and autologon credentials" -ForegroundColor Green
     
     # Mask password - show first 3 characters

@@ -143,6 +143,18 @@ $firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control"
 $isUEFI = ($firmwareType -eq 2)
 Write-Log "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
 
+# Detect hardware (physical/virtual, vendor, model) and show it alongside the other
+# pre-flight info. Best-effort - never blocks deployment.
+$hardware = & "Z:\Scripts\Unattend2026\Get-Hardware.ps1"
+if ($hardware) {
+    Write-Log "Hardware  : $(if ($hardware.IsVM) { "Virtual ($($hardware.Platform))" } else { 'Physical' })" -ForegroundColor Cyan
+    Write-Log "  Vendor  : $($hardware.Make)" -ForegroundColor Gray
+    Write-Log "  Model   : $($hardware.Model)" -ForegroundColor Gray
+    Write-Log "  Serial  : $($hardware.SerialNumber)" -ForegroundColor Gray
+    Write-Log "  BIOS    : $($hardware.BiosVersion)" -ForegroundColor Gray
+    Write-Log "  Detected: $($hardware.DetectionMethod)$(if ($hardware.CpuidHypervisor) { " (CPUID: $($hardware.CpuidHypervisor))" })" -ForegroundColor Gray
+}
+
 # ------------------------------------------------------------------
 # STEP 1 - Validate MAC address
 # ------------------------------------------------------------------

@@ -7,6 +7,7 @@
 Applications2026/
 Operating Systems/*
 Scratch/
+Scripts/MDT Scripts/
 
 # Keep folder placeholders even when parent folder is ignored
 !Operating Systems/.gitkeep
