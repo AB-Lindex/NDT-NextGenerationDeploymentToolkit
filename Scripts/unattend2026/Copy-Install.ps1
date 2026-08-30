@@ -28,8 +28,11 @@ if ($deploySettings) {
     Write-Host "Configuring deployment share mapping for first boot..." -ForegroundColor Cyan
     Write-Host "  Share: $($deploySettings.Share)" -ForegroundColor Gray
     
-    # Create settings.json with deployment credentials and autologon settings
+    # Create settings.json with deployment credentials and autologon settings.
+    # Record the MAC detected in WinPE so later phases key off it - a VM's MAC
+    # can change across reboots in a Hyper-V farm.
     $settings = @{
+        MAC = $macAddress
         Deploy = @{
             Share = $deploySettings.Share
             Username = $deploySettings.Username

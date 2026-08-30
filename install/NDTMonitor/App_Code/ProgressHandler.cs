@@ -10,10 +10,13 @@ namespace NDTMonitor
 {
     // NDT deployment progress endpoint.
     //
-    //   POST /progress        Body = JSON progress object from a deploying machine.
-    //                         Writes <MAC>.json (latest state) + appends audit.jsonl.
-    //   GET  /progress        Returns a JSON array of every machine's latest state.
-    //   GET  /progress?mac=X  Returns a single machine's latest state (dashes or colons).
+    //   POST /progress         Body = JSON progress object from a deploying machine.
+    //                          Writes <Computername>.json (latest state) + appends audit.jsonl.
+    //   GET  /progress         Returns a JSON array of every machine's latest state.
+    //   GET  /progress?name=X  Returns a single machine's latest state by computer name.
+    //
+    // Machines are keyed by Computername (not MAC): a VM's MAC can change in a
+    // Hyper-V farm, but its name is stable for the life of the deployment.
     //
     // Storage folder is read from the "LogRoot" appSetting in web.config
     // (rewritten by Install-NDTMonitor to the real path).
@@ -71,14 +74,18 @@ namespace NDTMonitor
             var data = ser.Deserialize<Dictionary<string, object>>(body);
             if (data == null) data = new Dictionary<string, object>();
 
-            string mac = data.ContainsKey("MAC") && data["MAC"] != null
-                ? data["MAC"].ToString() : "UNKNOWN";
+            // Identify machines by name; fall back to MAC only if the name is absent.
+            string name = data.ContainsKey("Computername") && data["Computername"] != null
+                ? data["Computername"].ToString() : null;
+            if (string.IsNullOrEmpty(name))
+                name = data.ContainsKey("MAC") && data["MAC"] != null
+                    ? data["MAC"].ToString() : "UNKNOWN";
 
             // Stamp the server-side receive time so stale machines are detectable.
             data["Received"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             string normalized = ser.Serialize(data);
 
-            string stateFile = Path.Combine(LogRoot, SafeMac(mac) + ".json");
+            string stateFile = Path.Combine(LogRoot, SafeName(name) + ".json");
             File.WriteAllText(stateFile, normalized, Encoding.UTF8);
 
             // Append to a per-day audit log (audit-yyyy-MM-dd.jsonl) so the trail
@@ -93,10 +100,10 @@ namespace NDTMonitor
 
         private static void HandleGet(HttpContext ctx)
         {
-            string macQuery = ctx.Request.QueryString["mac"];
-            if (!string.IsNullOrEmpty(macQuery))
+            string nameQuery = ctx.Request.QueryString["name"];
+            if (!string.IsNullOrEmpty(nameQuery))
             {
-                string file = Path.Combine(LogRoot, SafeMac(macQuery) + ".json");
+                string file = Path.Combine(LogRoot, SafeName(nameQuery) + ".json");
                 if (File.Exists(file))
                 {
                     ctx.Response.Write(File.ReadAllText(file, Encoding.UTF8));
@@ -124,10 +131,10 @@ namespace NDTMonitor
             ctx.Response.Write(sb.ToString());
         }
 
-        // Normalise a MAC to an uppercase, filesystem-safe filename stem.
-        private static string SafeMac(string mac)
+        // Normalise a computer name to an uppercase, filesystem-safe filename stem.
+        private static string SafeName(string name)
         {
-            string s = mac.Replace(":", "-").ToUpperInvariant();
+            string s = name.Replace(":", "-").ToUpperInvariant();
             foreach (char c in Path.GetInvalidFileNameChars())
                 s = s.Replace(c.ToString(), "");
             return s;
