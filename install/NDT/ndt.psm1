@@ -536,7 +536,7 @@ function Install-NDTMonitor {
         Endpoints (served on https://<host>:<Port>, or http://<host>:80 with no cert):
           POST /progress          receive a progress update (JSON body)
           GET  /progress          all machine states as a JSON array
-          GET  /progress?mac=..   a single machine's latest state
+          GET  /progress?name=..  a single machine's latest state (by computer name)
           GET  /                  live HTML dashboard (Default.htm)
 
     .PARAMETER LocalPath
@@ -2400,7 +2400,7 @@ function Watch-NDTDeployment {
         Watches a machine's deployment progress via the NDT Monitor and waits
         until it reports 100% / Done.
     .DESCRIPTION
-        Polls the NDT Monitor HTTP service (GET /progress?mac=..) for a single
+        Polls the NDT Monitor HTTP service (GET /progress?name=..) for a single
         machine and renders a live progress bar plus a status line each time the
         state changes. Blocks until the machine reports Status 'Done' (or 100%),
         the optional timeout elapses, or you press Ctrl+C.
@@ -2409,8 +2409,12 @@ function Watch-NDTDeployment {
         Install-NDT.ps1 (Phase 'Windows') during deployment.
 
         Returns \$true when the deployment completes, \$false on timeout.
+    .PARAMETER Computername
+        Name of the machine to watch. The NDT Monitor keys progress by computer
+        name (a VM's MAC can change across reboots in a Hyper-V farm).
     .PARAMETER MAC
         MAC address of the machine to watch (colon- or dash-separated, any case).
+        Resolved to its Computername via Control\CustomSettings.json before querying.
     .PARAMETER MonitorUrl
         Base URL of the NDT Monitor (e.g. https://ndt01:443). If omitted, it is
         resolved from the Deploy section (MonitorUrl) of Control\Sections.json.
@@ -2425,6 +2429,8 @@ function Watch-NDTDeployment {
         Ignore TLS certificate validation (internal CA / self-signed monitor).
         Works on both Windows PowerShell 5.1 and PowerShell 7.
     .EXAMPLE
+        Watch-NDTDeployment -Computername srv02
+    .EXAMPLE
         Watch-NDTDeployment -MAC '00:15:5D:02:56:01'
     .EXAMPLE
         Watch-NDTDeployment -MAC '00:15:5D:02:56:01' -TimeoutMinutes 90 -SkipCertificateCheck
@@ -2433,7 +2439,10 @@ function Watch-NDTDeployment {
     #>
     [CmdletBinding()]
     param (
-        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Alias('Name', 'MachineName')]
+        [string]$Computername,
+        [Parameter(ValueFromPipelineByPropertyName)]
         [string]$MAC,
         [Parameter()]
         [string]$MonitorUrl,
@@ -2448,7 +2457,29 @@ function Watch-NDTDeployment {
     )
 
     process {
-        $normalMAC = $MAC.ToUpper().Replace('-', ':')
+        # Determine the machine name to query. The monitor keys state by computer
+        # name; if only a MAC was supplied, resolve it via CustomSettings.json.
+        $targetName = $Computername
+        if (-not $targetName -and $MAC) {
+            $normalMAC = $MAC.ToUpper().Replace('-', ':')
+            $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
+            if (Test-Path $csPath) {
+                try {
+                    $cs = Get-Content $csPath -Raw | ConvertFrom-Json
+                    if ($cs.$normalMAC -and $cs.$normalMAC.Computername) {
+                        $targetName = $cs.$normalMAC.Computername
+                    }
+                } catch {
+                    # Fall through to the throw below.
+                }
+            }
+            if (-not $targetName) {
+                throw "Could not resolve a Computername for MAC '$normalMAC' from CustomSettings.json. Supply -Computername instead."
+            }
+        }
+        if (-not $targetName) {
+            throw "Specify -Computername (or -MAC) of the machine to watch."
+        }
 
         # Resolve MonitorUrl from the Deploy section of Sections.json if not supplied.
         if (-not $MonitorUrl) {
@@ -2484,9 +2515,9 @@ function Watch-NDTDeployment {
             }
         }
 
-        $uri      = "$MonitorUrl/progress?mac=$normalMAC"
-        $activity = "NDT deployment $normalMAC"
-        Write-Host "Watching deployment: $normalMAC" -ForegroundColor Cyan
+        $uri      = "$MonitorUrl/progress?name=$targetName"
+        $activity = "NDT deployment $targetName"
+        Write-Host "Watching deployment: $targetName" -ForegroundColor Cyan
         Write-Host "Monitor: $uri" -ForegroundColor DarkGray
 
         $deadline = if ($TimeoutMinutes -gt 0) { (Get-Date).AddMinutes($TimeoutMinutes) } else { $null }
@@ -2556,7 +2587,7 @@ function Watch-NDTDeployment {
         }
 
         $doneName = if ($final.Computername) { " ($($final.Computername))" } else { '' }
-        Write-Host "`nDeployment complete: $normalMAC$doneName - 100%" -ForegroundColor Green
+        Write-Host "`nDeployment complete: $targetName$doneName - 100%" -ForegroundColor Green
         return $true
     }
 }
