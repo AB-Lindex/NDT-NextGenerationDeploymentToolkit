@@ -1001,6 +1001,12 @@ function New-NDTPEImage {
         directly in WDS. Implies -SkipISO. Use this when the WIM is already built and
         only the WDS boot-image registration needs to be refreshed.
 
+    .PARAMETER DriverPath
+        One or more folders of out-of-box drivers to inject into the boot image with
+        DISM /Add-Driver /Recurse (Step 4c). Use this for NIC / mass-storage drivers
+        WinPE lacks (e.g. VMware vmxnet3 / pvscsi). Default: <LocalPath>\Drivers\PE.
+        A path that is missing or contains no .inf is skipped without failing the build.
+
     .PARAMETER DeploySection
         Name of the top-level key in Sections.json to read share credentials from.
         Default: Deploy. Use this when the NDT server being built uses an alternate
@@ -1053,6 +1059,9 @@ function New-NDTPEImage {
 
         [Parameter()]
         [string]$IsoStagingDir = 'C:\WinPE_ISO_Staging',
+
+        [Parameter()]
+        [string[]]$DriverPath,
 
         [Parameter()]
         [switch]$SkipWDS,
@@ -1322,6 +1331,30 @@ To skip WDS and build the WIM only:
                 Write-Host "  [OK] $pkg" -ForegroundColor Gray
             }
             Write-Host '  [OK] All optional packages added' -ForegroundColor Green
+        }
+
+        # -- Step 4c: Inject out-of-box drivers ---------------------------------
+        # DISM /Add-Driver /Recurse stages NIC / mass-storage drivers WinPE lacks
+        # (e.g. VMware vmxnet3 / pvscsi). Defaults to <LocalPath>\Drivers\PE; a
+        # missing or empty path is skipped so the build never fails on absent drivers.
+        $driverPaths = if ($DriverPath) { $DriverPath } else { @(Join-Path $LocalPath 'Drivers\PE') }
+        Write-Host "`nStep 4c: Injecting out-of-box drivers..." -ForegroundColor Cyan
+        foreach ($dp in $driverPaths) {
+            if (-not (Test-Path $dp)) {
+                Write-Host "  Driver path not found, skipping: $dp" -ForegroundColor Yellow
+                continue
+            }
+            $infCount = @(Get-ChildItem -Path $dp -Recurse -Filter *.inf -ErrorAction SilentlyContinue).Count
+            if ($infCount -eq 0) {
+                Write-Host "  No .inf files under: $dp - skipping" -ForegroundColor Yellow
+                continue
+            }
+            if ($PSCmdlet.ShouldProcess($MountDir, "Add $infCount driver(s) from $dp")) {
+                Write-Host "  Adding $infCount driver(s) from: $dp" -ForegroundColor Gray
+                dism /Image:"$MountDir" /Add-Driver /Driver:"$dp" /Recurse
+                if ($LASTEXITCODE -ne 0) { throw "DISM Add-Driver failed for '$dp' (exit $LASTEXITCODE)" }
+                Write-Host '  [OK] Drivers injected' -ForegroundColor Green
+            }
         }
 
         # -- Step 4b: Inject PowerShell 7 (only with -PS7) -----------------------

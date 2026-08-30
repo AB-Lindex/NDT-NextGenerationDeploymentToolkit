@@ -385,3 +385,9 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# NDT: Drivers/ holds sample driver payloads (a flying start for users). Track the
+# whole tree, overriding the global *.dll and x64/x86 build-output ignores above so
+# no driver file (incl. version/coinstaller DLLs) is silently dropped from commits.
+!Drivers/**/
+!Drivers/**
