@@ -59,6 +59,12 @@ function Send-NDTProgress {
 }
 
 try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
+
+# Get the MAC recorded in WinPE from settings.json (written fresh by Copy-Install.ps1).
+# A VM's live MAC can change across reboots in a Hyper-V farm, so the stored value
+# is authoritative rather than re-detecting the adapter here.
+$macAddress = (Get-Content -Path 'C:\temp\settings.json' -Raw | ConvertFrom-Json).MAC
+
 Write-Log 'Install-NDT.ps1 started' -ForegroundColor Cyan
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 Write-Log "Hostname : $env:COMPUTERNAME"
@@ -66,12 +72,8 @@ Write-Log "User     : $(whoami)"
 Write-Log "Domain   : $env:USERDOMAIN"
 Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
 Write-Log "IP       : $sysIP"
+Write-Log "MAC      : $macAddress (from settings.json)"
 Write-Log '-----------------------------------' -ForegroundColor Cyan
-
-# Get the MAC recorded in WinPE from settings.json (written fresh by Copy-Install.ps1).
-# A VM's live MAC can change across reboots in a Hyper-V farm, so the stored value
-# is authoritative rather than re-detecting the adapter here.
-$macAddress = (Get-Content -Path 'C:\temp\settings.json' -Raw | ConvertFrom-Json).MAC
 
 # Load CustomSettings.json
 $customSettingsPath = "Z:\Control\CustomSettings.json"

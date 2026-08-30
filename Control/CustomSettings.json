@@ -125,6 +125,21 @@
       "NPP"
     ]
   },
+  "00:15:5D:02:40:1A": {
+    "OS": "WIN2025DCC",
+    "Computername": "srv03",
+    "IPAddress": "10.0.3.23/24",
+    "AdminPassword": "Qantas-777",
+    "Install": "yes",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentGroups": [
+      "SMC"
+    ]
+  },
   "00:15:5D:02:40:42": {
     "OS": "WIN2025DCC",
     "Computername": "psg01",
@@ -156,21 +171,6 @@
     },
     "DeploymentGroups": [
       "CreateReferenceImage"
-    ]
-  },
-  "00:15:5D:02:40:1A": {
-    "OS": "WIN2025DCC",
-    "Computername": "srv03",
-    "IPAddress": "10.0.3.23/24",
-    "AdminPassword": "Qantas-777",
-    "Install": "yes",
-    "Sections": {
-      "Locale": "Sweden",
-      "NetworkSettings": "NicAuto",
-      "ADSettings": "ADJoinCorp"
-    },
-    "DeploymentGroups": [
-      "SMC"
     ]
   },
   "00:15:5D:02:40:17": {
