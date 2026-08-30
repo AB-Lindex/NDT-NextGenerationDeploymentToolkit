@@ -1351,10 +1351,7 @@ To skip WDS and build the WIM only:
             }
             if ($PSCmdlet.ShouldProcess($MountDir, "Add $infCount driver(s) from $dp")) {
                 Write-Host "  Adding $infCount driver(s) from: $dp" -ForegroundColor Gray
-                # /ForceUnsigned: boot-critical storage drivers (e.g. VMware pvscsi) fail
-                # DISM's offline signature check because the vendor chain is not in the
-                # image's trusted store. WinPE does not enforce driver signing at boot.
-                dism /Image:"$MountDir" /Add-Driver /Driver:"$dp" /Recurse /ForceUnsigned
+                dism /Image:"$MountDir" /Add-Driver /Driver:"$dp" /Recurse
                 if ($LASTEXITCODE -ne 0) { throw "DISM Add-Driver failed for '$dp' (exit $LASTEXITCODE)" }
                 Write-Host '  [OK] Drivers injected' -ForegroundColor Green
             }
