@@ -68,8 +68,10 @@ Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
 Write-Log "IP       : $sysIP"
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 
-# Get MAC address
-$macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
+# Get the MAC recorded in WinPE from settings.json (written fresh by Copy-Install.ps1).
+# A VM's live MAC can change across reboots in a Hyper-V farm, so the stored value
+# is authoritative rather than re-detecting the adapter here.
+$macAddress = (Get-Content -Path 'C:\temp\settings.json' -Raw | ConvertFrom-Json).MAC
 
 # Load CustomSettings.json
 $customSettingsPath = "Z:\Control\CustomSettings.json"
