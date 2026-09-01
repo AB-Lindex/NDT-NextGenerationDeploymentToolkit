@@ -396,3 +396,13 @@ Applications/ADK/*.zip
 # no driver file (incl. version/coinstaller DLLs) is silently dropped from commits.
 !Drivers/**/
 !Drivers/**
+
+# NDT: do NOT redistribute VMware's proprietary driver binaries (Broadcom EULA) in a
+# public repo. Ignore the driver payload files under Drivers/PE/VMware; the folder
+# structure (.gitkeep), README, and the extraction helper (.ps1) stay tracked. Users
+# stage their own drivers with Get-VMwarePEDrivers.ps1 from media they license.
+Drivers/PE/VMware/**/*.inf
+Drivers/PE/VMware/**/*.sys
+Drivers/PE/VMware/**/*.cat
+Drivers/PE/VMware/**/*.dll
+Drivers/PE/VMware/**/*.oem

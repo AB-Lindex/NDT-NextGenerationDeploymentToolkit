@@ -1,0 +1,2 @@
+# Placeholder so git keeps this folder. The real pvscsi driver files are gitignored
+# (VMware/Broadcom proprietary). Stage them with ..\Get-VMwarePEDrivers.ps1.
