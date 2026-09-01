@@ -335,6 +335,47 @@ if ($LASTEXITCODE -ne 0) {
 Send-PEProgress -Description 'OS image applied' -Percent 45
 
 # ------------------------------------------------------------------
+# STEP 4a - Inject OS drivers into the offline image (NOT the PE image).
+# Storage / NIC drivers the applied image may lack to boot or reach the
+# network. Folders live in Drivers\OS\<Platform> (e.g. VMware, Dell, HP) and
+# are auto-selected by matching the folder name against the detected hardware
+# (Get-Hardware Platform + Make + Model + BaseBoard). Best-effort: a missing
+# root, empty folder, or no match is skipped and never blocks deployment.
+# ------------------------------------------------------------------
+$osDriverRoot = "Z:\Drivers\OS"
+if ((Test-Path $osDriverRoot) -and $hardware) {
+    $hwString = "$($hardware.Platform) $($hardware.Make) $($hardware.Model) $($hardware.BaseBoardProduct)".ToUpper()
+    $driverFolders = @(Get-ChildItem -Path $osDriverRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -and $hwString -like "*$($_.Name.ToUpper())*" })
+
+    if ($driverFolders.Count -gt 0) {
+        Write-Log "Matched OS driver folder(s) for '$($hardware.Platform)' / '$($hardware.Make)': $($driverFolders.Name -join ', ')" -ForegroundColor Cyan
+        Send-PEProgress -Description 'Injecting OS drivers' -Percent 47
+        foreach ($folder in $driverFolders) {
+            # Skip folders with no .inf so DISM does not error on nothing to do.
+            $hasInf = Get-ChildItem -Path $folder.FullName -Recurse -Filter *.inf -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $hasInf) {
+                Write-Log "No .inf under $($folder.FullName) - skipping" -ForegroundColor Gray
+                continue
+            }
+            Write-Log "Injecting OS drivers from: $($folder.Name)" -ForegroundColor Cyan
+            # /ForceUnsigned: boot-critical storage/NIC drivers must apply even if the
+            # offline image would otherwise reject them (matches the PE injection).
+            Dism.exe /Image:C:\ /Add-Driver /Driver:"$($folder.FullName)" /Recurse /ForceUnsigned
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "WARNING: DISM /Add-Driver failed for $($folder.FullName) (exit $LASTEXITCODE)" -Level WARN
+            } else {
+                Write-Log "OS drivers injected from $($folder.Name)" -ForegroundColor Green
+            }
+        }
+    } else {
+        Write-Log "No matching OS driver folder under $osDriverRoot for '$($hardware.Platform)' / '$($hardware.Make)' - skipping OS driver injection" -ForegroundColor Gray
+    }
+} else {
+    Write-Log "OS driver root ($osDriverRoot) not present - skipping OS driver injection" -ForegroundColor Gray
+}
+
+# ------------------------------------------------------------------
 # STEP 4b - Run optional PostPEScript (PS5) after image apply
 # ------------------------------------------------------------------
 if ($machineConfig.PostPEScript) {
