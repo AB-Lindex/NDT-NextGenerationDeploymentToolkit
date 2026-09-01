@@ -7,6 +7,11 @@
     DISM, DandISetEnv, oscdimg and the KitsRoot10 registry value), checks the real
     exit code of each installer, writes logs, and verifies the result - so a failed
     ADK download can no longer be silently swallowed while the WinPE add-on succeeds.
+
+    Targets the stable ADK 10.1.26100.2454 (Windows Server 2025 generation) - the
+    26H1 Arm64 preview kit (10.1.28000.1) builds a WinPE that will not bind x64 NIC
+    drivers. After install it applies the ADK servicing patch KB5101684 (CVE-2026-25166,
+    WSIM) from the Windows_ADK_*Update*.zip in this folder, if present.
 #>
 
 #Requires -RunAsAdministrator
@@ -17,6 +22,9 @@ Set-Location $PSScriptRoot
 
 $LocalPath = 'C:\temp\ADK'
 $LogDir    = 'C:\temp\ADK-logs'   # kept outside $LocalPath so logs survive cleanup
+# Official Microsoft aka.ms link for the ADK 26100.2454 servicing patch (KB5101684).
+# Used only as a fallback when the zip is not staged in this folder.
+$PatchZipUrl = 'https://aka.ms/Windows_ADK_10.1.26100.2454_Update_KB5101684.zip'
 New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null
 New-Item -ItemType Directory -Path $LogDir    -Force | Out-Null
 
@@ -50,6 +58,45 @@ Invoke-AdkSetup -Exe "$LocalPath\adksetup.exe" `
 Invoke-AdkSetup -Exe "$LocalPath\adkwinpesetup.exe" `
     -Features 'OptionId.WindowsPreinstallationEnvironment' `
     -LogFile "$LogDir\adkwinpe.log" -Label 'Windows PE add-on'
+
+# 2.5 Apply the ADK servicing patch (KB5101684 / CVE-2026-25166). The patch ships as a
+#     zip of .msp files; only patches for installed features apply. msiexec returns 1642
+#     (ERROR_PATCH_TARGET_NOT_FOUND) for tools we do not install (WSIM, VAMT, OA3, AppMan)
+#     - that is expected and skipped, not a failure.
+$patchZip = Get-ChildItem $LocalPath -Filter 'Windows_ADK_*Update*.zip' -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $patchZip) {
+    # Not staged locally - download it from Microsoft (requires internet).
+    try {
+        $dest = Join-Path $LocalPath 'Windows_ADK_10.1.26100.2454_Update_KB5101684.zip'
+        Write-Host "ADK patch zip not found locally - downloading KB5101684 from Microsoft..." -ForegroundColor Cyan
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $PatchZipUrl -OutFile $dest -UseBasicParsing
+        $patchZip = Get-Item $dest
+    } catch {
+        Write-Warning "Could not download ADK patch from $PatchZipUrl : $_"
+    }
+}
+if ($patchZip) {
+    $patchDir = Join-Path $LocalPath 'PatchExpand'
+    Remove-Item $patchDir -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Archive -Path $patchZip.FullName -DestinationPath $patchDir -Force
+    $msps = @(Get-ChildItem $patchDir -Recurse -Filter *.msp)
+    Write-Host "Applying ADK patch $($patchZip.BaseName) ($($msps.Count) .msp) ..." -ForegroundColor Cyan
+    $applied = 0; $skipped = 0
+    foreach ($msp in $msps) {
+        $log = Join-Path $LogDir "msp-$($msp.BaseName).log"
+        $p = Start-Process msiexec.exe -ArgumentList "/p `"$($msp.FullName)`" /qn /norestart /l* `"$log`"" -Wait -PassThru
+        switch ($p.ExitCode) {
+            0       { $applied++ }
+            3010    { $applied++; Write-Host "  $($msp.Name): applied (reboot required)." -ForegroundColor Yellow }
+            1642    { $skipped++ }   # target product not installed - expected
+            default { throw "ADK patch '$($msp.Name)' FAILED (exit $($p.ExitCode)). See log: $log" }
+        }
+    }
+    Write-Host "  ADK patch complete: $applied applied, $skipped skipped (not installed)." -ForegroundColor Green
+} else {
+    Write-Warning "ADK servicing patch not available (not staged and download failed) - apply KB5101684+ manually for CVE-2026-25166."
+}
 
 # 3. Verify the install actually landed (read KitsRoot10 defensively under StrictMode).
 $kitsRoot = $null

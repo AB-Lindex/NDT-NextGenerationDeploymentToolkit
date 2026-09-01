@@ -386,6 +386,11 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
+# NDT: ADK servicing patch zip is large and downloadable from Microsoft at install
+# time (Applications\ADK\install.ps1) - keep it out of the repo. The bootstrapper
+# exes (adksetup.exe / adkwinpesetup.exe) ARE tracked.
+Applications/ADK/*.zip
+
 # NDT: Drivers/ holds sample driver payloads (a flying start for users). Track the
 # whole tree, overriding the global *.dll and x64/x86 build-output ignores above so
 # no driver file (incl. version/coinstaller DLLs) is silently dropped from commits.
