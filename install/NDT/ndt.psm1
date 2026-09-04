@@ -931,14 +931,37 @@ function Install-NDTMonitor {
     # -- Step 9: Start app pool + site -------------------------------------------
     Write-Host 'Step 9: Starting monitor...' -ForegroundColor Cyan
     if ($PSCmdlet.ShouldProcess($SiteName, 'Start app pool and website')) {
-        # Recycle (never just "start if stopped") so the worker always loads the
-        # current site config. This prevents a stale worker from a previously
-        # deleted site causing "Failed to map the path '/'" on redeploy.
-        if ((Get-WebAppPoolState -Name $AppPoolName).Value -eq 'Started') {
-            Restart-WebAppPool -Name $AppPoolName
-        } else {
-            Start-WebAppPool -Name $AppPoolName
+        # WAS reports app-pool state asynchronously: right after Stop-WebAppPool
+        # (Step 6) the pool can linger in 'Stopping'/'Starting', and a start/restart
+        # issued then fails with 0x80070425 "cannot accept control messages at this
+        # time". Wait for a stable state, then start/recycle with a bounded retry.
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-WebAppPoolState -Name $AppPoolName).Value -in @('Starting', 'Stopping') -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
         }
+
+        $started = $false
+        for ($attempt = 1; $attempt -le 10 -and -not $started; $attempt++) {
+            try {
+                # Recycle (never just "start if stopped") so the worker always loads the
+                # current site config. This prevents a stale worker from a previously
+                # deleted site causing "Failed to map the path '/'" on redeploy.
+                if ((Get-WebAppPoolState -Name $AppPoolName).Value -eq 'Started') {
+                    Restart-WebAppPool -Name $AppPoolName -ErrorAction Stop
+                } else {
+                    Start-WebAppPool -Name $AppPoolName -ErrorAction Stop
+                }
+                $started = $true
+            } catch [System.Runtime.InteropServices.COMException] {
+                # -2147024347 = 0x80070425 (transient WAS state); wait and retry.
+                if ($_.Exception.HResult -eq -2147024347 -and $attempt -lt 10) {
+                    Start-Sleep -Milliseconds 750
+                } else {
+                    throw
+                }
+            }
+        }
+
         if ((Get-WebsiteState -Name $SiteName).Value -ne 'Started') {
             Start-Website -Name $SiteName
         }
