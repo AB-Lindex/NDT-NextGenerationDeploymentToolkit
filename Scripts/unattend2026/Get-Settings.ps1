@@ -118,18 +118,10 @@ foreach ($token in $leftover) {
 # Post-process unattend.xml for special configurations
 # $needsPostProcessing = $false
 
-# Check if DHCP is requested (IPAddress = "DHCP")
-$isDHCP = $false
-if ($machineConfig.IPAddress -eq "DHCP") {
-    $isDHCP = $true
-} else {
-    foreach ($section in $sections.GetEnumerator()) {
-        if ($section.Value.IPAddress -eq "DHCP") {
-            $isDHCP = $true
-            break
-        }
-    }
-}
+# DHCP is used when IPAddress is explicitly "DHCP" or absent entirely (no static IP configured).
+# $effectiveSettings already merges machine config over referenced sections (machine wins).
+$effectiveIP = if ($effectiveSettings.ContainsKey('IPAddress')) { $effectiveSettings['IPAddress'] } else { $null }
+$isDHCP = [string]::IsNullOrWhiteSpace($effectiveIP) -or $effectiveIP -eq "DHCP"
 
 # Check if workgroup join is requested (JoinDomain = "WORKGROUP" or empty)
 $isWorkgroup = $false

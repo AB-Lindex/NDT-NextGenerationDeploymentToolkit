@@ -1,4 +1,15 @@
 {
+  "00:15:5D:02:40:0E": {
+    "Computername": "Win11a",
+    "OS": "WIN11ENT",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentGroups": [
+    ]
+  },
   "00:15:5D:02:40:1F": {
     "Computername": "SQL41",
     "IPAddress": "10.0.3.61/24",
