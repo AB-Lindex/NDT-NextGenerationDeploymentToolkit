@@ -50,6 +50,11 @@ if ($deploySettings) {
         $settings.Deploy['MonitorUrl'] = $deploySettings.MonitorUrl
     }
 
+    # Pass optional MapTimeoutSec through so install2026.ps1 can tune the share-map wait per site.
+    if ($deploySettings.MapTimeoutSec) {
+        $settings.Deploy['MapTimeoutSec'] = $deploySettings.MapTimeoutSec
+    }
+
     # Detect hardware (physical/virtual, vendor, model) and persist for later phases -
     # app installers query this (e.g. VMware Tools) after settings.json exists.
     $hardware = & "Z:\Scripts\unattend2026\Get-Hardware.ps1"

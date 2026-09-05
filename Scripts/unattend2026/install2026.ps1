@@ -103,8 +103,52 @@ if (-not (Test-Path $settingsPath)) {
     exit 1
 }
 $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
-Write-Log "Mapping share: $($settings.Deploy.Share)"
-net use Z: "$($settings.Deploy.Share)" /user:"$($settings.Deploy.Username)" "$($settings.Deploy.Password)" /persistent:no
+
+# Map the deployment share, waiting patiently for the network to come up.
+# Physical NICs can take far longer than a VM to negotiate link + obtain a DHCP
+# lease, so we poll for a usable IPv4 address and then retry the mapping until Z:
+# is genuinely readable. Without this guard a slow NIC makes net use fail silently,
+# Z: never maps, and pwsh -File 'Z:\...\Install-NDT.ps1' aborts with exit code 64
+# before the deployment engine can even start.
+$shareUnc      = $settings.Deploy.Share
+# Total time to keep trying - overridable per-site via Deploy.MapTimeoutSec in settings.json.
+$mapTimeoutSec = if ($settings.Deploy.MapTimeoutSec) { [int]$settings.Deploy.MapTimeoutSec } else { 120 }
+$mapPollSec    = 5                                   # delay between attempts
+$mapProbe      = 'Z:\Control\CustomSettings.json'    # proves the share is really readable
+$deadline      = (Get-Date).AddSeconds($mapTimeoutSec)
+$mapped        = $false
+
+Write-Log "Mapping share: $shareUnc (waiting up to $mapTimeoutSec s for network)"
+while ((Get-Date) -lt $deadline) {
+    # Wait for a real IPv4 address - skip loopback, tunnels and APIPA (169.254.x.x).
+    $ip = Get-NetIPAddress -AddressFamily IPv4 -Type Unicast -ErrorAction SilentlyContinue |
+        Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' -and $_.IPAddress -notlike '169.254.*' } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+    if (-not $ip) {
+        Write-Log 'No usable IPv4 address yet - waiting for NIC/DHCP...' -ForegroundColor Yellow
+        Start-Sleep -Seconds $mapPollSec
+        continue
+    }
+
+    # Drop any stale/partial Z: from a failed prior attempt, then (re)map.
+    net use Z: /delete /yes 2>$null | Out-Null
+    net use Z: "$shareUnc" /user:"$($settings.Deploy.Username)" "$($settings.Deploy.Password)" /persistent:no 2>$null | Out-Null
+
+    if (Test-Path $mapProbe) {
+        Write-Log "Share mapped successfully (IP $ip)" -ForegroundColor Green
+        $mapped = $true
+        break
+    }
+
+    Write-Log "Share not reachable yet (IP $ip) - retrying in $mapPollSec s..." -ForegroundColor Yellow
+    Start-Sleep -Seconds $mapPollSec
+}
+
+if (-not $mapped) {
+    Write-Log "ERROR: Could not map $shareUnc within $mapTimeoutSec s - aborting" -Level ERROR
+    net use Z: /delete /yes 2>$null | Out-Null
+    exit 1
+}
 
 # Ensure PowerShell 7 is installed before invoking Install-NDT.ps1 with pwsh.exe.
 # install2026.ps1 itself runs under powershell.exe (PS5 via RunOnce), so we use
