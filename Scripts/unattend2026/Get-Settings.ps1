@@ -123,20 +123,10 @@ foreach ($token in $leftover) {
 $effectiveIP = if ($effectiveSettings.ContainsKey('IPAddress')) { $effectiveSettings['IPAddress'] } else { $null }
 $isDHCP = [string]::IsNullOrWhiteSpace($effectiveIP) -or $effectiveIP -eq "DHCP"
 
-# Check if workgroup join is requested (JoinDomain = "WORKGROUP" or empty)
-$isWorkgroup = $false
-$joinDomain = ""
-if ($machineConfig.JoinDomain) {
-    $joinDomain = $machineConfig.JoinDomain
-}
-foreach ($section in $sections.GetEnumerator()) {
-    if ($section.Value.JoinDomain) {
-        $joinDomain = $section.Value.JoinDomain
-    }
-}
-if ($joinDomain -eq "WORKGROUP" -or $joinDomain -eq "") {
-    $isWorkgroup = $true
-}
+# Workgroup is used when JoinDomain is explicitly "WORKGROUP" or absent entirely (no domain join).
+# $effectiveSettings already merges machine config over referenced sections (machine wins).
+$joinDomain = if ($effectiveSettings.ContainsKey('JoinDomain')) { $effectiveSettings['JoinDomain'] } else { $null }
+$isWorkgroup = [string]::IsNullOrWhiteSpace($joinDomain) -or $joinDomain -eq "WORKGROUP"
 
 # Load as XML for manipulation
 if ($isDHCP -or $isWorkgroup) {
