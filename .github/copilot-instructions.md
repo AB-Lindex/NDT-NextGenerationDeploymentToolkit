@@ -95,7 +95,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 3. Handle `C:\temp\reboot.flag` — compare flag timestamp to last-boot time to distinguish re-logon from completed reboot. If flag is newer than boot time, exit (reboot still pending); otherwise delete flag and continue.
 4. Re-register `RunOnce\Deploy2026` to survive intermediate reboots.
 5. Remove "Continue Deployment" desktop shortcut from `C:\Users\Public\Desktop` if present.
-6. Map the deploy share using credentials from `C:\temp\settings.json`.
+6. Map the deploy share using credentials from `C:\temp\settings.json`. **Waits for the network first**: polls for a usable IPv4 address (skips loopback/tunnel/APIPA `169.254.*`), then retries `net use Z:` on a loop, confirming success via `Test-Path Z:\Control\CustomSettings.json` (not `net use`'s exit code) rather than assuming the first attempt worked. This handles slow physical NICs (DHCP/PHY negotiation) that a VM never hits; without it a slow NIC left `Z:` unmapped and `pwsh -File 'Z:\...\Install-NDT.ps1'` aborted with **exit code 64** (missing `-File` target) before the engine could run. Timeout = `Deploy.MapTimeoutSec` from `settings.json` (**default 120 s**, forwarded by `Copy-Install.ps1` only when set; absent = 120); on timeout it logs an explicit error and exits 1. Mirrors MDT's `ZTIConnect.wsf` → `ValidateNetworkConnectivity` (`ipconfig /renew` if no lease) + `ValidateConnectionEx` (5-try backoff map loop).
 7. Install PS 7 if absent (probes `%ProgramFiles%\PowerShell\7\pwsh.exe` directly — not `Get-Command`, since PS 5 `$PATH` is frozen at launch).
 8. Launch `Install-NDT.ps1` via `pwsh.exe` (PS 7) as a **child process**; inspect `$LASTEXITCODE`:
    - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag`.
@@ -150,11 +150,12 @@ Shared named sections, referenced by name from MAC blocks. Merged into effective
 "NicAuto":     { "DefaultGateway": "10.0.3.1", "DNSServers": "10.0.3.11" },
 "ADJoinCorp":  { "JoinDomain": "corp.dev", "Domain": "corp", "OU": "ou=Servers,dc=corp,dc=dev", "User": "ADJoin2026", "Password": "..." },
 "RefSettings": { "Sysprep": "Generalize", "Shutdown": "Shutdown", "IPAddress": "DHCP", "JoinDomain": "WORKGROUP", ... },
-"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999" },
+"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999", "MapTimeoutSec": 120 },
 "ADLogon-AD01": { "Username": "Corp\\ADLogon",   "Password": "..." },
 "ADLogon-AD02": { "Username": "Dev\\ADLogon",    "Password": "..." }
 // The key name must match the "Reference" value used in DeploymentGroups.json.
 // MonitorUrl (on the deploy section) is optional — enables NDT Monitor progress reporting; stamped by Install-NDT.
+// MapTimeoutSec (on the deploy section) is optional — max seconds install2026.ps1 waits for network + share map; default 120 when absent.
 ```
 
 ### DeploymentGroups.json
