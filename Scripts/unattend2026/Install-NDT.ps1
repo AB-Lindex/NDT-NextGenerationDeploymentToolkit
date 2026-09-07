@@ -36,6 +36,7 @@ function Send-NDTProgress {
     )
     if (-not $script:MonitorUrl) { return }
     $pct  = if ($Total -gt 0) { [int][Math]::Round(($Completed / $Total) * 100) } else { 0 }
+    $uri  = "$script:MonitorUrl/progress"
     $body = [ordered]@{
         Computername = $env:COMPUTERNAME
         MAC          = $macAddress
@@ -49,12 +50,17 @@ function Send-NDTProgress {
         Percent      = $pct
         Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     } | ConvertTo-Json -Compress
+    Write-Log "Monitor POST -> $uri | Status=$Status Percent=$pct% ($Completed/$Total) Step='$StepId'" -ForegroundColor DarkGray
     try {
-        $null = Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post `
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $null = Invoke-RestMethod -Uri $uri -Method Post `
             -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop `
             -SkipCertificateCheck
+        $sw.Stop()
+        Write-Log "Monitor POST OK <- Status=$Status Percent=$pct% ($([int]$sw.ElapsedMilliseconds) ms)" -ForegroundColor DarkGray
     } catch {
-        # Non-critical -- never block deployment
+        # Non-critical -- never block deployment, but log so lost updates are visible.
+        Write-Log "Monitor POST FAILED <- Status=$Status Percent=$pct% : $($_.Exception.Message)" -Level WARN
     }
 }
 
