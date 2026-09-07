@@ -32,7 +32,8 @@ function Send-NDTProgress {
         [string]$Group       = '',
         [string]$StepId      = '',
         [int]   $Completed   = 0,
-        [int]   $Total       = 0
+        [int]   $Total       = 0,
+        [int]   $MaxAttempts = 3
     )
     if (-not $script:MonitorUrl) { return }
     $pct  = if ($Total -gt 0) { [int][Math]::Round(($Completed / $Total) * 100) } else { 0 }
@@ -51,16 +52,23 @@ function Send-NDTProgress {
         Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     } | ConvertTo-Json -Compress
     Write-Log "Monitor POST -> $uri | Status=$Status Percent=$pct% ($Completed/$Total) Step='$StepId'" -ForegroundColor DarkGray
-    try {
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $null = Invoke-RestMethod -Uri $uri -Method Post `
-            -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop `
-            -SkipCertificateCheck
-        $sw.Stop()
-        Write-Log "Monitor POST OK <- Status=$Status Percent=$pct% ($([int]$sw.ElapsedMilliseconds) ms)" -ForegroundColor DarkGray
-    } catch {
-        # Non-critical -- never block deployment, but log so lost updates are visible.
-        Write-Log "Monitor POST FAILED <- Status=$Status Percent=$pct% : $($_.Exception.Message)" -Level WARN
+    # Retry on failure: the first post after an idle gap often times out while a
+    # cold TCP/TLS connection and the IIS handler warm up; the next attempt reuses
+    # the now-warm connection and succeeds. Best-effort - never blocks deployment.
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        try {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $null = Invoke-RestMethod -Uri $uri -Method Post `
+                -Body $body -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop `
+                -SkipCertificateCheck
+            $sw.Stop()
+            $onAttempt = if ($attempt -gt 1) { " on attempt $attempt/$MaxAttempts" } else { '' }
+            Write-Log "Monitor POST OK <- Status=$Status Percent=$pct% ($([int]$sw.ElapsedMilliseconds) ms)$onAttempt" -ForegroundColor DarkGray
+            return
+        } catch {
+            Write-Log "Monitor POST FAILED (attempt $attempt/$MaxAttempts) <- Status=$Status Percent=$pct% : $($_.Exception.Message)" -Level WARN
+            if ($attempt -lt $MaxAttempts) { Start-Sleep -Milliseconds 500 }
+        }
     }
 }
 
