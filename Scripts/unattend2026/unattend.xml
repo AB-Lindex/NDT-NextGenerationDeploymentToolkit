@@ -70,6 +70,13 @@
                     <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultPassword /t REG_SZ /d "!ADMINPASSWORD!" /f</Path>
                     <WillReboot>Never</WillReboot>
                 </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>5</Order>
+                    <!-- Pin AutoLogon to the LOCAL built-in Administrator; after domain join a blank domain resolves to CORP\Administrator and auto-logon fails. -->
+                    <Description>Bootstrap: set AutoLogon domain to the local machine (not the joined domain)</Description>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon" /v DefaultDomainName /t REG_SZ /d "!COMPUTERNAME!" /f</Path>
+                    <WillReboot>Never</WillReboot>
+                </RunSynchronousCommand>
             </RunSynchronous>
         </component>
         <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
@@ -141,6 +148,7 @@
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
+                <Domain>!COMPUTERNAME!</Domain>
                 <Username>Administrator</Username>
                 <LogonCount>999</LogonCount>
             </AutoLogon>
