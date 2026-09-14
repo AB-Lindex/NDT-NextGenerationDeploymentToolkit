@@ -13,6 +13,7 @@ $runOnceValue = 'Deploy2026'
 $runOnceCmd   = 'powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1'
 $deployCompleteFlagPath = 'C:\temp\deploy-complete.flag'
 $pauseFlagPath           = 'C:\temp\pause.flag'
+$deployWallpaperPath     = 'C:\temp\deploy-wallpaper.bmp'
 
 function Write-Log {
     param(
@@ -27,6 +28,84 @@ function Write-Log {
         'ERROR' { Write-Host $Message -ForegroundColor Red }
         default { Write-Host $Message -ForegroundColor $ForegroundColor }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Deployment UX helpers (best-effort - never block or fail deployment)
+# ---------------------------------------------------------------------------
+# The Phase 2 console is launched by RunOnce under the AutoLogon session. On
+# Windows 11 the shell hides that window, and after every reboot step the bare
+# desktop briefly appears before RunOnce re-launches us - both leave the local
+# technician with no visible sign that deployment is still running. These helpers
+# (1) paint a solid "Deployment in progress" wallpaper on the AutoLogon profile so
+# the bare desktop always reads as deploying, and (2) bring the console forward.
+function Initialize-DeployUI {
+    if (-not ('DeployUI' -as [type])) {
+        Add-Type -ErrorAction SilentlyContinue -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class DeployUI {
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+}
+'@
+    }
+}
+
+function Set-DeploymentWallpaper {
+    param([string]$Path = $deployWallpaperPath)
+    try {
+        Initialize-DeployUI
+        if (-not (Test-Path $Path)) {
+            Add-Type -AssemblyName System.Drawing
+            $bmp  = New-Object System.Drawing.Bitmap -ArgumentList 1920, 1080
+            $g    = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(0, 78, 152))
+            $font = New-Object System.Drawing.Font -ArgumentList 'Segoe UI', 44, ([System.Drawing.FontStyle]::Bold)
+            $sf   = New-Object System.Drawing.StringFormat
+            $sf.Alignment     = [System.Drawing.StringAlignment]::Center
+            $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+            $rect = New-Object System.Drawing.RectangleF -ArgumentList 0, 0, 1920, 1080
+            $text = "Deployment in progress`r`nDo not turn off this computer"
+            $g.DrawString($text, $font, [System.Drawing.Brushes]::White, $rect, $sf)
+            $g.Dispose(); $font.Dispose()
+            $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Bmp)
+            $bmp.Dispose()
+        }
+        # Solid colour behind the wallpaper - renders instantly on the next AutoLogon
+        # before the bitmap loads, so a reboot never flashes a plain default desktop.
+        Set-ItemProperty 'HKCU:\Control Panel\Colors'  -Name Background     -Value '0 78 152' -Force
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallPaper      -Value $Path      -Force
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallpaperStyle -Value '10'       -Force  # stretch
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name TileWallpaper  -Value '0'        -Force
+        [DeployUI]::SystemParametersInfo(0x0014, 0, $Path, 0x03) | Out-Null   # SPI_SETDESKWALLPAPER, update+broadcast
+        Write-Log 'Deployment wallpaper applied'
+    } catch {
+        Write-Log "Could not apply deployment wallpaper: $($_.Exception.Message)" -Level WARN
+    }
+}
+
+function Show-DeploymentConsole {
+    try {
+        Initialize-DeployUI
+        $hwnd = [DeployUI]::GetConsoleWindow()
+        if ($hwnd -ne [IntPtr]::Zero) {
+            [DeployUI]::ShowWindow($hwnd, 9) | Out-Null            # SW_RESTORE
+            [DeployUI]::SetForegroundWindow($hwnd) | Out-Null
+        }
+    } catch { }
+}
+
+function Clear-DeploymentWallpaper {
+    try {
+        Initialize-DeployUI
+        Set-ItemProperty 'HKCU:\Control Panel\Desktop' -Name WallPaper -Value '' -Force
+        [DeployUI]::SystemParametersInfo(0x0014, 0, '', 0x03) | Out-Null
+        Remove-Item $deployWallpaperPath -Force -ErrorAction SilentlyContinue
+        Write-Log 'Deployment wallpaper cleared'
+    } catch { }
 }
 
 try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
@@ -88,6 +167,12 @@ if (Test-Path $rebootFlagPath) {
 # Re-register RunOnce so deployment survives any reboot. Removed on completion.
 Set-ItemProperty -Path $runOnceKey -Name $runOnceValue -Value $runOnceCmd -Force
 Write-Log 'RunOnce\Deploy2026 registered'
+
+# Make deployment progress visible to a local technician: paint the "in progress"
+# wallpaper on the AutoLogon profile (covers the bare-desktop flash after each
+# reboot) and bring the console to the foreground (Windows 11 hides it).
+Set-DeploymentWallpaper
+Show-DeploymentConsole
 
 # If we're resuming from a Pause, the shortcut on the Public Desktop is no longer needed.
 $pauseShortcut = 'C:\Users\Public\Desktop\Continue Deployment.lnk'
@@ -211,6 +296,9 @@ if ($ndtExitCode -eq 3010) {
     Set-ItemProperty   -Path $winlogonKey -Name AutoAdminLogon -Value '0' -Type String -Force
     Remove-ItemProperty -Path $winlogonKey -Name DefaultPassword     -ErrorAction SilentlyContinue
     Remove-ItemProperty -Path $winlogonKey -Name DefaultDomainName   -ErrorAction SilentlyContinue
+
+    # Deployment is finished - remove the "in progress" wallpaper.
+    Clear-DeploymentWallpaper
 
     # Write sentinel so any duplicate invocations in the same logon session exit immediately.
     New-Item -Path $deployCompleteFlagPath -ItemType File -Force | Out-Null
