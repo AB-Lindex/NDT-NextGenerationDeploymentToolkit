@@ -34,7 +34,14 @@ function Write-Log {
     }
 }
 
-try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
+# Get-NetIPAddress (NetTCPIP module) is not available in WinPE PS5.1 - use WMI instead.
+try {
+    $sysIP = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=TRUE' |
+        ForEach-Object { $_.IPAddress } |
+        Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notmatch '^169\.254\.' -and $_ -ne '127.0.0.1' } |
+        Select-Object -First 1
+    if (-not $sysIP) { $sysIP = 'unknown' }
+} catch { $sysIP = 'unknown' }
 Write-Log 'install.ps1 (WinPE) started' -ForegroundColor Cyan
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 Write-Log "Hostname : $env:COMPUTERNAME"

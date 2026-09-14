@@ -156,6 +156,9 @@
                 <HideEULAPage>true</HideEULAPage>
                 <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
                 <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <!-- Skip the Win11 client user-OOBE (CloudExperienceHost); on a domain-joined client it disables our AutoLogon on exit. Harmless on Server. -->
+                <SkipMachineOOBE>true</SkipMachineOOBE>
+                <SkipUserOOBE>true</SkipUserOOBE>
                 <ProtectYourPC>3</ProtectYourPC>
             </OOBE>
             <TimeZone>!TIMEZONE!</TimeZone>
