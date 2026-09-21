@@ -1825,6 +1825,10 @@ function Add-NDTComputer {
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
     .PARAMETER DeploymentGroups
         Ordered array of deployment group names from DeploymentGroups.json.
+    .PARAMETER Unattend
+        Share-relative, backslash-rooted path to an OS-specific unattend.xml template
+        (e.g. \Scripts\unattend2026\unattend-win11.xml). When omitted the default
+        Scripts\unattend2026\unattend.xml is used.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
     .PARAMETER InputObject
@@ -1867,6 +1871,8 @@ function Add-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
+        [string]$Unattend,
+        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -1896,6 +1902,7 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('Unattend'))         { $entry.Unattend        = $Unattend }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
         }
@@ -1927,6 +1934,10 @@ function Set-NDTComputer {
     .PARAMETER Install
         Deployment safeguard: 'no' disables imaging for this machine (WinPE reboots without
         touching the disk); 'yes' deploys normally. Valid values: yes, no.
+    .PARAMETER Unattend
+        Share-relative, backslash-rooted path to an OS-specific unattend.xml template
+        (e.g. \Scripts\unattend2026\unattend-win11.xml). When omitted the default
+        Scripts\unattend2026\unattend.xml is used.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
@@ -1962,6 +1973,8 @@ function Set-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
+        [string]$Unattend,
+        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -1985,6 +1998,10 @@ function Set-NDTComputer {
         }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('Unattend')) {
+            if ($entry.Value.PSObject.Properties['Unattend']) { $entry.Value.Unattend = $Unattend }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'Unattend' -Value $Unattend }
+        }
         if ($PSBoundParameters.ContainsKey('DefaultGateway')) {
             if ($entry.Value.PSObject.Properties['DefaultGateway']) { $entry.Value.DefaultGateway = $DefaultGateway }
             else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'DefaultGateway' -Value $DefaultGateway }
@@ -2440,6 +2457,13 @@ function Test-NDTDeployment {
             $wimAbsPath = Join-Path $LocalPath $wimRelPath.TrimStart('\')
             Write-Check 'WIM file exists on disk' (Test-Path $wimAbsPath) "$wimRelPath  (index $wimIndex)"
         }
+    }
+
+    # -- [5b] Unattend template --------------------------------------------------
+    if ($machine.Unattend) {
+        Write-Host "`n[5b] Unattend template" -ForegroundColor White
+        $unattendAbs = Join-Path $LocalPath ($machine.Unattend).TrimStart('\')
+        Write-Check 'Unattend template exists on disk' (Test-Path $unattendAbs) $machine.Unattend
     }
 
     # -- [6] Deployment groups ---------------------------------------------------

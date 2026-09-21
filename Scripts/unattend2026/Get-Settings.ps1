@@ -6,7 +6,7 @@ param(
 
 $jsonPath = "Z:\Control\CustomSettings.json"
 $sectionsPath = "Z:\Control\Sections.json"
-$templatePath = "Z:\Scripts\unattend2026\unattend.xml"
+$defaultTemplatePath = "Z:\Scripts\unattend2026\unattend.xml"
 $outputPath = "c:\temp\unattend.xml"
 
 # Load JSON content
@@ -20,6 +20,21 @@ $machineConfig = $config.$MACAddress
 if (-not $machineConfig) {
     Write-Error "No configuration found for MAC address: $MACAddress"
     exit 1
+}
+
+# Resolve the unattend template. A machine block may point at an OS-specific
+# template via the 'Unattend' key (share-relative, backslash-rooted, like PostPEScript);
+# otherwise the default template is used.
+if ($machineConfig.Unattend) {
+    $templatePath = "Z:$($machineConfig.Unattend)"
+    if (-not (Test-Path $templatePath)) {
+        Write-Warning "Unattend template '$templatePath' not found - falling back to default."
+        $templatePath = $defaultTemplatePath
+    } else {
+        Write-Host "Using unattend template: $templatePath" -ForegroundColor Cyan
+    }
+} else {
+    $templatePath = $defaultTemplatePath
 }
 
 # Iterate through all sections and load their data
@@ -42,7 +57,7 @@ if ($machineConfig.Sections) {
 # Build merged effective settings (machine config takes precedence over sections)
 $effectiveSettings = @{}
 foreach ($property in $machineConfig.PSObject.Properties) {
-    if ($property.Name -notin @('Sections', 'DeploymentGroups')) {
+    if ($property.Name -notin @('Sections', 'DeploymentGroups', 'Unattend')) {
         $effectiveSettings[$property.Name] = $property.Value
     }
 }
