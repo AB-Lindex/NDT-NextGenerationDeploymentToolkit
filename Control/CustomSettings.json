@@ -193,7 +193,9 @@
     "DefaultGateway": "10.0.1.1",
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
-    "Locale": "Sweden",
+    "Sections": {
+      "Locale": "Sweden"
+    },
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentGroups": [
       "General Settings",
@@ -211,7 +213,9 @@
     "DefaultGateway": "10.0.1.1",
     "DNSServers": "127.0.0.1",
     "JoinDomain": "WORKGROUP",
-    "Locale": "Sweden",
+    "Sections": {
+      "Locale": "Sweden"
+    },
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentGroups": [
       "General Settings",
@@ -252,7 +256,9 @@
     "DefaultGateway": "10.0.1.1",
     "DNSServers": "10.0.1.100",
     "JoinDomain": "WORKGROUP",
-    "Locale": "Sweden",
+    "Sections": {
+      "Locale": "Sweden"
+    },
     "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
     "DeploymentGroups": [
       "General Settings",

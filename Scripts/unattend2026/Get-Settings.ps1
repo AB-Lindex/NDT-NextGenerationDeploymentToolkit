@@ -126,7 +126,12 @@ foreach ($entry in $effectiveSettings.GetEnumerator()) {
 # never leaves a literal !TOKEN! in the answer file. Matches !UPPERCASE_TOKENS!.
 $leftover = [regex]::Matches($unattendContent, '!([A-Z0-9_]+)!') | ForEach-Object { $_.Value } | Select-Object -Unique
 foreach ($token in $leftover) {
-    $unattendContent = $unattendContent -replace [regex]::Escape($token), ''
+    $esc = [regex]::Escape($token)
+    # Drop any element whose entire value was the unresolved placeholder (e.g. <TimeZone>!TIMEZONE!</TimeZone>).
+    # An empty element like <TimeZone></TimeZone> is a hard schema violation that fails the oobeSystem pass.
+    $unattendContent = $unattendContent -replace "<([A-Za-z0-9:_.-]+)(\s[^>]*)?>\s*$esc\s*</\1>", ''
+    # Blank any remaining occurrences (e.g. inside attribute values or reg command strings).
+    $unattendContent = $unattendContent -replace $esc, ''
     Write-Host "Cleared unmatched placeholder $token" -ForegroundColor DarkYellow
 }
 
