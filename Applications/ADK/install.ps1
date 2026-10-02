@@ -1,16 +1,18 @@
 <#
     Install the Windows ADK + WinPE add-on (Deployment Tools + WinPE).
 
-    NOTE: adksetup.exe / adkwinpesetup.exe in this folder are ONLINE bootstrappers
-    (~1.5 MB) that download payload from Microsoft at runtime - internet access is
-    required. This script installs the base ADK FIRST (it provides Deployment Tools,
-    DISM, DandISetEnv, oscdimg and the KitsRoot10 registry value), checks the real
-    exit code of each installer, writes logs, and verifies the result - so a failed
-    ADK download can no longer be silently swallowed while the WinPE add-on succeeds.
+    NOTE: adksetup.exe / adkwinpesetup.exe are ONLINE bootstrappers (~2 MB) that
+    download payload from Microsoft at runtime - internet access is required. They are
+    downloaded fresh from Microsoft fwlinks on every run (not stored in this folder), so
+    the bootstrapper's embedded payload hashes always match what Microsoft serves (a stale
+    bootstrapper fails with 0x80091007). Each download must carry a valid Microsoft
+    Authenticode signature and a 10.1.26100.* version, otherwise the script aborts.
+    The base ADK is installed FIRST (it provides Deployment Tools, DISM, DandISetEnv,
+    oscdimg and the KitsRoot10 registry value), the real exit code of each installer is
+    checked, logs are written, and the result is verified.
 
-    Targets ADK 10.1.26100.9457 (September 2026; replaces 2454, whose online payloads
-    were re-signed and now fail hash verification with 0x80091007). Do not use the
-    26H1 Arm64 kit (10.1.28000.1) - its WinPE will not bind x64 NIC drivers.
+    Do not use the 26H1 Arm64 kit (10.1.28000.1) - its WinPE will not bind x64 NIC drivers;
+    the version pin below exists to stop an fwlink retarget from silently installing it.
     After install it applies any ADK servicing patch staged in this folder as
     Windows_ADK_*Update*.zip (see learn.microsoft.com adk-servicing for the current KB).
 #>
@@ -29,6 +31,29 @@ New-Item -ItemType Directory -Path $LogDir    -Force | Out-Null
 # Recurse in case a future offline layout ships an Installers\ payload folder.
 Copy-Item -Path "$PSScriptRoot\*" -Destination $LocalPath -Recurse -Force
 
+$AdkVersionPattern = '10.1.26100.*'
+
+function Get-AdkBootstrapper {
+    param(
+        [Parameter(Mandatory)][int]$LinkId,
+        [Parameter(Mandatory)][string]$Destination,
+        [Parameter(Mandatory)][string]$Label
+    )
+    $url = "https://go.microsoft.com/fwlink/?linkid=$LinkId"
+    Write-Host "Downloading $Label bootstrapper ($url) ..." -ForegroundColor Cyan
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $url -OutFile $Destination -UseBasicParsing
+    $sig = Get-AuthenticodeSignature $Destination
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        throw "$Label download failed signature check (status $($sig.Status))."
+    }
+    $ver = (Get-Item $Destination).VersionInfo.ProductVersion
+    if ($ver -notlike $AdkVersionPattern) {
+        throw "$Label download is version '$ver', expected $AdkVersionPattern. The fwlink may have been retargeted."
+    }
+    Write-Host "  $Label bootstrapper $ver (signature valid)." -ForegroundColor Green
+}
+
 function Invoke-AdkSetup {
     param(
         [Parameter(Mandatory)][string]$Exe,
@@ -46,6 +71,10 @@ function Invoke-AdkSetup {
         default { throw "$Label FAILED (exit $($p.ExitCode)). See log: $LogFile" }
     }
 }
+
+# fwlink ids track the Windows 11 24H2 / Server 2025 (26100) ADK and WinPE add-on.
+Get-AdkBootstrapper -LinkId 2289980 -Destination "$LocalPath\adksetup.exe"       -Label 'Windows ADK'
+Get-AdkBootstrapper -LinkId 2289981 -Destination "$LocalPath\adkwinpesetup.exe" -Label 'Windows PE add-on'
 
 # 1. Base ADK first - Deployment Tools (DISM, DandISetEnv, oscdimg, KitsRoot10).
 Invoke-AdkSetup -Exe "$LocalPath\adksetup.exe" `
