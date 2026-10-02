@@ -34,6 +34,9 @@ function Write-Log {
     }
 }
 
+# Read by Copy-Install.ps1 so the FinishAction prompt can show total deployment duration.
+$env:NDT_DEPLOY_START = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+
 # Get-NetIPAddress (NetTCPIP module) is not available in WinPE PS5.1 - use WMI instead.
 try {
     $sysIP = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=TRUE' |

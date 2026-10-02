@@ -55,6 +55,15 @@ if ($deploySettings) {
         $settings.Deploy['MapTimeoutSec'] = $deploySettings.MapTimeoutSec
     }
 
+    # FinishAction: MAC block overrides the deploy section; absent = DESKTOP (handled by install2026.ps1).
+    $finishAction = if ($machineConfig.FinishAction) { $machineConfig.FinishAction } else { $deploySettings.FinishAction }
+    if ($finishAction) {
+        $settings['FinishAction'] = ([string]$finishAction).ToUpper()
+    }
+
+    # Local wall-clock, no offset: WinPE and the installed OS both read the RTC as local time.
+    $settings['DeployStart'] = if ($env:NDT_DEPLOY_START) { $env:NDT_DEPLOY_START } else { Get-Date -Format 'yyyy-MM-dd HH:mm:ss' }
+
     # Detect hardware (physical/virtual, vendor, model) and persist for later phases -
     # app installers query this (e.g. VMware Tools) after settings.json exists.
     $hardware = & "Z:\Scripts\unattend2026\Get-Hardware.ps1"

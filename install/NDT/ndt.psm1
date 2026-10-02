@@ -1911,6 +1911,9 @@ function Add-NDTComputer {
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
     .PARAMETER DeploymentGroups
         Ordered array of deployment group names from DeploymentGroups.json.
+    .PARAMETER FinishAction
+        What happens when deployment ends: DESKTOP (default), PROMPT, REBOOT (alias RESTART), SHUTDOWN, LOGOFF.
+        Overrides FinishAction in the deploy section of Sections.json.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
     .PARAMETER InputObject
@@ -1953,6 +1956,9 @@ function Add-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
+        [ValidateSet('DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF')]
+        [string]$FinishAction,
+        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -1982,6 +1988,7 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('FinishAction'))    { $entry.FinishAction    = $FinishAction.ToUpper() }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
         }
@@ -2013,12 +2020,17 @@ function Set-NDTComputer {
     .PARAMETER Install
         Deployment safeguard: 'no' disables imaging for this machine (WinPE reboots without
         touching the disk); 'yes' deploys normally. Valid values: yes, no.
+    .PARAMETER FinishAction
+        What happens when deployment ends: DESKTOP (default), PROMPT, REBOOT (alias RESTART), SHUTDOWN, LOGOFF.
+        Overrides FinishAction in the deploy section of Sections.json.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -DeploymentGroups 'General Settings','SMC','SQL2025'
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -Install no
+    .EXAMPLE
+        Set-NDTComputer -MAC '00:15:5D:02:56:01' -FinishAction PROMPT
     .EXAMPLE
         Set-NDTComputer -MAC '00:15:5D:02:56:01' -Properties @{ SQLServer = 'SQL2026' }
     #>
@@ -2048,6 +2060,9 @@ function Set-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
+        [ValidateSet('DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF')]
+        [string]$FinishAction,
+        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -2071,6 +2086,10 @@ function Set-NDTComputer {
         }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('FinishAction')) {
+            if ($entry.Value.PSObject.Properties['FinishAction']) { $entry.Value.FinishAction = $FinishAction.ToUpper() }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'FinishAction' -Value $FinishAction.ToUpper() }
+        }
         if ($PSBoundParameters.ContainsKey('DefaultGateway')) {
             if ($entry.Value.PSObject.Properties['DefaultGateway']) { $entry.Value.DefaultGateway = $DefaultGateway }
             else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'DefaultGateway' -Value $DefaultGateway }
@@ -2530,6 +2549,19 @@ function Test-NDTDeployment {
     Write-Check 'OS'              ([bool]$machine.OS)               $machine.OS
     Write-Check 'AdminPassword'   ([bool]$machine.AdminPassword)   '(set)'
     Write-Check 'DeploymentGroups' ([bool]$machine.DeploymentGroups) ($machine.DeploymentGroups -join ', ')
+
+    # FinishAction: MAC block overrides the deploy section; absent = DESKTOP.
+    $deploySectionName = if ($machine.Deploy) { $machine.Deploy } else { 'Deploy' }
+    $deploySection     = $sectionsCatalog.PSObject.Properties[$deploySectionName]
+    if ($machine.FinishAction) {
+        $finishAction = [string]$machine.FinishAction; $finishSource = 'machine'
+    } elseif ($deploySection -and $deploySection.Value.FinishAction) {
+        $finishAction = [string]$deploySection.Value.FinishAction; $finishSource = "section '$deploySectionName'"
+    } else {
+        $finishAction = 'DESKTOP'; $finishSource = 'default'
+    }
+    $finishValid = $finishAction.ToUpper() -in 'DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF'
+    Write-Check 'FinishAction' $finishValid "$finishAction ($finishSource)"
 
     # -- [4] Sections ------------------------------------------------------------
     if ($machine.Sections) {

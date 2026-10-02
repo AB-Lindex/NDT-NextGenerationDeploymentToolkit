@@ -108,6 +108,65 @@ function Clear-DeploymentWallpaper {
     } catch { }
 }
 
+# MDT-style FinishAction: DESKTOP (default), PROMPT, REBOOT, SHUTDOWN, LOGOFF.
+# On failure REBOOT/SHUTDOWN/LOGOFF downgrade to PROMPT - RunOnce + AutoLogon are still
+# in place then, so acting on them would loop the failed deployment.
+function Invoke-FinishAction {
+    param(
+        [bool]$Success,
+        [string]$Detail
+    )
+    $action = if ($settings -and $settings.FinishAction) { ([string]$settings.FinishAction).ToUpper() } else { 'DESKTOP' }
+    # MDT treats RESTART as an alias for REBOOT.
+    if ($action -eq 'RESTART') { $action = 'REBOOT' }
+    if ($action -notin 'DESKTOP', 'PROMPT', 'REBOOT', 'SHUTDOWN', 'LOGOFF') {
+        Write-Log "Unknown FinishAction '$action' - using DESKTOP" -Level WARN
+        $action = 'DESKTOP'
+    }
+    if (-not $Success -and $action -in 'REBOOT', 'SHUTDOWN', 'LOGOFF') {
+        Write-Log "Deployment failed - FinishAction $action downgraded to PROMPT" -Level WARN
+        $action = 'PROMPT'
+    }
+    Write-Log "FinishAction: $action"
+
+    switch ($action) {
+        'PROMPT' {
+            $finished = Get-Date
+            $duration = 'unknown'
+            try {
+                $start = [datetime]::ParseExact([string]$settings.DeployStart, 'yyyy-MM-dd HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture)
+                $span  = $finished - $start
+                if ($span.TotalSeconds -ge 0) {
+                    $duration = '{0:00}:{1:00}:{2:00}' -f [math]::Floor($span.TotalHours), $span.Minutes, $span.Seconds
+                }
+            } catch { }
+
+            $status = if ($Success) { 'Deployment completed successfully.' } else { 'Deployment did NOT complete successfully.' }
+            $lines  = @(
+                $status, '',
+                "Computer : $env:COMPUTERNAME",
+                "Finished : $($finished.ToString('yyyy-MM-dd HH:mm:ss'))",
+                "Duration : $duration"
+            )
+            if ($Detail) { $lines += "Details  : $Detail" }
+            $lines += '', "Log: $LogPath"
+
+            $title = if ($Success) { 'NDT - Deployment finished' } else { 'NDT - Deployment failed' }
+            # WScript.Shell.Popup works on both Desktop Experience and Server Core.
+            # 64 = information icon, 48 = warning icon; +4096 = system modal (stays on top).
+            $icon  = if ($Success) { 64 } else { 48 }
+            try {
+                (New-Object -ComObject WScript.Shell).Popup(($lines -join "`r`n"), 0, $title, $icon + 4096) | Out-Null
+            } catch {
+                Write-Log "Could not show finish prompt: $($_.Exception.Message)" -Level WARN
+            }
+        }
+        'REBOOT'   { shutdown.exe /r /t 10 /c "NDT deployment finished" }
+        'SHUTDOWN' { shutdown.exe /s /t 10 /c "NDT deployment finished" }
+        'LOGOFF'   { shutdown.exe /l /f }
+    }
+}
+
 try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Object { $_.InterfaceAlias -notmatch 'Loopback|Tunnel' } | Select-Object -First 1 -ExpandProperty IPAddress) } catch { $sysIP = 'unknown' }
 Write-Log "install2026.ps1 started" -ForegroundColor Cyan
 Write-Log "-----------------------------------" -ForegroundColor Cyan
@@ -232,6 +291,7 @@ while ((Get-Date) -lt $deadline) {
 if (-not $mapped) {
     Write-Log "ERROR: Could not map $shareUnc within $mapTimeoutSec s - aborting" -Level ERROR
     net use Z: /delete /yes 2>$null | Out-Null
+    Invoke-FinishAction -Success $false -Detail "Could not map $shareUnc within $mapTimeoutSec s"
     exit 1
 }
 
@@ -249,6 +309,7 @@ if (-not (Test-Path $pwshExe)) {
     if (-not (Test-Path $pwshExe)) {
         Write-Log 'pwsh.exe still not found after install - aborting' -Level ERROR
         net use Z: /delete /yes
+        Invoke-FinishAction -Success $false -Detail 'PowerShell 7 installation failed'
         exit 1
     }
     Write-Log 'PowerShell 7 installed successfully' -ForegroundColor Green
@@ -309,11 +370,13 @@ if ($ndtExitCode -eq 3010) {
     #Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
 
     Write-Log "Deployment complete - cleanup done at $(Get-Date)" -ForegroundColor Green
+    Invoke-FinishAction -Success $true
 
 } else {
     # Unexpected exit code - unmap share and log, but do not create deploy-complete.flag.
     Write-Log "Unexpected exit code $ndtExitCode from Install-NDT.ps1 - deployment may be incomplete" -Level WARN
     net use Z: /delete /yes
+    Invoke-FinishAction -Success $false -Detail "Install-NDT.ps1 exited with code $ndtExitCode"
     exit $ndtExitCode
 }
 

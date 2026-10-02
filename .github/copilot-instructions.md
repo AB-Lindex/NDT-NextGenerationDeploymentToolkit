@@ -80,7 +80,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 4. Resolve and validate WIM path + index from `Control/OS.json`; abort if WIM file not found.
 5. All pre-flight checks passed → partition disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
 6. Apply OS image to `C:\` with DISM.
-7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password + optional `MonitorUrl`) to `C:\temp`.
+7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password + optional `MonitorUrl` + optional `FinishAction` + `DeployStart` wall-clock timestamp captured at the start of `install.ps1`) to `C:\temp`.
 8. Run `Get-Settings.ps1` → generates `unattend.xml` from template (replaces `!PLACEHOLDER!` tokens); apply to offline image with DISM.
 9. Run BCDBoot (UEFI: `/f UEFI /s S:` ; BIOS: `/f BIOS /s C:`), set BCD timeout 0, then `wpeutil Reboot`.
 
@@ -98,9 +98,10 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 6. Map the deploy share using credentials from `C:\temp\settings.json`. **Waits for the network first**: polls for a usable IPv4 address (skips loopback/tunnel/APIPA `169.254.*`), then retries `net use Z:` on a loop, confirming success via `Test-Path Z:\Control\CustomSettings.json` (not `net use`'s exit code) rather than assuming the first attempt worked. This handles slow physical NICs (DHCP/PHY negotiation) that a VM never hits; without it a slow NIC left `Z:` unmapped and `pwsh -File 'Z:\...\Install-NDT.ps1'` aborted with **exit code 64** (missing `-File` target) before the engine could run. Timeout = `Deploy.MapTimeoutSec` from `settings.json` (**default 120 s**, forwarded by `Copy-Install.ps1` only when set; absent = 120); on timeout it logs an explicit error and exits 1. Mirrors MDT's `ZTIConnect.wsf` → `ValidateNetworkConnectivity` (`ipconfig /renew` if no lease) + `ValidateConnectionEx` (5-try backoff map loop).
 7. Install PS 7 if absent (probes `%ProgramFiles%\PowerShell\7\pwsh.exe` directly — not `Get-Command`, since PS 5 `$PATH` is frozen at launch).
 8. Launch `Install-NDT.ps1` via `pwsh.exe` (PS 7) as a **child process**; inspect `$LASTEXITCODE`:
-   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag`.
+   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag`, then run the **FinishAction** (see Key conventions).
    - `3010` → reboot step; write `reboot.flag`, unmap share, exit 0 (RunOnce remains, resumes after reboot).
    - `3011` → pause step; write `pause.flag`, **remove** RunOnce (so reboot while paused does NOT auto-resume), unmap share.
+   - any other code (and early failures after `settings.json` is read: share map timeout, PS 7 install failure) → FinishAction runs with failure status; RunOnce/AutoLogon stay in place.
 
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
@@ -138,7 +139,8 @@ MAC address blocks only — one per machine:
     "NetworkSettings": "NicAuto",
     "ADSettings": "ADJoinCorp"
   },
-  "DeploymentGroups": ["General Settings", "SMC"]
+  "DeploymentGroups": ["General Settings", "SMC"],
+  "FinishAction": "PROMPT"     // optional: DESKTOP (default) | PROMPT | REBOOT | SHUTDOWN | LOGOFF; overrides the deploy section
 }
 ```
 
@@ -150,12 +152,13 @@ Shared named sections, referenced by name from MAC blocks. Merged into effective
 "NicAuto":     { "DefaultGateway": "10.0.3.1", "DNSServers": "10.0.3.11" },
 "ADJoinCorp":  { "JoinDomain": "corp.dev", "Domain": "corp", "OU": "ou=Servers,dc=corp,dc=dev", "User": "ADJoin2026", "Password": "..." },
 "RefSettings": { "Sysprep": "Generalize", "Shutdown": "Shutdown", "IPAddress": "DHCP", "JoinDomain": "WORKGROUP", ... },
-"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999", "MapTimeoutSec": 120 },
+"Deploy":       { "Share": "\\\\dc01.corp.dev\\Deploy2026", "Username": "Corp\\Deploy2026", "Password": "...", "MonitorUrl": "http://ndt01.corp.dev:9999", "MapTimeoutSec": 120, "FinishAction": "DESKTOP" },
 "ADLogon-AD01": { "Username": "Corp\\ADLogon",   "Password": "..." },
 "ADLogon-AD02": { "Username": "Dev\\ADLogon",    "Password": "..." }
 // The key name must match the "Reference" value used in DeploymentGroups.json.
 // MonitorUrl (on the deploy section) is optional — enables NDT Monitor progress reporting; stamped by Install-NDT.
 // MapTimeoutSec (on the deploy section) is optional — max seconds install2026.ps1 waits for network + share map; default 120 when absent.
+// FinishAction (on the deploy section) is optional — site default end-of-deployment action; a MAC block's FinishAction overrides it.
 ```
 
 ### DeploymentGroups.json
@@ -241,5 +244,6 @@ Also exported by the module (see `ndt.psd1`):
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
 - **NDT Monitor** — IIS web service (`install/NDTMonitor`) providing centralized deployment progress (MDT-monitoring replacement). Endpoints: `POST /progress` (receive update), `GET /progress` (all machines as JSON array), `GET /progress?mac=..` (single machine), `GET /` (dashboard). Data lives in `Logs\progress\`: `<MAC>.json` (latest state) and `audit-<date>.jsonl` (daily-rolling append-only history, retry-on-lock, retained indefinitely). Reporting is best-effort and never blocks deployment; no credentials are stored in progress data. Uses JSON only (`JavaScriptSerializer`) — **not** XML — so it is not exposed to the MDT-monitor XXE vulnerability.
 - **`Install:NO`** in a MAC block disables deployment for that machine (reboot, no disk wipe). This is distinct from `Deploy` (a section-name reference); the reserved values `yes`/`no` are never treated as section names by `Copy-Install.ps1`.
+- **`FinishAction`** (MDT equivalent) - what `install2026.ps1` does when deployment ends: `DESKTOP` (default, leave the desktop as-is), `PROMPT` (system-modal `WScript.Shell` popup - works on Desktop Experience and Server Core - showing computer name, finished timestamp, duration since `DeployStart`, and on failure the reason), `REBOOT` / `SHUTDOWN` (`shutdown.exe /r|/s /t 10`; `RESTART` is accepted as an alias for `REBOOT`, as in MDT), `LOGOFF` (`shutdown.exe /l /f`). Resolved by `Copy-Install.ps1` (MAC block overrides the deploy section) into `settings.json`. Runs on success **and** on failure (like MDT), but on failure `REBOOT`/`SHUTDOWN`/`LOGOFF` are downgraded to `PROMPT` because RunOnce/AutoLogon are still in place and would loop the failed deployment. Unknown values fall back to `DESKTOP`. CRUD via `-FinishAction` on `Add-NDTComputer`/`Set-NDTComputer`; validated by `Test-NDTDeployment`.
 - **`Unattend` (optional, OS-level)** — an `OS.json` entry may point at an OS-specific unattend template via its `Unattend` key (share-relative, backslash-rooted, e.g. `\Scripts\unattend2026\unattend-win11.xml`). `Get-Settings.ps1` resolves it from the machine's `OS` key as `Z:$($osEntry.Unattend)`; absent or missing file falls back to the default `Scripts\unattend2026\unattend.xml`. The override is OS-bound (every machine of that OS gets the same answer file) and is CRUD-managed via `-Unattend` on `Add-NDTOs`/`Set-NDTOs` (and validated by `Test-NDTDeployment`).
   - **DECISION (2026-10):** the unattend override lives at the **OS tier** (`OS.json`), not per-machine, since the differences are OS-bound. The single default `unattend.xml` remains the canonical source of truth; small deltas between Server 2022/2025/Win11 stay expressed through placeholders + conditional post-processing (DHCP/workgroup) rather than duplicated files, to avoid drift. A dedicated file is justified only when an OS needs a structurally different answer file (Win11 Home/Pro OOBE / Microsoft-account bypass / TPM+SecureBoot bypass — note Win11 **Enterprise** needs none of these and runs on the shared template). Originally built per-machine (2026-09); relocated to the OS tier (2026-10) once Win11 Enterprise confirmed no machine-specific delta was needed.
