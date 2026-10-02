@@ -6,6 +6,7 @@ param(
 
 $jsonPath = "Z:\Control\CustomSettings.json"
 $sectionsPath = "Z:\Control\Sections.json"
+$osPath = "Z:\Control\OS.json"
 $defaultTemplatePath = "Z:\Scripts\unattend2026\unattend.xml"
 $outputPath = "c:\temp\unattend.xml"
 
@@ -22,19 +23,23 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# Resolve the unattend template. A machine block may point at an OS-specific
-# template via the 'Unattend' key (share-relative, backslash-rooted, like PostPEScript);
-# otherwise the default template is used.
-if ($machineConfig.Unattend) {
-    $templatePath = "Z:$($machineConfig.Unattend)"
-    if (-not (Test-Path $templatePath)) {
-        Write-Warning "Unattend template '$templatePath' not found - falling back to default."
-        $templatePath = $defaultTemplatePath
-    } else {
-        Write-Host "Using unattend template: $templatePath" -ForegroundColor Cyan
+# Resolve the unattend template. The machine's OS entry in OS.json may point at an
+# OS-specific template via its 'Unattend' key (share-relative, backslash-rooted, like
+# PostPEScript); otherwise the default template is used. The override is OS-bound, not
+# per-machine, so every machine of that OS gets the same answer file automatically.
+$templatePath = $defaultTemplatePath
+if ($machineConfig.OS) {
+    $osCatalog = Get-Content -Path $osPath -Raw | ConvertFrom-Json
+    $osEntry = $osCatalog.$($machineConfig.OS)
+    if ($osEntry -and $osEntry.Unattend) {
+        $candidatePath = "Z:$($osEntry.Unattend)"
+        if (-not (Test-Path $candidatePath)) {
+            Write-Warning "Unattend template '$candidatePath' not found - falling back to default."
+        } else {
+            $templatePath = $candidatePath
+            Write-Host "Using unattend template: $templatePath" -ForegroundColor Cyan
+        }
     }
-} else {
-    $templatePath = $defaultTemplatePath
 }
 
 # Iterate through all sections and load their data
@@ -57,7 +62,7 @@ if ($machineConfig.Sections) {
 # Build merged effective settings (machine config takes precedence over sections)
 $effectiveSettings = @{}
 foreach ($property in $machineConfig.PSObject.Properties) {
-    if ($property.Name -notin @('Sections', 'DeploymentGroups', 'Unattend')) {
+    if ($property.Name -notin @('Sections', 'DeploymentGroups')) {
         $effectiveSettings[$property.Name] = $property.Value
     }
 }

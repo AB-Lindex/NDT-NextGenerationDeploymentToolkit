@@ -19,5 +19,12 @@
         "Index": 4},
     "WIN2025DCCSQL": {
         "Path": "Operating systems\\ref-w2025dccsql\\w2025dccsql.wim",
-        "Index": 1}
+        "Index": 1},
+    "WIN11ENT": {
+        "Path": "Operating systems\\Ref-w11x64Ent\\w11x64Ent.wim",
+        "Index": 1},
+    "EXAMPLE-WIN11PRO": {
+        "Path": "Operating Systems\\win11pro\\install.wim",
+        "Index": 1,
+        "Unattend": "\\Scripts\\unattend2026\\unattend-win11.xml"}
 }

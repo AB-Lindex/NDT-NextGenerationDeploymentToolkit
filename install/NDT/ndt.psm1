@@ -1825,10 +1825,6 @@ function Add-NDTComputer {
         Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
     .PARAMETER DeploymentGroups
         Ordered array of deployment group names from DeploymentGroups.json.
-    .PARAMETER Unattend
-        Share-relative, backslash-rooted path to an OS-specific unattend.xml template
-        (e.g. \Scripts\unattend2026\unattend-win11.xml). When omitted the default
-        Scripts\unattend2026\unattend.xml is used.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
     .PARAMETER InputObject
@@ -1871,8 +1867,6 @@ function Add-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
-        [string]$Unattend,
-        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -1902,7 +1896,6 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('LocalAdmin'))      { $entry.AdminPassword   = $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
-        if ($PSBoundParameters.ContainsKey('Unattend'))         { $entry.Unattend        = $Unattend }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
         }
@@ -1934,10 +1927,6 @@ function Set-NDTComputer {
     .PARAMETER Install
         Deployment safeguard: 'no' disables imaging for this machine (WinPE reboots without
         touching the disk); 'yes' deploys normally. Valid values: yes, no.
-    .PARAMETER Unattend
-        Share-relative, backslash-rooted path to an OS-specific unattend.xml template
-        (e.g. \Scripts\unattend2026\unattend-win11.xml). When omitted the default
-        Scripts\unattend2026\unattend.xml is used.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to set or add.
     .EXAMPLE
@@ -1973,8 +1962,6 @@ function Set-NDTComputer {
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
-        [string]$Unattend,
-        [Parameter()]
         [hashtable]$Properties
     )
 
@@ -1998,10 +1985,6 @@ function Set-NDTComputer {
         }
         if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
-        if ($PSBoundParameters.ContainsKey('Unattend')) {
-            if ($entry.Value.PSObject.Properties['Unattend']) { $entry.Value.Unattend = $Unattend }
-            else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'Unattend' -Value $Unattend }
-        }
         if ($PSBoundParameters.ContainsKey('DefaultGateway')) {
             if ($entry.Value.PSObject.Properties['DefaultGateway']) { $entry.Value.DefaultGateway = $DefaultGateway }
             else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'DefaultGateway' -Value $DefaultGateway }
@@ -2095,9 +2078,10 @@ function Get-NDTOs {
 
     $entries = $catalog.PSObject.Properties | ForEach-Object {
         [PSCustomObject]@{
-            Key   = $_.Name
-            Path  = $_.Value.Path
-            Index = $_.Value.Index
+            Key      = $_.Name
+            Path     = $_.Value.Path
+            Index    = $_.Value.Index
+            Unattend = $_.Value.Unattend
         }
     }
 
@@ -2118,8 +2102,15 @@ function Add-NDTOs {
         Share-relative path to the WIM file (backslash-rooted).
     .PARAMETER Index
         WIM image index to apply.
+    .PARAMETER Unattend
+        Optional share-relative, backslash-rooted path to an OS-specific unattend.xml
+        template (e.g. \Scripts\unattend2026\unattend-win11.xml). When omitted, every
+        machine using this OS gets the default Scripts\unattend2026\unattend.xml.
     .EXAMPLE
         Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\ref-w2025dcg\w2025dcg.wim' -Index 1
+    .EXAMPLE
+        Add-NDTOs -Key WIN11ENT -Path 'Operating Systems\win11\install.wim' -Index 1 `
+            -Unattend '\Scripts\unattend2026\unattend-win11.xml'
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -2130,7 +2121,9 @@ function Add-NDTOs {
         [Parameter(Mandatory)]
         [string]$Path,
         [Parameter(Mandatory)]
-        [int]$Index
+        [int]$Index,
+        [Parameter()]
+        [string]$Unattend
     )
 
     $osPath = Join-Path $LocalPath 'Control\OS.json'
@@ -2143,7 +2136,9 @@ function Add-NDTOs {
     }
 
     if ($PSCmdlet.ShouldProcess($Key, 'Add OS entry')) {
-        $catalog | Add-Member -MemberType NoteProperty -Name $Key -Value ([PSCustomObject]@{ Path = $Path; Index = $Index })
+        $value = [ordered]@{ Path = $Path; Index = $Index }
+        if ($PSBoundParameters.ContainsKey('Unattend')) { $value.Unattend = $Unattend }
+        $catalog | Add-Member -MemberType NoteProperty -Name $Key -Value ([PSCustomObject]$value)
         $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Added OS '$Key'."
         Get-NDTOs -LocalPath $LocalPath -Key $Key
@@ -2163,10 +2158,15 @@ function Set-NDTOs {
         New share-relative WIM path.
     .PARAMETER Index
         New WIM image index.
+    .PARAMETER Unattend
+        Share-relative, backslash-rooted path to an OS-specific unattend.xml template.
+        Pass an empty string to clear it and revert this OS to the default template.
     .EXAMPLE
         Set-NDTOs -Key WIN2025DCG -Index 2
     .EXAMPLE
         Get-NDTOs -Key WIN2025DCG | Set-NDTOs -Path 'Operating Systems\new\install.wim' -Index 1
+    .EXAMPLE
+        Set-NDTOs -Key WIN11ENT -Unattend '\Scripts\unattend2026\unattend-win11.xml'
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param (
@@ -2177,7 +2177,9 @@ function Set-NDTOs {
         [Parameter()]
         [string]$Path,
         [Parameter()]
-        [int]$Index
+        [int]$Index,
+        [Parameter()]
+        [string]$Unattend
     )
 
     $osPath = Join-Path $LocalPath 'Control\OS.json'
@@ -2191,6 +2193,15 @@ function Set-NDTOs {
     if ($PSCmdlet.ShouldProcess($Key, 'Update OS entry')) {
         if ($PSBoundParameters.ContainsKey('Path'))  { $entry.Value.Path  = $Path }
         if ($PSBoundParameters.ContainsKey('Index')) { $entry.Value.Index = $Index }
+        if ($PSBoundParameters.ContainsKey('Unattend')) {
+            if ([string]::IsNullOrEmpty($Unattend)) {
+                if ($entry.Value.PSObject.Properties['Unattend']) { $entry.Value.PSObject.Properties.Remove('Unattend') }
+            } elseif ($entry.Value.PSObject.Properties['Unattend']) {
+                $entry.Value.Unattend = $Unattend
+            } else {
+                $entry.Value | Add-Member -MemberType NoteProperty -Name 'Unattend' -Value $Unattend
+            }
+        }
         $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Updated OS '$Key'."
         Get-NDTOs -LocalPath $LocalPath -Key $Key
@@ -2456,14 +2467,13 @@ function Test-NDTDeployment {
             $wimIndex   = $osEntry.Value.Index
             $wimAbsPath = Join-Path $LocalPath $wimRelPath.TrimStart('\')
             Write-Check 'WIM file exists on disk' (Test-Path $wimAbsPath) "$wimRelPath  (index $wimIndex)"
-        }
-    }
 
-    # -- [5b] Unattend template --------------------------------------------------
-    if ($machine.Unattend) {
-        Write-Host "`n[5b] Unattend template" -ForegroundColor White
-        $unattendAbs = Join-Path $LocalPath ($machine.Unattend).TrimStart('\')
-        Write-Check 'Unattend template exists on disk' (Test-Path $unattendAbs) $machine.Unattend
+            # OS-specific unattend template (optional; absent = default template).
+            if ($osEntry.Value.Unattend) {
+                $unattendAbs = Join-Path $LocalPath ($osEntry.Value.Unattend).TrimStart('\')
+                Write-Check 'Unattend template exists on disk' (Test-Path $unattendAbs) $osEntry.Value.Unattend
+            }
+        }
     }
 
     # -- [6] Deployment groups ---------------------------------------------------

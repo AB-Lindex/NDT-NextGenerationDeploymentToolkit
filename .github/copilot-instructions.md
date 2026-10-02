@@ -45,7 +45,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── unattend.xml               ← unattend template with !PLACEHOLDER! tokens
 │   ├── Get-MACAddress.ps1
 │   ├── Get-OS.ps1
-│   ├── Get-Settings.ps1           ← fills unattend.xml from CustomSettings.json
+│   ├── Get-Settings.ps1           ← fills unattend.xml from CustomSettings.json (template chosen per OS via OS.json)
 │   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
 │   ├── test.ps1                   ← standalone test: runs Copy-Install + Get-Settings
 │   ├── wds/
@@ -131,7 +131,6 @@ MAC address blocks only — one per machine:
   "Computername": "srv02",
   "IPAddress": "10.0.3.22/24", // omit or "DHCP" for DHCP
   "AdminPassword": "...",
-  "Unattend": "\\Scripts\\unattend2026\\unattend-win11.xml", // optional OS-specific unattend template (default: unattend.xml)
   "SQLServer": "SQL2025",       // arbitrary extra keys passed as script parameters
   "AlwaysOn": "AO2025",
   "Sections": {
@@ -187,7 +186,10 @@ Action definitions only — what to run (three forms):
 
 ```jsonc
 "WIN2025DC":  { "Path": "Operating Systems\\VL Server 2025 2509\\sources\\install.wim", "Index": 3 },
-"WIN2025DCG": { "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim",               "Index": 1 }
+"WIN2025DCG": { "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim",               "Index": 1 },
+"WIN11ENT":   { "Path": "Operating Systems\\win11\\install.wim", "Index": 1, "Unattend": "\\Scripts\\unattend2026\\unattend-win11.xml" }
+// Unattend (optional) — share-relative, backslash-rooted path to an OS-specific unattend template;
+// absent or missing file falls back to the default Scripts\unattend2026\unattend.xml.
 ```
 
 ---
@@ -239,5 +241,5 @@ Also exported by the module (see `ndt.psd1`):
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
 - **NDT Monitor** — IIS web service (`install/NDTMonitor`) providing centralized deployment progress (MDT-monitoring replacement). Endpoints: `POST /progress` (receive update), `GET /progress` (all machines as JSON array), `GET /progress?mac=..` (single machine), `GET /` (dashboard). Data lives in `Logs\progress\`: `<MAC>.json` (latest state) and `audit-<date>.jsonl` (daily-rolling append-only history, retry-on-lock, retained indefinitely). Reporting is best-effort and never blocks deployment; no credentials are stored in progress data. Uses JSON only (`JavaScriptSerializer`) — **not** XML — so it is not exposed to the MDT-monitor XXE vulnerability.
 - **`Install:NO`** in a MAC block disables deployment for that machine (reboot, no disk wipe). This is distinct from `Deploy` (a section-name reference); the reserved values `yes`/`no` are never treated as section names by `Copy-Install.ps1`.
-- **`Unattend` (optional, per-machine)** — a MAC block may point at an OS-specific unattend template via the `Unattend` key (share-relative, backslash-rooted, e.g. `\Scripts\unattend2026\unattend-win11.xml`, same convention as `PostPEScript`). `Get-Settings.ps1` resolves it as `Z:$($machineConfig.Unattend)`; absent or missing file falls back to the default `Scripts\unattend2026\unattend.xml`. The key is excluded from `!PLACEHOLDER!` substitution and is CRUD-managed via `-Unattend` on `Add-NDTComputer`/`Set-NDTComputer` (and validated by `Test-NDTDeployment`).
-  - **DECISION (2026-09, revisit):** the per-machine `Unattend` key exists as an opt-in escape hatch only. The single default `unattend.xml` remains the canonical source of truth; small deltas between Server 2022/2025/Win11 stay expressed through placeholders + conditional post-processing (DHCP/workgroup) rather than duplicated files, to avoid drift. A dedicated file is justified when an OS needs a structurally different answer file (Win11 OOBE / Microsoft-account bypass / TPM+SecureBoot bypass is the likely first real case). An **OS-level** default (in `OS.json`) was considered — since the differences are OS-bound — but deferred pending a closer look at the Win11 editions; keep it per-machine for now.
+- **`Unattend` (optional, OS-level)** — an `OS.json` entry may point at an OS-specific unattend template via its `Unattend` key (share-relative, backslash-rooted, e.g. `\Scripts\unattend2026\unattend-win11.xml`). `Get-Settings.ps1` resolves it from the machine's `OS` key as `Z:$($osEntry.Unattend)`; absent or missing file falls back to the default `Scripts\unattend2026\unattend.xml`. The override is OS-bound (every machine of that OS gets the same answer file) and is CRUD-managed via `-Unattend` on `Add-NDTOs`/`Set-NDTOs` (and validated by `Test-NDTDeployment`).
+  - **DECISION (2026-10):** the unattend override lives at the **OS tier** (`OS.json`), not per-machine, since the differences are OS-bound. The single default `unattend.xml` remains the canonical source of truth; small deltas between Server 2022/2025/Win11 stay expressed through placeholders + conditional post-processing (DHCP/workgroup) rather than duplicated files, to avoid drift. A dedicated file is justified only when an OS needs a structurally different answer file (Win11 Home/Pro OOBE / Microsoft-account bypass / TPM+SecureBoot bypass — note Win11 **Enterprise** needs none of these and runs on the shared template). Originally built per-machine (2026-09); relocated to the OS tier (2026-10) once Win11 Enterprise confirmed no machine-specific delta was needed.
