@@ -9,6 +9,9 @@ Operating Systems/*
 Scratch/
 Scripts/MDT Scripts/
 
+# NDT version state file (stamped on the live share by Install-NDT / Update-NDT)
+/version.json
+
 # Keep folder placeholders even when parent folder is ignored
 !Operating Systems/.gitkeep
 !Operating Systems/*/

@@ -21,6 +21,43 @@ function Remove-NDTBootstrapArtefact {
     }
 }
 
+function Get-NDTRepoVersion {
+    # Private helper (not exported). Resolves the "repo version" = the latest commit on
+    # the branch referenced by the archive ZIP URL. The project commits a timestamp as the
+    # commit message (yy-MM-dd HH:mm:ss), so the commit subject is a readable, monotonically
+    # increasing version string. Returns Version (commit subject), Commit (short SHA) and
+    # Date (committer date); returns $null if it cannot be resolved (e.g. offline).
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$RepoZipUrl
+    )
+
+    # Parse owner/repo/branch from a GitHub archive URL:
+    #   https://github.com/<owner>/<repo>/archive/refs/heads/<branch>.zip
+    if ($RepoZipUrl -notmatch 'github\.com/([^/]+)/([^/]+)/archive/refs/heads/([^/.]+)\.zip') {
+        Write-Verbose "  Could not parse owner/repo/branch from '$RepoZipUrl' - repo version unavailable."
+        return $null
+    }
+    $owner  = $Matches[1]
+    $repo   = $Matches[2]
+    $branch = $Matches[3]
+
+    $apiUrl = "https://api.github.com/repos/$owner/$repo/commits/$branch"
+    try {
+        $commit = Invoke-RestMethod -Uri $apiUrl -Headers @{ 'User-Agent' = 'NDT' } -TimeoutSec 15 -ErrorAction Stop
+    } catch {
+        Write-Verbose "  Could not query GitHub for repo version: $_"
+        return $null
+    }
+
+    [PSCustomObject]@{
+        Version = ($commit.commit.message -split "`n")[0].Trim()
+        Commit  = $commit.sha.Substring(0, 7)
+        Date    = $commit.commit.committer.date
+    }
+}
+
 function Install-NDT {
     <#
     .SYNOPSIS
@@ -114,6 +151,11 @@ function Install-NDT {
         if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
         Write-Verbose "  Repository root: $repoRoot"
 
+        # Resolve the repo version being installed (latest commit on the branch).
+        $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
+        $newVersion = if ($repoInfo) { $repoInfo.Version } else { 'unknown' }
+        $newCommit  = if ($repoInfo) { $repoInfo.Commit }  else { $null }
+
         if ($PSCmdlet.ShouldProcess($LocalPath, 'Copy repository content to LocalPath')) {
             if (-not (Test-Path $LocalPath)) { New-Item -ItemType Directory -Path $LocalPath -Force | Out-Null }
             Copy-Item -Path (Join-Path $repoRoot '*') -Destination $LocalPath -Recurse -Force
@@ -146,6 +188,17 @@ function Install-NDT {
                     Write-Verbose "  Created mandatory folder: $folder"
                 }
             }
+
+            # Stamp version.json at the share root with the installed version.
+            $versionFile = Join-Path $LocalPath 'version.json'
+            $versionData = [ordered]@{
+                Version = $newVersion
+                Commit  = $newCommit
+                Updated = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
+                Source  = $RepoZipUrl
+            }
+            $versionData | ConvertTo-Json | Set-Content -Path $versionFile -Encoding UTF8
+            Write-Verbose "  version.json stamped: $newVersion"
         }
     } finally {
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
@@ -252,6 +305,7 @@ function Install-NDT {
 
     Write-Host "NDT deployment share installed successfully." -ForegroundColor Green
     Write-Host "  Local path : $LocalPath"
+    Write-Host "  Version    : $newVersion"
     Write-Host "  Share      : \\$(hostname)\$ShareName"
     Write-Host "  UNC (ref)  : $ShareUNC"
     Write-Host "  Deploy user: $DeployUsername"
@@ -385,6 +439,20 @@ function Update-NDT {
     $preserveItems = @('Control') + ($Preserve | Where-Object { $_ })
     #endregion
 
+    #region -- Read current version (version.json in share root) -----------------
+    # version.json records the repo ModuleVersion this share was last updated to.
+    $versionFile    = Join-Path $LocalPath 'version.json'
+    $currentVersion = 'unknown'
+    if (Test-Path $versionFile) {
+        try {
+            $vj = Get-Content $versionFile -Raw | ConvertFrom-Json
+            if ($vj.Version) { $currentVersion = $vj.Version }
+        } catch {
+            Write-Verbose "  Could not read existing version.json: $_"
+        }
+    }
+    #endregion
+
     #region -- Backup ------------------------------------------------------------
     if (-not $NoBackup) {
         if (-not $BackupPath) {
@@ -424,6 +492,13 @@ function Update-NDT {
         $repoRoot = Get-ChildItem -Path $tempDir -Directory | Select-Object -First 1 -ExpandProperty FullName
         if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
         Write-Verbose "  Repository root: $repoRoot"
+
+        # Resolve the incoming repo version (latest commit on the branch; the project
+        # commits a timestamp as the commit message, so it is readable and increasing).
+        $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
+        $newVersion = if ($repoInfo) { $repoInfo.Version } else { 'unknown' }
+        $newCommit  = if ($repoInfo) { $repoInfo.Commit }  else { $null }
+        Write-Host "NDT version: $currentVersion -> $newVersion" -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($LocalPath, 'Apply upgrade (refresh code, preserve config)')) {
             # Artefacts that belong only in the source repo and must not land on a
@@ -478,6 +553,16 @@ function Update-NDT {
                 }
 
             Write-Host 'Code refreshed (Control configuration preserved).' -ForegroundColor Green
+
+            # Stamp version.json with the version we just applied.
+            $versionData = [ordered]@{
+                Version = $newVersion
+                Commit  = $newCommit
+                Updated = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss')
+                Source  = $RepoZipUrl
+            }
+            $versionData | ConvertTo-Json | Set-Content -Path $versionFile -Encoding UTF8
+            Write-Host "  version.json stamped: $newVersion" -ForegroundColor Green
         }
     } finally {
         if (Test-Path $tempZip) { Remove-Item $tempZip -Force -ErrorAction SilentlyContinue }
@@ -506,11 +591,12 @@ function Update-NDT {
 
     Write-Host "`nNDT upgrade complete." -ForegroundColor Green
     Write-Host "  Local path : $LocalPath"
+    Write-Host "  Version    : $currentVersion -> $newVersion"
     if (-not $NoBackup) { Write-Host "  Backup     : $BackupPath" }
     Write-Host ''
     Write-Host 'Post-upgrade notes:' -ForegroundColor Cyan
     Write-Host '  * The NDT module itself updates from PSGallery, not the share:' -ForegroundColor White
-    Write-Host '      Update-Module NDT' -ForegroundColor Gray
+    Write-Host '      Install-Module NDT -Force -Scope AllUsers' -ForegroundColor Gray
     Write-Host '  * If WinPE scripts changed, rebuild the boot image:' -ForegroundColor White
     Write-Host '      New-NDTPEImage' -ForegroundColor Gray
     if (-not $UpdateMonitor) {
