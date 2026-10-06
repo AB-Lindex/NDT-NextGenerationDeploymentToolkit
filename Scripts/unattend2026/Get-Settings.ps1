@@ -43,7 +43,8 @@ if ($machineConfig.OS) {
 }
 
 # Iterate through all sections and load their data
-$sections = @{}
+# Ordered so the first section in JSON order wins on key overlap, matching Install-NDT.ps1.
+$sections = [ordered]@{}
 if ($machineConfig.Sections) {
     foreach ($sectionProperty in $machineConfig.Sections.PSObject.Properties) {
         $sectionName = $sectionProperty.Name
