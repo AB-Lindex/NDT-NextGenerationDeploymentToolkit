@@ -41,6 +41,7 @@
     "Password": ""
   },
   "Deploy": {
+    "System": true,
     "Share": "\\\\ndt01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",
     "Password": "P@ssw0rd2026",

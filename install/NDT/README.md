@@ -55,6 +55,8 @@ Test-NDTDeployment -MAC '00:15:5D:02:56:05'
 | `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs` | Manage the OS catalog in `OS.json`. |
 | `Move-NDTReferenceImage` | Move captured reference WIMs from `Reference\` into `Operating Systems\`. |
 | `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration. |
+| `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). Add only. |
+| `Get-NDTCatalog` / `Test-NDTComputerEntry` | Read-only helpers for front ends: available OS/sections/groups, and validation + key-overlap check of a proposed entry. |
 
 ## Boot media
 

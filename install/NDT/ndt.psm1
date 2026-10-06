@@ -1887,6 +1887,14 @@ function Get-NDTComputer {
     $entries
 }
 
+function ConvertTo-NDTMac {
+    # Normalises to upper-case colon-separated form; throws on anything that is not 6 hex octets.
+    param([Parameter(Mandatory)][string]$MAC)
+    $hex = ($MAC.Trim() -replace '[:\-\.]', '').ToUpper()
+    if ($hex -notmatch '^[0-9A-F]{12}$') { throw "Invalid MAC address '$MAC'. Expected 6 hex octets, e.g. 00:15:5D:02:56:01." }
+    (($hex -split '(.{2})' | Where-Object { $_ }) -join ':')
+}
+
 function Add-NDTComputer {
     <#
     .SYNOPSIS
@@ -1908,12 +1916,15 @@ function Add-NDTComputer {
     .PARAMETER LocalAdmin
         Local administrator password (stored as plain text in CustomSettings.json).
     .PARAMETER Sections
-        Hashtable of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }
+        Dictionary of section references, e.g. @{ Locale = 'Sweden'; ADSettings = 'ADJoinCorp' }.
+        Pass [ordered]@{} to control precedence (first section wins on overlapping keys).
     .PARAMETER DeploymentGroups
         Ordered array of deployment group names from DeploymentGroups.json.
     .PARAMETER FinishAction
         What happens when deployment ends: DESKTOP (default), PROMPT, REBOOT (alias RESTART), SHUTDOWN, LOGOFF.
         Overrides FinishAction in the deploy section of Sections.json.
+    .PARAMETER Install
+        YES or NO. NO writes "Install": "NO" so WinPE reboots without touching the disk.
     .PARAMETER Properties
         Hashtable of arbitrary extra key-value pairs to include in the entry.
     .PARAMETER InputObject
@@ -1952,12 +1963,15 @@ function Add-NDTComputer {
         [Parameter()]
         [string]$LocalAdmin,
         [Parameter()]
-        [hashtable]$Sections,
+        [System.Collections.IDictionary]$Sections,
         [Parameter()]
         [string[]]$DeploymentGroups,
         [Parameter()]
         [ValidateSet('DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF')]
         [string]$FinishAction,
+        [Parameter()]
+        [ValidateSet('YES', 'NO')]
+        [string]$Install,
         [Parameter()]
         [hashtable]$Properties
     )
@@ -1966,7 +1980,7 @@ function Add-NDTComputer {
         $path = Join-Path $LocalPath 'Control\CustomSettings.json'
         if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
 
-        $normalMAC = $MAC.ToUpper()
+        $normalMAC = ConvertTo-NDTMac $MAC
         $settings  = Get-Content $path -Raw | ConvertFrom-Json
 
         if ($settings.PSObject.Properties[$normalMAC]) {
@@ -1989,6 +2003,7 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('Sections'))        { $entry.Sections        = $Sections }
         if ($PSBoundParameters.ContainsKey('DeploymentGroups')) { $entry.DeploymentGroups = $DeploymentGroups }
         if ($PSBoundParameters.ContainsKey('FinishAction'))    { $entry.FinishAction    = $FinishAction.ToUpper() }
+        if ($PSBoundParameters.ContainsKey('Install'))         { $entry.Install         = $Install.ToUpper() }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
         }
@@ -2442,6 +2457,220 @@ function Move-NDTReferenceImage {
 
 #region -- Deployment validation ---------------------------------------------
 
+function Get-NDTCatalog {
+    <#
+    .SYNOPSIS
+        Returns the choices a front end (TUI/GUI) needs to build a computer entry.
+    .DESCRIPTION
+        Read-only. Returns OS keys, sections (with key preview and System flag) and
+        deployment groups from the Control files. No UI, no writes.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share (local path or UNC). Default: C:\Deploy2026
+    .EXAMPLE
+        (Get-NDTCatalog -LocalPath \\ndt01.corp.dev\Deploy2026).Sections
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026'
+    )
+
+    $ctl = Join-Path $LocalPath 'Control'
+    foreach ($f in 'OS.json', 'Sections.json', 'DeploymentGroups.json') {
+        if (-not (Test-Path (Join-Path $ctl $f))) { throw "$f not found at: $(Join-Path $ctl $f)" }
+    }
+    $osJson  = Get-Content (Join-Path $ctl 'OS.json') -Raw | ConvertFrom-Json
+    $snJson  = Get-Content (Join-Path $ctl 'Sections.json') -Raw | ConvertFrom-Json
+    $dgJson  = Get-Content (Join-Path $ctl 'DeploymentGroups.json') -Raw | ConvertFrom-Json
+
+    $os = @(foreach ($p in $osJson.PSObject.Properties) {
+        [PSCustomObject]@{ Name = $p.Name; Path = $p.Value.Path; Index = $p.Value.Index }
+    })
+
+    $sections = @(foreach ($p in $snJson.PSObject.Properties) {
+        $isSystem = [bool]($p.Value.PSObject.Properties['System'] -and $p.Value.System -eq $true)
+        $keys     = @($p.Value.PSObject.Properties | Where-Object { $_.Name -ne 'System' } | ForEach-Object { $_.Name })
+        [PSCustomObject]@{
+            Name    = $p.Name
+            System  = $isSystem
+            Keys    = $keys
+            Preview = ($keys -join ', ')
+        }
+    })
+
+    $groups = @(foreach ($p in $dgJson.PSObject.Properties) {
+        [PSCustomObject]@{ Name = $p.Name; Steps = @($p.Value.PSObject.Properties).Count }
+    })
+
+    [PSCustomObject]@{
+        OS            = $os
+        Sections      = $sections
+        Groups        = $groups
+        FinishActions = @('DESKTOP', 'PROMPT', 'REBOOT', 'SHUTDOWN', 'LOGOFF')
+    }
+}
+
+function Get-NDTSectionOverlap {
+    # Keys supplied by more than one source. Machine-level keys always win; between sections the first listed wins.
+    # SectionKeys maps section name -> its key names (System sections must be left out by the caller).
+    param (
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Entry,
+        [Parameter(Mandatory)][hashtable]$SectionKeys
+    )
+    $owners = [ordered]@{}
+    foreach ($k in $Entry.Keys) {
+        if ($k -in 'Sections', 'DeploymentGroups') { continue }
+        $owners[$k] = [System.Collections.Generic.List[string]]::new()
+        $owners[$k].Add('(machine)')
+    }
+    if ($Entry['Sections']) {
+        foreach ($label in $Entry['Sections'].Keys) {
+            $secName = [string]$Entry['Sections'][$label]
+            if (-not $SectionKeys.ContainsKey($secName)) { continue }
+            foreach ($k in $SectionKeys[$secName]) {
+                if (-not $owners.Contains($k)) { $owners[$k] = [System.Collections.Generic.List[string]]::new() }
+                $owners[$k].Add($secName)
+            }
+        }
+    }
+    foreach ($k in $owners.Keys) {
+        if ($owners[$k].Count -gt 1) {
+            [PSCustomObject]@{ Key = $k; Winner = $owners[$k][0]; Losers = @($owners[$k] | Select-Object -Skip 1) }
+        }
+    }
+}
+
+function Test-NDTComputerEntry {
+    <#
+    .SYNOPSIS
+        Validates a proposed computer entry before it is written to CustomSettings.json.
+    .DESCRIPTION
+        Read-only, no UI. Checks the same references as Test-NDTDeployment (OS key, WIM,
+        sections, groups, actions, scripts) plus field formats, and reports key overlaps
+        between machine-level fields and the entry's sections (machine wins; between
+        sections the first listed wins).
+    .PARAMETER Entry
+        The entry as it would be written: OS, Computername, IPAddress, AdminPassword,
+        Sections (ordered label -> section name), DeploymentGroups, FinishAction, Install.
+    .PARAMETER MAC
+        Optional. When supplied it is validated and checked for duplicates.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share (local path or UNC). Default: C:\Deploy2026
+    .OUTPUTS
+        PSCustomObject with Valid, Errors, Warnings and Overlaps (Key, Winner, Losers).
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary]$Entry,
+        [Parameter()]
+        [string]$MAC,
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026'
+    )
+
+    $errors   = [System.Collections.Generic.List[string]]::new()
+    $warnings = [System.Collections.Generic.List[string]]::new()
+    $overlaps = [System.Collections.Generic.List[object]]::new()
+
+    $ctl = Join-Path $LocalPath 'Control'
+    foreach ($f in 'CustomSettings.json', 'OS.json', 'Sections.json', 'DeploymentGroups.json', 'DeploymentActions.json') {
+        if (-not (Test-Path (Join-Path $ctl $f))) { throw "$f not found at: $(Join-Path $ctl $f)" }
+    }
+    $settings = Get-Content (Join-Path $ctl 'CustomSettings.json') -Raw | ConvertFrom-Json
+    $osJson   = Get-Content (Join-Path $ctl 'OS.json') -Raw | ConvertFrom-Json
+    $snJson   = Get-Content (Join-Path $ctl 'Sections.json') -Raw | ConvertFrom-Json
+    $dgJson   = Get-Content (Join-Path $ctl 'DeploymentGroups.json') -Raw | ConvertFrom-Json
+    $daJson   = Get-Content (Join-Path $ctl 'DeploymentActions.json') -Raw | ConvertFrom-Json
+
+    # -- MAC
+    if ($PSBoundParameters.ContainsKey('MAC')) {
+        try {
+            $normalMAC = ConvertTo-NDTMac $MAC
+            if ($settings.PSObject.Properties[$normalMAC]) { $errors.Add("MAC $normalMAC already exists in CustomSettings.json.") }
+        } catch { $errors.Add($_.Exception.Message) }
+    }
+
+    # -- Scalar fields
+    $name = [string]$Entry['Computername']
+    if (-not $name) { $errors.Add('Computername is required.') }
+    elseif ($name -notmatch '^(?!\d+$)[A-Za-z0-9]([A-Za-z0-9-]{0,13}[A-Za-z0-9])?$') {
+        $errors.Add("Computername '$name' is not a valid NetBIOS name (1-15 letters/digits/hyphens, not all digits).")
+    }
+
+    $ip = [string]$Entry['IPAddress']
+    if ($ip -and $ip -ne 'DHCP') {
+        $ipOk = $false
+        if ($ip -match '^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})$') {
+            $ipOk = (@($Matches[1], $Matches[2], $Matches[3], $Matches[4]) | Where-Object { [int]$_ -gt 255 }).Count -eq 0 -and
+                    [int]$Matches[5] -ge 1 -and [int]$Matches[5] -le 32
+        }
+        if (-not $ipOk) { $errors.Add("IPAddress '$ip' must be DHCP or a.b.c.d/nn.") }
+    }
+
+    if (-not $Entry['AdminPassword']) { $errors.Add('AdminPassword is required.') }
+
+    $fin = [string]$Entry['FinishAction']
+    if ($fin -and $fin.ToUpper() -notin 'DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF') {
+        $errors.Add("FinishAction '$fin' is not valid.")
+    }
+    $inst = [string]$Entry['Install']
+    if ($inst -and $inst.ToUpper() -notin 'YES', 'NO') { $errors.Add("Install '$inst' must be YES or NO.") }
+
+    # -- OS and WIM
+    $osKey = [string]$Entry['OS']
+    if (-not $osKey) { $errors.Add('OS is required.') }
+    else {
+        $osEntry = $osJson.PSObject.Properties[$osKey]
+        if (-not $osEntry) { $errors.Add("OS '$osKey' not found in OS.json.") }
+        else {
+            $wim = Join-Path $LocalPath ([string]$osEntry.Value.Path).TrimStart('\')
+            if (-not (Test-Path $wim)) { $errors.Add("WIM for OS '$osKey' not found: $($osEntry.Value.Path)") }
+        }
+    }
+
+    # -- Sections (order = precedence) and overlaps
+    $sectionKeys = @{}
+    if ($Entry['Sections']) {
+        foreach ($label in $Entry['Sections'].Keys) {
+            $secName = [string]$Entry['Sections'][$label]
+            $sec     = $snJson.PSObject.Properties[$secName]
+            if (-not $sec) { $errors.Add("Section '$secName' not found in Sections.json."); continue }
+            $isSystem = [bool]($sec.Value.PSObject.Properties['System'] -and $sec.Value.System -eq $true)
+            if ($isSystem) { $warnings.Add("Section '$secName' is a System section and should not be listed in Sections."); continue }
+            $sectionKeys[$secName] = @($sec.Value.PSObject.Properties | ForEach-Object { $_.Name })
+        }
+    }
+    foreach ($o in (Get-NDTSectionOverlap -Entry $Entry -SectionKeys $sectionKeys)) { $overlaps.Add($o) }
+
+    # -- Groups, actions, scripts
+    $refs = [System.Collections.Generic.List[string]]::new()
+    foreach ($g in @($Entry['DeploymentGroups'])) {
+        if (-not $g) { continue }
+        $grp = $dgJson.PSObject.Properties[[string]$g]
+        if (-not $grp) { $errors.Add("DeploymentGroup '$g' not found in DeploymentGroups.json."); continue }
+        foreach ($step in $grp.Value.PSObject.Properties) {
+            $ref = [string]$step.Value.Reference
+            if ($ref -and -not $refs.Contains($ref)) { $refs.Add($ref) }
+        }
+    }
+    foreach ($ref in $refs) {
+        $act = $daJson.PSObject.Properties[$ref]
+        if (-not $act) { $errors.Add("Action '$ref' not found in DeploymentActions.json."); continue }
+        $scriptRel = [string]$act.Value.Script
+        if ($scriptRel -and -not (Test-Path (Join-Path $LocalPath $scriptRel.TrimStart('\')))) {
+            $errors.Add("Script for action '$ref' not found: $scriptRel")
+        }
+    }
+
+    [PSCustomObject]@{
+        Valid    = ($errors.Count -eq 0)
+        Errors   = $errors.ToArray()
+        Warnings = $warnings.ToArray()
+        Overlaps = $overlaps.ToArray()
+    }
+}
+
 function Test-NDTDeployment {
     <#
     .SYNOPSIS
@@ -2570,6 +2799,12 @@ function Test-NDTDeployment {
             $sectionName = $sectionProp.Value
             $exists = [bool]$sectionsCatalog.PSObject.Properties[$sectionName]
             Write-Check "[$($sectionProp.Name)] '$sectionName'" $exists
+            if ($exists) {
+                $secVal = $sectionsCatalog.PSObject.Properties[$sectionName].Value
+                if ($secVal.PSObject.Properties['System'] -and $secVal.System -eq $true) {
+                    Write-Check "'$sectionName' is a System section" $false 'System sections (deploy share) are not meant to be listed in Sections.' -IsWarning
+                }
+            }
         }
     }
 
@@ -2851,6 +3086,40 @@ function Watch-NDTDeployment {
         Write-Host "`nDeployment complete: $targetName$doneName - 100%" -ForegroundColor Green
         return $true
     }
+}
+
+#endregion
+
+#region -- Terminal UI --------------------------------------------------------
+
+# The TUI file needs PS7 (Terminal.Gui); on 5.1 it is skipped and the command throws.
+if ($PSVersionTable.PSVersion.Major -ge 7) { . (Join-Path $PSScriptRoot 'Private\NDT.Tui.ps1') }
+
+function New-NDTComputerTui {
+    <#
+    .SYNOPSIS
+        Terminal form for adding a computer to CustomSettings.json. Requires PowerShell 7.
+    .DESCRIPTION
+        Single-screen Terminal.Gui form (needs the Microsoft.PowerShell.ConsoleGuiTools module).
+        Add only; use Set-NDTComputer / Remove-NDTComputer to change or delete entries.
+        Validation is done by Test-NDTComputerEntry and the write by Add-NDTComputer.
+        Deployment action parameters (DeploymentActions.json "Parameters") are not prompted;
+        add those keys by hand afterwards.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share (local path or UNC). Default: C:\Deploy2026
+    .OUTPUTS
+        The created entry (as Get-NDTComputer returns it), or nothing if cancelled.
+    .EXAMPLE
+        New-NDTComputerTui -LocalPath \\ndt01.corp.dev\Deploy2026
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026'
+    )
+    if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'New-NDTComputerTui requires PowerShell 7 (pwsh).' }
+    if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { throw 'New-NDTComputerTui needs an interactive terminal.' }
+    Show-NDTComputerForm -LocalPath $LocalPath
 }
 
 #endregion

@@ -23,6 +23,8 @@
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
         'Move-NDTReferenceImage',
         'Test-NDTDeployment',
+        'Get-NDTCatalog', 'Test-NDTComputerEntry',
+        'New-NDTComputerTui',
         'Watch-NDTDeployment'
     )
     CmdletsToExport   = @()
