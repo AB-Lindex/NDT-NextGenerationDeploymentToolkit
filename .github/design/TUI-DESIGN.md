@@ -6,6 +6,9 @@ ConsoleGuiTools 0.7.x (Terminal.Gui 1.16). Code: `install/NDT/Private/NDT.Tui.ps
 (`New-NDTComputerTui` wrapper in `ndt.psm1`). Minimum terminal 100x28.
 Deviations: System sections show `[x]` but not greyed (Terminal.Gui 1 ListView
 has no per-row colour); optimistic-concurrency check (section 5, item 6) not done.
+Additions: every list has a vertical `ScrollBarView` (arrows + thumb) that hides
+itself when all rows fit. Terminal.Gui 1 requires the list to be added to its
+parent window before the scrollbar is created, so `New-NDTTuiList` takes `-Parent`.
 Location rationale: `.github/` is versioned in git, never published to PSGallery
 (`install/NDT/` is published as-is - no `FileList`), and is stripped from a live
 share by `Install-NDT`.
