@@ -1,3 +1,65 @@
+function ConvertTo-NDTJson {
+    # Private helper (not exported). Windows PowerShell 5.1 ConvertTo-Json pads nested
+    # values with huge indentation, double spaces after ':' and \u0027/\u003c/\u003e/\u0026
+    # escapes; re-emit with 2-space indent and those characters unescaped.
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        $InputObject,
+        [int]$Depth = 10
+    )
+    process {
+        $json = ConvertTo-Json -InputObject $InputObject -Depth $Depth
+        if ($PSVersionTable.PSVersion.Major -ge 7) { return $json }
+
+        $sb       = New-Object System.Text.StringBuilder
+        $indent   = 0
+        $inString = $false
+        $n        = $json.Length
+        for ($i = 0; $i -lt $n; $i++) {
+            $c = $json[$i]
+            if ($inString) {
+                if ($c -eq '\') {
+                    if ($i + 5 -lt $n -and $json[$i + 1] -eq 'u' -and $json.Substring($i + 2, 4) -match '^(0027|003[cCeE]|0026)$') {
+                        [void]$sb.Append([char][Convert]::ToInt32($json.Substring($i + 2, 4), 16))
+                        $i += 5
+                    } else {
+                        [void]$sb.Append($c).Append($json[$i + 1])
+                        $i++
+                    }
+                } else {
+                    [void]$sb.Append($c)
+                    if ($c -eq '"') { $inString = $false }
+                }
+                continue
+            }
+            switch ($c) {
+                '"' { $inString = $true; [void]$sb.Append($c) }
+                { $_ -eq '{' -or $_ -eq '[' } {
+                    $j = $i + 1
+                    while ($j -lt $n -and [char]::IsWhiteSpace($json[$j])) { $j++ }
+                    $close = if ($c -eq '{') { '}' } else { ']' }
+                    if ($j -lt $n -and $json[$j] -eq $close) {
+                        [void]$sb.Append($c).Append($close)   # empty object/array stays on one line
+                        $i = $j
+                    } else {
+                        $indent++
+                        [void]$sb.Append($c).Append("`r`n").Append(' ' * (2 * $indent))
+                    }
+                }
+                { $_ -eq '}' -or $_ -eq ']' } {
+                    $indent--
+                    [void]$sb.Append("`r`n").Append(' ' * (2 * $indent)).Append($c)
+                }
+                ',' { [void]$sb.Append(",`r`n").Append(' ' * (2 * $indent)) }
+                ':' { [void]$sb.Append(': ') }
+                default { if (-not [char]::IsWhiteSpace($c)) { [void]$sb.Append($c) } }
+            }
+        }
+        $sb.ToString()
+    }
+}
+
 function Remove-NDTBootstrapArtefact {
     # Private helper (not exported). NDT runs from the PSGallery module install,
     # never from the share, so the module copy and publish helper that ship inside
@@ -234,7 +296,7 @@ function Install-NDT {
                 $settings.Deploy | Add-Member -NotePropertyName MonitorUrl -NotePropertyValue $monitorUrl
             }
 
-            $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $sectionsDest -Encoding UTF8
+            $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $sectionsDest -Encoding UTF8
             Write-Verbose 'Deploy section stamped in Sections.json.'
 
             $plainPassword = $null
@@ -2010,7 +2072,7 @@ function Add-NDTComputer {
 
         if ($PSCmdlet.ShouldProcess($normalMAC, 'Add computer entry')) {
             $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
-            $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+            $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
             Write-Verbose "Added computer '$normalMAC' ($($entry.Computername))."
             Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
         }
@@ -2122,7 +2184,7 @@ function Set-NDTComputer {
                 }
             }
         }
-        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
         Write-Verbose "Updated computer '$normalMAC'."
         Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
     }
@@ -2161,7 +2223,7 @@ function Remove-NDTComputer {
 
     if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove computer entry')) {
         $settings.PSObject.Properties.Remove($normalMAC)
-        $settings | ConvertTo-Json -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
         Write-Verbose "Removed computer '$normalMAC'."
     }
 }
@@ -2259,7 +2321,7 @@ function Add-NDTOs {
         $value = [ordered]@{ Path = $Path; Index = $Index }
         if ($PSBoundParameters.ContainsKey('Unattend')) { $value.Unattend = $Unattend }
         $catalog | Add-Member -MemberType NoteProperty -Name $Key -Value ([PSCustomObject]$value)
-        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        $catalog | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Added OS '$Key'."
         Get-NDTOs -LocalPath $LocalPath -Key $Key
     }
@@ -2322,7 +2384,7 @@ function Set-NDTOs {
                 $entry.Value | Add-Member -MemberType NoteProperty -Name 'Unattend' -Value $Unattend
             }
         }
-        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        $catalog | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Updated OS '$Key'."
         Get-NDTOs -LocalPath $LocalPath -Key $Key
     }
@@ -2360,7 +2422,7 @@ function Remove-NDTOs {
 
     if ($PSCmdlet.ShouldProcess($Key, 'Remove OS entry')) {
         $catalog.PSObject.Properties.Remove($Key)
-        $catalog | ConvertTo-Json -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
+        $catalog | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Removed OS '$Key'."
     }
 }
