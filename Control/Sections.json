@@ -29,8 +29,6 @@
     "RefSAPWD": "P@ssw0rd2026"
   },
   "RefSettings": {
-    "Sysprep": "Generalize",
-    "Shutdown": "Shutdown",
     "IPAddress": "DHCP",
     "DefaultGateway": "",
     "DNSServers": "",
