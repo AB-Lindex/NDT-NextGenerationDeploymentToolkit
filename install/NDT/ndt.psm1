@@ -2221,10 +2221,24 @@ function Remove-NDTComputer {
         throw "Computer '$normalMAC' not found in CustomSettings.json."
     }
 
+    $computername = $settings.PSObject.Properties[$normalMAC].Value.Computername
+
     if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove computer entry')) {
         $settings.PSObject.Properties.Remove($normalMAC)
         $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
         Write-Verbose "Removed computer '$normalMAC'."
+
+        # Drop the NDT Monitor state file so a redeploy does not start at 100%.
+        # Mirrors ProgressHandler.SafeName (':' -> '-', upper-case, invalid chars stripped); audit logs are kept.
+        if ($computername) {
+            $safeName = $computername.Replace(':', '-').ToUpperInvariant()
+            foreach ($c in [System.IO.Path]::GetInvalidFileNameChars()) { $safeName = $safeName.Replace([string]$c, '') }
+            $progressFile = Join-Path $LocalPath "Logs\progress\$safeName.json"
+            if ($safeName -and (Test-Path -LiteralPath $progressFile)) {
+                Remove-Item -LiteralPath $progressFile -Force
+                Write-Verbose "Removed progress file '$progressFile'."
+            }
+        }
     }
 }
 
