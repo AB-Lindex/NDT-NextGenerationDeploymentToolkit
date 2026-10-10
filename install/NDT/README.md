@@ -52,6 +52,7 @@ Test-NDTDeployment -MAC '00:15:5D:02:56:05'
 | `Install-NDTMonitor` | Install the NDT Monitor IIS progress web service (idempotent). |
 | `New-NDTPEImage` | Build the WinPE boot WIM, two bootable ISOs (Gen 1 hybrid + Gen 2 UEFI no-prompt), and update the WDS boot image. |
 | `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer` | Manage per-machine entries in `CustomSettings.json`. |
+| `Remove-NDTProgress` | Delete a computer's NDT Monitor progress file (called by `Add-`/`Remove-NDTComputer`). |
 | `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs` | Manage the OS catalog in `OS.json`. |
 | `Move-NDTReferenceImage` | Move captured reference WIMs from `Reference\` into `Operating Systems\`. |
 | `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration. |

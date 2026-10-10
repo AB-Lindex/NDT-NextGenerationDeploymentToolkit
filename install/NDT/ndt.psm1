@@ -2074,6 +2074,7 @@ function Add-NDTComputer {
             $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
             $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
             Write-Verbose "Added computer '$normalMAC' ($($entry.Computername))."
+            if ($entry.Computername) { Remove-NDTProgress -Computername $entry.Computername -LocalPath $LocalPath }
             Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
         }
     }
@@ -2228,17 +2229,41 @@ function Remove-NDTComputer {
         $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
         Write-Verbose "Removed computer '$normalMAC'."
 
-        # Drop the NDT Monitor state file so a redeploy does not start at 100%.
-        # Mirrors ProgressHandler.SafeName (':' -> '-', upper-case, invalid chars stripped); audit logs are kept.
-        if ($computername) {
-            $safeName = $computername.Replace(':', '-').ToUpperInvariant()
-            foreach ($c in [System.IO.Path]::GetInvalidFileNameChars()) { $safeName = $safeName.Replace([string]$c, '') }
-            $progressFile = Join-Path $LocalPath "Logs\progress\$safeName.json"
-            if ($safeName -and (Test-Path -LiteralPath $progressFile)) {
-                Remove-Item -LiteralPath $progressFile -Force
-                Write-Verbose "Removed progress file '$progressFile'."
-            }
-        }
+        if ($computername) { Remove-NDTProgress -Computername $computername -LocalPath $LocalPath }
+    }
+}
+
+function Remove-NDTProgress {
+    <#
+    .SYNOPSIS
+        Removes a computer's NDT Monitor progress file (Logs\progress\<COMPUTERNAME>.json).
+    .DESCRIPTION
+        Prevents a redeploy from showing the previous run's 100% state. The audit logs
+        (audit-<date>.jsonl) are left untouched. Does nothing if no progress file exists.
+    .PARAMETER Computername
+        Name of the computer whose progress file should be removed.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share.
+    .EXAMPLE
+        Remove-NDTProgress -Computername srv02 -LocalPath C:\Deploy2026
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param (
+        [Parameter(Mandatory, ValueFromPipelineByPropertyName)]
+        [string]$Computername,
+        [Parameter(Mandatory)]
+        [string]$LocalPath
+    )
+
+    # Mirrors ProgressHandler.SafeName: ':' -> '-', upper-case, invalid filename chars stripped.
+    $safeName = $Computername.Replace(':', '-').ToUpperInvariant()
+    foreach ($c in [System.IO.Path]::GetInvalidFileNameChars()) { $safeName = $safeName.Replace([string]$c, '') }
+    if (-not $safeName) { return }
+
+    $progressFile = Join-Path $LocalPath "Logs\progress\$safeName.json"
+    if ((Test-Path -LiteralPath $progressFile) -and $PSCmdlet.ShouldProcess($progressFile, 'Remove progress file')) {
+        Remove-Item -LiteralPath $progressFile -Force
+        Write-Verbose "Removed progress file '$progressFile'."
     }
 }
 

@@ -19,7 +19,7 @@
         'Update-NDT',
         'Install-NDTMonitor',
         'New-NDTPEImage',
-        'Get-NDTComputer', 'Add-NDTComputer', 'Set-NDTComputer', 'Remove-NDTComputer',
+        'Get-NDTComputer', 'Add-NDTComputer', 'Set-NDTComputer', 'Remove-NDTComputer', 'Remove-NDTProgress',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
         'Move-NDTReferenceImage',
         'Test-NDTDeployment',
