@@ -187,7 +187,10 @@ Invoke-Bcd @('/bootsequence', $peGuid) | Out-Null
 Write-Host "  [OK] WinPE entry $peGuid set as one-time boot"
 
 # BCD change + reading the ramdisk from C: would otherwise trigger a BitLocker recovery prompt. Best-effort.
-& manage-bde.exe -protectors -disable $sysDrive -RebootCount 1 2>&1 | Out-Null
+# manage-bde.exe is absent when the BitLocker feature is not installed (e.g. Server).
+if (Get-Command manage-bde.exe -ErrorAction SilentlyContinue) {
+    & manage-bde.exe -protectors -disable $sysDrive -RebootCount 1 2>&1 | Out-Null
+}
 
 # ------------------------------------------------------------------
 # STEP 5 - Reboot into WinPE
