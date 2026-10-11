@@ -47,6 +47,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── Get-OS.ps1
 │   ├── Get-Settings.ps1           ← fills unattend.xml from CustomSettings.json (template chosen per OS via OS.json)
 │   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
+│   ├── Start-Refresh.ps1          ← in-OS launcher: validates MAC/OS/WIM, stages boot2026.iso PE to C:\NDT-PE, one-shot ramdisk BCD entry, reboots into the normal WinPE install.ps1 flow (re-image in place)
 │   ├── test.ps1                   ← standalone test: runs Copy-Install + Get-Settings
 │   ├── wds/
 │   │   └── nuke-wds.ps1           ← WDS reset utility (stop, wipe RemoteInstall, reinit, add WIM)

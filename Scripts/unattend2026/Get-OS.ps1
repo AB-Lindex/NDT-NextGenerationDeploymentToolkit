@@ -1,12 +1,14 @@
 # Get OS WIM path based on MAC address configuration
 param(
     [Parameter(Mandatory=$true)]
-    [string]$MACAddress
+    [string]$MACAddress,
+
+    [string]$ShareRoot = 'Z:\'
 )
 
-$customSettingsPath = "Z:\Control\CustomSettings.json"
-$sectionsPath = "Z:\Control\Sections.json"
-$osJsonPath = "Z:\Control\OS.json"
+$customSettingsPath = Join-Path $ShareRoot 'Control\CustomSettings.json'
+$sectionsPath = Join-Path $ShareRoot 'Control\Sections.json'
+$osJsonPath = Join-Path $ShareRoot 'Control\OS.json'
 
 # Load JSON files
 $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
@@ -22,7 +24,7 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# Get OS reference — check MAC block first, then fall back to referenced sections
+# Get OS reference - check MAC block first, then fall back to referenced sections
 $osName = $machineConfig.OS
 if (-not $osName -and $machineConfig.Sections) {
     foreach ($sectionRef in $machineConfig.Sections.PSObject.Properties.Value) {
@@ -57,8 +59,8 @@ if (-not $wimPath) {
 # Get index from OS config, default to 1 if not specified
 $wimIndex = if ($osInfo.Index) { $osInfo.Index } else { 1 }
 
-# Build full path with Z:\
-$fullPath = "Z:\$wimPath"
+# Build full path under the share root (default Z:\)
+$fullPath = Join-Path $ShareRoot $wimPath
 
 Write-Host "WIM Path: $fullPath" -ForegroundColor Green
 Write-Host "WIM Index: $wimIndex" -ForegroundColor Green
