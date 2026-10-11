@@ -362,7 +362,28 @@ if ($ndtExitCode -eq 3010) {
     Clear-DeploymentWallpaper
 
     # Write sentinel so any duplicate invocations in the same logon session exit immediately.
-    New-Item -Path $deployCompleteFlagPath -ItemType File -Force | Out-Null
+    $flagLines = @(
+        'NDT deployment is now FINISHED.',
+        '',
+        "Computer : $env:COMPUTERNAME",
+        "Finished : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+    )
+    if ($settings -and $settings.DeployStart) { $flagLines += "Started  : $($settings.DeployStart)" }
+    $flagLines += @(
+        '',
+        'This file is a sentinel: while it exists, install2026.ps1 will not run again.',
+        '',
+        'Log files in C:\temp:',
+        '  install.log      - Phase 1 (WinPE): config validation, disk partitioning, DISM image apply,',
+        '                     unattend generation, BCDBoot. Copied here from X:\install.log before the',
+        '                     first reboot.',
+        '  install2026.log  - Phase 2 bootstrap (PS 5, install2026.ps1): network wait, share mapping,',
+        '                     PowerShell 7 install, launching the step engine, reboot/pause handling,',
+        '                     cleanup and FinishAction.',
+        '  install-ndt.log  - Step engine (PS 7, Install-NDT.ps1): the ordered deployment steps from',
+        '                     DeploymentGroups.json - per-step start/finish, script output, exit codes.'
+    )
+    Set-Content -Path $deployCompleteFlagPath -Value $flagLines -Encoding ASCII -Force
 
     # Remove sensitive/temporary deployment files from C:\temp.
     # Commented out for debugging purposes - enable in production.
