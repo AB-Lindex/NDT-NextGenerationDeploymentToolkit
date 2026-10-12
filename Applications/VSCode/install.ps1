@@ -42,4 +42,12 @@ if (-not (Test-Path $codeExe)) {
 }
 
 Write-Host "VS Code installed: $codeExe"
+
+$shell    = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut('C:\Users\Public\Desktop\Visual Studio Code.lnk')
+$shortcut.TargetPath       = $codeExe
+$shortcut.WorkingDirectory = Split-Path $codeExe
+$shortcut.Save()
+Write-Host 'Created shortcut on the public desktop'
+
 exit 0
