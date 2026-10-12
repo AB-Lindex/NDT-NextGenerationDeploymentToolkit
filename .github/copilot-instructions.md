@@ -45,6 +45,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── unattend.xml               ← unattend template with !PLACEHOLDER! tokens
 │   ├── Get-MACAddress.ps1
 │   ├── Get-OS.ps1
+│   ├── Invoke-NDTSql.ps1         ← parameterised SQL query over TCP/SQL auth (System.Data.SqlClient; works in PE PS5 + PS7 and OS); settings from the `NDTSql` section of Sections.json (not used by deployment lookups yet)
 │   ├── Get-Settings.ps1           ← fills unattend.xml from CustomSettings.json (template chosen per OS via OS.json)
 │   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
 │   ├── Start-Refresh.ps1          ← in-OS launcher: validates MAC/OS/WIM, stages boot2026.iso PE to C:\NDT-PE, one-shot ramdisk BCD entry, reboots into the normal WinPE install.ps1 flow (re-image in place)

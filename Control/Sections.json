@@ -57,5 +57,15 @@
     "Share": "\\\\dc01.corp.dev\\Deploy2026",
     "Username": "Corp\\Deploy2026",
     "Password": "P@ssw0rd2026"
+  },
+  "NDTSql": {
+    "System": true,
+    "Server": "sql01.corp.dev",
+    "Port": 1433,
+    "Database": "NDT",
+    "Username": "ndt_reader",
+    "Password": "CHANGE-ME",
+    "Encrypt": true,
+    "TrustServerCertificate": false
   }
 }

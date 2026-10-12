@@ -111,6 +111,16 @@ Other `New-NDTPEImage` inputs:
 
 `Update-NDT` refreshes the code of an existing share and preserves `Control\*.json`, credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Rebuild the boot image with `New-NDTPEImage` afterwards if `install.ps1`, drivers or the WinPE launcher changed.
 
+## SQL access
+
+The share contains `Scripts\unattend2026\Invoke-NDTSql.ps1`, a parameterised T-SQL helper that
+connects over TCP (default 1433) with a SQL login using `System.Data.SqlClient`. It works in the
+production WinPE (PowerShell 5.1), the experimental PowerShell 7 WinPE and a normal OS. Settings
+come from an `NDTSql` section in `Control\Sections.json` (`Server`, `Database`, `Username`,
+`Password`, optional `Port`, `Encrypt`, `TrustServerCertificate`); add it by hand, since
+`Update-NDT` does not change an existing `Sections.json`. Use a read-only login. NDT does not use
+it for its own lookups yet. See the repository README.
+
 ## Starting a deployment from inside Windows
 
 Not a module command: run `Scripts\unattend2026\Start-Refresh.ps1` elevated from the share. It validates the machine, stages the boot ISO's WinPE locally, adds a one-shot ramdisk boot entry and reboots into the normal WinPE deployment. See the repository README.

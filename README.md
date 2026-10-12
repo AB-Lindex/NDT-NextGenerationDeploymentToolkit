@@ -256,6 +256,7 @@ Deploy2026/
 │       ├── Get-MACAddress.ps1    # Resolves the active NIC MAC address
 │       ├── Get-OS.ps1            # Resolves WIM path/index from OS.json (-ShareRoot, default Z:\)
 │       ├── Get-Hardware.ps1      # Physical/virtual, hypervisor, vendor, model, serial
+│       ├── Invoke-NDTSql.ps1     # Parameterised SQL query over TCP with SQL authentication (WinPE PS5/PS7 and OS)
 │       ├── Get-Settings.ps1      # Generates unattend.xml from template + CustomSettings.json
 │       ├── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json on C:\temp
 │       ├── Start-Refresh.ps1     # Run from inside Windows: stages WinPE, one-shot BCD entry, reboots to re-image in place
@@ -348,6 +349,33 @@ Maps OS keys to WIM file paths and image indexes. An optional `Unattend` key (sh
 ```json
 "WIN2025DCG": { "Path": "Operating systems\\ref-w2025dcg\\w2025dcg.wim", "Index": 1 }
 ```
+
+---
+
+## SQL access
+
+`Scripts\unattend2026\Invoke-NDTSql.ps1` runs a parameterised T-SQL statement against SQL Server over TCP (default port 1433) with a SQL login. It uses `System.Data.SqlClient`, so the same script works in the production WinPE (PowerShell 5.1 with `WinPE-NetFx`), in the experimental PowerShell 7 WinPE and in a normal OS. NDT does not use SQL for its own lookups yet; this is groundwork for broader lookups. There is no named-pipe, IPC$ or SQLShare mode.
+
+Connection settings live in a section of `Sections.json` (default name `NDTSql`; mark it `"System": true` so it is not offered as a machine section). `Update-NDT` never changes an existing `Sections.json`, so add the section by hand:
+
+```json
+"NDTSql": {
+  "System": true,
+  "Server": "sql01.example.com",
+  "Port": 1433,
+  "Database": "NDT",
+  "Username": "ndt_reader",
+  "Password": "...",
+  "Encrypt": true,
+  "TrustServerCertificate": false
+}
+```
+
+```powershell
+& Z:\Scripts\unattend2026\Invoke-NDTSql.ps1 -Query 'SELECT * FROM Machines WHERE Mac = @mac' -Parameter @{ mac = $macAddress }
+```
+
+`-Mode Rows` (default) returns one object per row, `Scalar` the first value, `NonQuery` the affected-row count. Use a read-only login: the credentials are plaintext on the share, like the deploy credentials, and are read after the share is mapped (never baked into the WIM). With `Encrypt` on, WinPE must trust the server certificate; build the boot image with `New-NDTPEImage -RootCACertName <subject>` for an internal CA. Use the server FQDN and a fixed port (a named instance needs the SQL Browser service). The framework's `System.Data.SqlClient` does not support TDS 8.0 strict encryption.
 
 ---
 
