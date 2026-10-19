@@ -4,14 +4,15 @@ param(
     [string]$MACAddress
 )
 
-$jsonPath = "Z:\Control\CustomSettings.json"
+. "Z:\Scripts\unattend2026\Get-NDTMachine.ps1"
 $sectionsPath = "Z:\Control\Sections.json"
 $osPath = "Z:\Control\OS.json"
 $defaultTemplatePath = "Z:\Scripts\unattend2026\unattend.xml"
 $outputPath = "c:\temp\unattend.xml"
 
-# Load JSON content
-$config = Get-Content -Path $jsonPath -Raw | ConvertFrom-Json
+# Load JSON content (machine config = CustomSettings.json merged with Control\Projects)
+try { $config = Get-NDTMachine -ControlPath 'Z:\Control' }
+catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsCatalog = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 
 Write-Host "Using MAC Address: $MACAddress" -ForegroundColor Yellow

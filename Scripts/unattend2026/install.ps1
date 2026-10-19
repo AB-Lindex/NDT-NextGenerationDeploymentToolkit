@@ -170,20 +170,36 @@ if ($hardware) {
 # ------------------------------------------------------------------
 $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
 
-$customSettingsPath = "Z:\Control\CustomSettings.json"
-$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+# Machine config = CustomSettings.json merged with Control\Projects\**\*.json.
+# A duplicate MAC or an invalid JSON file is reported here, before the disk is touched,
+# and retried after the operator fixes the file.
+. "Z:\Scripts\Unattend2026\Get-NDTMachine.ps1"
 
-while (-not $customSettings.$macAddress) {
-    Write-Log "ERROR: MAC address '$macAddress' not found in CustomSettings.json" -Level ERROR
+$customSettings = $null
+$machineSource  = @{}
+while ($true) {
+    $machineSource = @{}
+    try {
+        $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' -SourceMap $machineSource
+    } catch {
+        $customSettings = $null
+        Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
+        Read-Host "Fix the configuration on the share, then press Enter to retry"
+        continue
+    }
+
+    if ($customSettings.$macAddress) { break }
+
+    Write-Log "ERROR: MAC address '$macAddress' not found in CustomSettings.json or Control\Projects" -Level ERROR
     Write-Log "Available MAC addresses in configuration:" -ForegroundColor Yellow
-    $customSettings.PSObject.Properties | Where-Object { $_.Name -match '^[0-9A-F:]+$' } | ForEach-Object {
-        Write-Log "  $($_.Name)" -ForegroundColor Gray
+    $customSettings.PSObject.Properties | ForEach-Object {
+        Write-Log "  $($_.Name)  ($($machineSource[$_.Name]))" -ForegroundColor Gray
     }
     Read-Host "Press Enter to retry"
-    $customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
 }
 
 $machineConfig = $customSettings.$macAddress
+Write-Log "Machine config source: Control\$($machineSource[$macAddress.ToUpper()])" -ForegroundColor Gray
 
 # ------------------------------------------------------------------
 # SAFETY CHECK - Install:NO prevents accidental disk wipe

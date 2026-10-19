@@ -6,13 +6,13 @@ param(
     [string]$ShareRoot = 'Z:\'
 )
 
-$customSettingsPath = Join-Path $ShareRoot 'Control\CustomSettings.json'
+. (Join-Path $PSScriptRoot 'Get-NDTMachine.ps1')
 $sectionsPath = Join-Path $ShareRoot 'Control\Sections.json'
 $osJsonPath = Join-Path $ShareRoot 'Control\OS.json'
 
-# Load JSON files
-$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
-$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
+# Load JSON files (machine config = CustomSettings.json merged with Control\Projects)
+try { $customSettings = Get-NDTMachine -ControlPath (Join-Path $ShareRoot 'Control') }
+catch { Write-Error $_.Exception.Message; exit 1 }$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 $osConfig = Get-Content -Path $osJsonPath -Raw | ConvertFrom-Json
 
 Write-Host "Using MAC Address: $MACAddress" -ForegroundColor Yellow

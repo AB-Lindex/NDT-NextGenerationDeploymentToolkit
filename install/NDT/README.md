@@ -65,14 +65,38 @@ Watch-NDTDeployment -Computername srv05
 | `Update-NDT` | In-place upgrade that refreshes code while preserving Control config, credentials, WIMs, certificates, and logs. |
 | `Install-NDTMonitor` | Install the NDT Monitor IIS progress web service (idempotent). |
 | `New-NDTPEImage` | Build the WinPE boot WIM, two bootable ISOs (Gen 1 hybrid + Gen 2 UEFI no-prompt), inject drivers, and update the WDS boot image. Switches: `-SkipISO`, `-SkipWDS`, `-RegisterOnly`, `-DriverPath`, `-DeploySection`, `-RootCACertName`, `-PS7` (experimental). |
-| `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer` | Manage per-machine entries in `CustomSettings.json`. |
+| `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer` | Manage per-machine entries in `CustomSettings.json` and in `Control\Projects\**\*.json` (see below). |
 | `Remove-NDTProgress` | Delete a computer's NDT Monitor progress file (called by `Add-`/`Remove-NDTComputer`). |
 | `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs` | Manage the OS catalog in `OS.json`. |
 | `Move-NDTReferenceImage` | Move captured reference WIMs from `Reference\` into `Operating Systems\`. |
-| `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration (machine block, sections, OS key, WIM, groups, actions, script paths, finish action). Returns `$true`/`$false`. |
+| `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration (machine block and its source file, duplicate or unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action). Returns `$true`/`$false`. |
 | `Watch-NDTDeployment` | Live progress bar for a machine (by `-Computername` or `-MAC`) until the NDT Monitor reports Done. `-TimeoutMinutes`, `-PollSeconds`, `-MonitorUrl`, `-SkipCertificateCheck`. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). Add only. |
 | `Get-NDTCatalog` / `Test-NDTComputerEntry` | Read-only helpers for front ends: available OS/sections/groups, and validation + key-overlap check of a proposed entry. |
+
+## Per-project machine files
+
+Besides `Control\CustomSettings.json`, machine blocks (same format, keyed by MAC address) can
+live in any `*.json` file under `Control\Projects\`, at any depth - for example
+`Projects\ProjectA\web-tier.json` (many machines) or `Projects\ProjectA\sql01.json` (one).
+The effective machine set is the union of all files.
+
+```powershell
+Add-NDTComputer -File 'ProjectA\sql01' -MAC '00:15:5D:02:56:06' -Computername sql01 -OS WIN2025DCG
+Get-NDTComputer | Select-Object MAC, Computername, SourceFile
+```
+
+- `Add-NDTComputer -File` is relative to `Control\Projects` (`.json` is appended if missing; folders
+  and file are created; rooted paths and `..` escapes are rejected). Without `-File` the entry goes
+  to `CustomSettings.json`.
+- `Get-NDTComputer` adds a `SourceFile` property (relative to `Control`). `Set-`/`Remove-NDTComputer`
+  write back to whichever file holds the MAC; removing the last MAC leaves the file as `{}`.
+- A MAC defined more than once, or an invalid JSON file, aborts deployment (reported in WinPE before
+  the disk is touched) and fails `Test-NDTDeployment`. `Set-`/`Remove-NDTComputer` refuse a duplicated
+  MAC and `Get-NDTComputer` warns about it.
+- Only MAC-shaped keys count; other keys are ignored. `Update-NDT` never removes or overwrites
+  anything in `Control\Projects`. `Sections.json`, `DeploymentGroups.json` and
+  `DeploymentActions.json` remain single files. `New-NDTComputerTui` still writes to `CustomSettings.json`.
 
 ## Boot media
 

@@ -1900,12 +1900,106 @@ cmd.exe /k
     }
 }
 
-#region -- Computer management (CustomSettings.json) -------------------------
+#region -- Computer management (CustomSettings.json + Control\Projects) ------
+
+function Get-NDTMachineEntry {
+    # Private helper (not exported). Returns every MAC block found in Control\CustomSettings.json
+    # plus Control\Projects\**\*.json as objects: MAC (upper case), Key (name as written),
+    # SourceFile (relative to Control), Path, Root (parsed file, for write-back) and Value.
+    # Duplicates are returned as-is - callers decide. An invalid JSON file throws.
+    # NOTE: the share-side equivalent is Scripts\unattend2026\Get-NDTMachine.ps1 (cannot be
+    # shared: this module is installed from PSGallery). Keep the two in step.
+    [CmdletBinding()]
+    param ([Parameter(Mandatory)][string]$LocalPath)
+
+    $control = Join-Path $LocalPath 'Control'
+    $csPath  = Join-Path $control 'CustomSettings.json'
+    if (-not (Test-Path $csPath)) { throw "CustomSettings.json not found at: $csPath" }
+
+    $controlFull = [System.IO.Path]::GetFullPath($control).TrimEnd('\')
+    $files = [System.Collections.Generic.List[string]]::new()
+    $files.Add([System.IO.Path]::GetFullPath($csPath))
+    $projects = Join-Path $controlFull 'Projects'
+    if (Test-Path -LiteralPath $projects -PathType Container) {
+        Get-ChildItem -LiteralPath $projects -Filter '*.json' -File -Recurse |
+            Where-Object { $_.Extension -eq '.json' } |
+            Sort-Object FullName |
+            ForEach-Object { $files.Add($_.FullName) }
+    }
+
+    $macPattern = '^([0-9A-F]{2}:){5}[0-9A-F]{2}$'
+    foreach ($file in $files) {
+        $rel = $file.Substring($controlFull.Length).TrimStart('\')
+        $raw = Get-Content -LiteralPath $file -Raw
+        if ([string]::IsNullOrWhiteSpace($raw)) { continue }
+        try { $json = $raw | ConvertFrom-Json -ErrorAction Stop }
+        catch { throw "Invalid JSON in Control\$rel : $($_.Exception.Message)" }
+        if ($null -eq $json -or $json -isnot [System.Management.Automation.PSCustomObject]) {
+            throw "Control\$rel must contain a JSON object keyed by MAC address."
+        }
+        foreach ($prop in $json.PSObject.Properties) {
+            if ($prop.Name -notmatch $macPattern) { continue }
+            [PSCustomObject]@{
+                MAC        = $prop.Name.ToUpper()
+                Key        = $prop.Name
+                SourceFile = $rel
+                Path       = $file
+                Root       = $json
+                Value      = $prop.Value
+            }
+        }
+    }
+}
+
+function Resolve-NDTMachineEntry {
+    # Private helper (not exported). The single entry for a MAC; throws if missing or duplicated.
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)][string]$LocalPath,
+        [Parameter(Mandatory)][string]$MAC
+    )
+    $normalMAC = $MAC.ToUpper()
+    $found = @(Get-NDTMachineEntry -LocalPath $LocalPath | Where-Object { $_.MAC -eq $normalMAC })
+    if ($found.Count -eq 0) { throw "Computer '$normalMAC' not found in CustomSettings.json or Control\Projects." }
+    if ($found.Count -gt 1) {
+        throw "Computer '$normalMAC' is defined more than once ($((($found | ForEach-Object { "Control\$($_.SourceFile)" })) -join ', ')). Remove the duplicate first."
+    }
+    $found[0]
+}
+
+function Resolve-NDTProjectFile {
+    # Private helper (not exported). Maps a -File value (relative to Control\Projects, .json
+    # appended if missing) to a full path; rejects rooted paths and anything escaping Projects.
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)][string]$LocalPath,
+        [Parameter(Mandatory)][string]$File
+    )
+    $name = $File.Trim()
+    if (-not $name) { throw '-File must not be empty.' }
+    if ([System.IO.Path]::IsPathRooted($name) -or $name -match '^[\\/]') {
+        throw "-File '$File' must be relative to Control\Projects (no drive or leading slash)."
+    }
+    if ($name -notmatch '\.json$') { $name += '.json' }
+
+    $root = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $LocalPath 'Control') 'Projects')).TrimEnd('\')
+    try { $full = [System.IO.Path]::GetFullPath((Join-Path $root $name)) }
+    catch { throw "-File '$File' is not a valid path: $($_.Exception.Message)" }
+    if (-not $full.StartsWith("$root\", [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "-File '$File' resolves outside Control\Projects."
+    }
+    if ([System.IO.Path]::GetFileName($full) -eq '.json') { throw "-File '$File' has no file name." }
+    $full
+}
 
 function Get-NDTComputer {
     <#
     .SYNOPSIS
-        Retrieves computer entries from CustomSettings.json.
+        Retrieves computer entries from CustomSettings.json and Control\Projects\**\*.json.
+    .DESCRIPTION
+        Each entry carries a SourceFile property (path relative to Control) naming the file
+        that holds it. A MAC defined more than once is returned for each definition and a
+        warning is written - deployment refuses to run until the duplicate is removed.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
@@ -1929,19 +2023,16 @@ function Get-NDTComputer {
         [string]$Computername
     )
 
-    $path = Join-Path $LocalPath 'Control\CustomSettings.json'
-    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+    $all = @(Get-NDTMachineEntry -LocalPath $LocalPath)
+    foreach ($dup in ($all | Group-Object MAC | Where-Object Count -gt 1)) {
+        Write-Warning "Duplicate MAC $($dup.Name) in: $(($dup.Group | ForEach-Object { "Control\$($_.SourceFile)" }) -join ', ')"
+    }
 
-    $settings   = Get-Content $path -Raw | ConvertFrom-Json
-    $macPattern = '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
-
-    $entries = $settings.PSObject.Properties |
-        Where-Object { $_.Name -match $macPattern } |
-        ForEach-Object {
-            $obj = [ordered]@{ MAC = $_.Name.ToUpper() }
-            foreach ($prop in $_.Value.PSObject.Properties) { $obj[$prop.Name] = $prop.Value }
-            [PSCustomObject]$obj
-        }
+    $entries = $all | ForEach-Object {
+        $obj = [ordered]@{ MAC = $_.MAC; SourceFile = $_.SourceFile }
+        foreach ($prop in $_.Value.PSObject.Properties) { $obj[$prop.Name] = $prop.Value }
+        [PSCustomObject]$obj
+    }
 
     if ($MAC)          { $entries = $entries | Where-Object { $_.MAC -eq $MAC.ToUpper() } }
     if ($Computername) { $entries = $entries | Where-Object { $_.Computername -eq $Computername } }
@@ -1960,9 +2051,13 @@ function ConvertTo-NDTMac {
 function Add-NDTComputer {
     <#
     .SYNOPSIS
-        Adds a new computer entry to CustomSettings.json.
+        Adds a new computer entry to CustomSettings.json, or to a file under Control\Projects.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
+    .PARAMETER File
+        Target file relative to Control\Projects (e.g. 'ProjectA\web-tier'); '.json' is appended
+        if missing and folders/file are created as needed. Rooted paths and paths escaping
+        Control\Projects are rejected. Default: Control\CustomSettings.json.
     .PARAMETER MAC
         MAC address of the computer (colon-separated, any case).
     .PARAMETER Computername
@@ -2001,11 +2096,16 @@ function Add-NDTComputer {
         Get-NDTComputer -MAC '00:15:5D:02:40:1C' |
             Add-NDTComputer -MAC '00:15:5D:02:40:99' -Computername NDT03 -IPAddress '10.0.3.99/24'
         Clones the NDT01 entry into a new machine, replacing only the unique fields.
+    .EXAMPLE
+        Add-NDTComputer -File 'ProjectA\sql01' -MAC '00:15:5D:02:56:06' -Computername sql01 -OS WIN2025DCG
+        Writes the entry to Control\Projects\ProjectA\sql01.json instead of CustomSettings.json.
     #>
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Manual')]
     param (
         [Parameter()]
         [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter()]
+        [string]$File,
         [Parameter(Mandatory)]
         [string]$MAC,
         [Parameter(Mandatory, ValueFromPipeline, ParameterSetName = 'Clone')]
@@ -2042,17 +2142,26 @@ function Add-NDTComputer {
         $path = Join-Path $LocalPath 'Control\CustomSettings.json'
         if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
 
-        $normalMAC = ConvertTo-NDTMac $MAC
-        $settings  = Get-Content $path -Raw | ConvertFrom-Json
+        $normalMAC  = ConvertTo-NDTMac $MAC
+        $targetPath = if ($PSBoundParameters.ContainsKey('File')) { Resolve-NDTProjectFile -LocalPath $LocalPath -File $File } else { $path }
 
-        if ($settings.PSObject.Properties[$normalMAC]) {
-            throw "Computer '$normalMAC' already exists. Use Set-NDTComputer to update it."
+        # Uniqueness is checked across CustomSettings.json and every Projects file.
+        $existing = @(Get-NDTMachineEntry -LocalPath $LocalPath | Where-Object { $_.MAC -eq $normalMAC })
+        if ($existing.Count -gt 0) {
+            throw "Computer '$normalMAC' already exists (Control\$($existing[0].SourceFile)). Use Set-NDTComputer to update it."
         }
+
+        $settings = $null
+        if (Test-Path -LiteralPath $targetPath) {
+            $raw = Get-Content -LiteralPath $targetPath -Raw
+            if (-not [string]::IsNullOrWhiteSpace($raw)) { $settings = $raw | ConvertFrom-Json }
+        }
+        if ($null -eq $settings) { $settings = [PSCustomObject]@{} }
 
         $entry = [ordered]@{}
         if ($InputObject) {
             foreach ($prop in $InputObject.PSObject.Properties) {
-                if ($prop.Name -eq 'MAC') { continue }   # MAC is the key, never a value
+                if ($prop.Name -in 'MAC', 'SourceFile') { continue }   # MAC is the key; SourceFile is read-only metadata
                 $entry[$prop.Name] = $prop.Value
             }
         }
@@ -2071,8 +2180,10 @@ function Add-NDTComputer {
         }
 
         if ($PSCmdlet.ShouldProcess($normalMAC, 'Add computer entry')) {
+            $targetDir = Split-Path -Parent $targetPath
+            if (-not (Test-Path -LiteralPath $targetDir)) { $null = New-Item -ItemType Directory -Path $targetDir -Force }
             $settings | Add-Member -MemberType NoteProperty -Name $normalMAC -Value ([PSCustomObject]$entry)
-            $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
+            $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -LiteralPath $targetPath -Encoding UTF8
             Write-Verbose "Added computer '$normalMAC' ($($entry.Computername))."
             if ($entry.Computername) { Remove-NDTProgress -Computername $entry.Computername -LocalPath $LocalPath }
             Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
@@ -2083,7 +2194,8 @@ function Add-NDTComputer {
 function Set-NDTComputer {
     <#
     .SYNOPSIS
-        Updates an existing computer entry in CustomSettings.json.
+        Updates an existing computer entry in whichever file holds it (CustomSettings.json or
+        Control\Projects\**\*.json). Refuses if the MAC is defined more than once.
         Only parameters that are explicitly supplied are changed.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
@@ -2144,14 +2256,11 @@ function Set-NDTComputer {
         [hashtable]$Properties
     )
 
-    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
-    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
-
-    $normalMAC = $MAC.ToUpper()
-    $settings  = Get-Content $path -Raw | ConvertFrom-Json
-    $entry     = $settings.PSObject.Properties[$normalMAC]
-
-    if (-not $entry) { throw "Computer '$normalMAC' not found in CustomSettings.json." }
+    $found    = Resolve-NDTMachineEntry -LocalPath $LocalPath -MAC $MAC
+    $path     = $found.Path
+    $normalMAC = $found.MAC
+    $settings = $found.Root
+    $entry    = $settings.PSObject.Properties[$found.Key]
 
     if ($PSCmdlet.ShouldProcess($normalMAC, 'Update computer entry')) {
         if ($PSBoundParameters.ContainsKey('Computername'))   { $entry.Value.Computername   = $Computername }
@@ -2185,7 +2294,7 @@ function Set-NDTComputer {
                 }
             }
         }
-        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
         Write-Verbose "Updated computer '$normalMAC'."
         Get-NDTComputer -LocalPath $LocalPath -MAC $normalMAC
     }
@@ -2194,7 +2303,9 @@ function Set-NDTComputer {
 function Remove-NDTComputer {
     <#
     .SYNOPSIS
-        Removes a computer entry from CustomSettings.json.
+        Removes a computer entry from whichever file holds it (CustomSettings.json or
+        Control\Projects\**\*.json). Refuses if the MAC is defined more than once. A Projects
+        file is never deleted - removing its last MAC leaves it as {}.
     .PARAMETER LocalPath
         Root of the NDT deployment share. Default: C:\Deploy2026
     .PARAMETER MAC
@@ -2212,21 +2323,17 @@ function Remove-NDTComputer {
         [string]$MAC
     )
 
-    $path      = Join-Path $LocalPath 'Control\CustomSettings.json'
-    if (-not (Test-Path $path)) { throw "CustomSettings.json not found at: $path" }
+    $found     = Resolve-NDTMachineEntry -LocalPath $LocalPath -MAC $MAC
+    $path      = $found.Path
+    $normalMAC = $found.MAC
+    $settings  = $found.Root
 
-    $normalMAC = $MAC.ToUpper()
-    $settings  = Get-Content $path -Raw | ConvertFrom-Json
-
-    if (-not $settings.PSObject.Properties[$normalMAC]) {
-        throw "Computer '$normalMAC' not found in CustomSettings.json."
-    }
-
-    $computername = $settings.PSObject.Properties[$normalMAC].Value.Computername
+    $computername = $found.Value.Computername
 
     if ($PSCmdlet.ShouldProcess($normalMAC, 'Remove computer entry')) {
-        $settings.PSObject.Properties.Remove($normalMAC)
-        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $path -Encoding UTF8
+        $settings.PSObject.Properties.Remove($found.Key)
+        # The file is left in place (as {} when this was its last MAC), never deleted.
+        $settings | ConvertTo-NDTJson -Depth 10 | Set-Content -LiteralPath $path -Encoding UTF8
         Write-Verbose "Removed computer '$normalMAC'."
 
         if ($computername) { Remove-NDTProgress -Computername $computername -LocalPath $LocalPath }
@@ -2678,7 +2785,6 @@ function Test-NDTComputerEntry {
     foreach ($f in 'CustomSettings.json', 'OS.json', 'Sections.json', 'DeploymentGroups.json', 'DeploymentActions.json') {
         if (-not (Test-Path (Join-Path $ctl $f))) { throw "$f not found at: $(Join-Path $ctl $f)" }
     }
-    $settings = Get-Content (Join-Path $ctl 'CustomSettings.json') -Raw | ConvertFrom-Json
     $osJson   = Get-Content (Join-Path $ctl 'OS.json') -Raw | ConvertFrom-Json
     $snJson   = Get-Content (Join-Path $ctl 'Sections.json') -Raw | ConvertFrom-Json
     $dgJson   = Get-Content (Join-Path $ctl 'DeploymentGroups.json') -Raw | ConvertFrom-Json
@@ -2688,7 +2794,8 @@ function Test-NDTComputerEntry {
     if ($PSBoundParameters.ContainsKey('MAC')) {
         try {
             $normalMAC = ConvertTo-NDTMac $MAC
-            if ($settings.PSObject.Properties[$normalMAC]) { $errors.Add("MAC $normalMAC already exists in CustomSettings.json.") }
+            $existing  = @(Get-NDTMachineEntry -LocalPath $LocalPath | Where-Object { $_.MAC -eq $normalMAC })
+            if ($existing.Count -gt 0) { $errors.Add("MAC $normalMAC already exists in Control\$($existing[0].SourceFile).") }
         } catch { $errors.Add($_.Exception.Message) }
     }
 
@@ -2854,24 +2961,43 @@ function Test-NDTDeployment {
         return $false
     }
 
-    $settings        = Get-Content $csPath -Raw | ConvertFrom-Json
     $sectionsCatalog = Get-Content $snPath -Raw | ConvertFrom-Json
     $deployment      = Get-Content $djPath -Raw | ConvertFrom-Json
     $groups          = Get-Content $dgPath -Raw | ConvertFrom-Json
     $osCatalog       = Get-Content $osPath -Raw | ConvertFrom-Json
 
-    # -- [2] MAC entry -----------------------------------------------------------
+    # -- [2] MAC entry (CustomSettings.json + Control\Projects) ------------------
     Write-Host "`n[2] Machine entry" -ForegroundColor White
-    $machineEntry = $settings.PSObject.Properties[$normalMAC]
-    Write-Check "MAC $normalMAC in CustomSettings.json" ([bool]$machineEntry)
+    $allEntries = $null
+    try {
+        $allEntries = @(Get-NDTMachineEntry -LocalPath $LocalPath)
+        Write-Check 'Machine files readable (CustomSettings.json + Projects)' $true
+    } catch {
+        Write-Check 'Machine files readable (CustomSettings.json + Projects)' $false $_.Exception.Message
+        Write-Host "`n  Cannot read machine configuration  -  cannot continue." -ForegroundColor Red
+        Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
+        return $false
+    }
 
-    if (-not $machineEntry) {
+    $macHits = @($allEntries | Where-Object { $_.MAC -eq $normalMAC })
+    Write-Check "MAC $normalMAC found" ($macHits.Count -gt 0) $(if ($macHits.Count -gt 0) { "Control\$($macHits[0].SourceFile)" })
+    if ($macHits.Count -gt 1) {
+        Write-Check "MAC $normalMAC unique" $false "Defined in: $(($macHits | ForEach-Object { "Control\$($_.SourceFile)" }) -join ', ')"
+    }
+
+    # Any duplicate blocks every deployment on the share, not just this MAC.
+    $otherDupes = @($allEntries | Group-Object MAC | Where-Object { $_.Count -gt 1 -and $_.Name -ne $normalMAC })
+    foreach ($d in $otherDupes) {
+        Write-Check "Duplicate MAC $($d.Name) elsewhere (blocks all deployments)" $false "Defined in: $(($d.Group | ForEach-Object { "Control\$($_.SourceFile)" }) -join ', ')"
+    }
+
+    if ($macHits.Count -eq 0) {
         Write-Host "`n  MAC not found  -  cannot continue." -ForegroundColor Red
         Write-Host "`nResult: $($script:checkErrors) error(s), $($script:checkWarnings) warning(s)`n" -ForegroundColor Red
         return $false
     }
 
-    $machine = $machineEntry.Value
+    $machine = $macHits[0].Value
 
     # -- [3] Required fields -----------------------------------------------------
     Write-Host "`n[3] Required fields" -ForegroundColor White
@@ -3011,7 +3137,7 @@ function Watch-NDTDeployment {
         name (a VM's MAC can change across reboots in a Hyper-V farm).
     .PARAMETER MAC
         MAC address of the machine to watch (colon- or dash-separated, any case).
-        Resolved to its Computername via Control\CustomSettings.json before querying.
+        Resolved to its Computername via CustomSettings.json / Control\Projects before querying.
     .PARAMETER MonitorUrl
         Base URL of the NDT Monitor (e.g. https://ndt01:443). If omitted, it is
         resolved from the Deploy section (MonitorUrl) of Control\Sections.json.
@@ -3055,23 +3181,19 @@ function Watch-NDTDeployment {
 
     process {
         # Determine the machine name to query. The monitor keys state by computer
-        # name; if only a MAC was supplied, resolve it via CustomSettings.json.
+        # name; if only a MAC was supplied, resolve it via the merged machine set
+        # (CustomSettings.json + Control\Projects).
         $targetName = $Computername
         if (-not $targetName -and $MAC) {
             $normalMAC = $MAC.ToUpper().Replace('-', ':')
-            $csPath = Join-Path $LocalPath 'Control\CustomSettings.json'
-            if (Test-Path $csPath) {
-                try {
-                    $cs = Get-Content $csPath -Raw | ConvertFrom-Json
-                    if ($cs.$normalMAC -and $cs.$normalMAC.Computername) {
-                        $targetName = $cs.$normalMAC.Computername
-                    }
-                } catch {
-                    # Fall through to the throw below.
-                }
+            try {
+                $hit = @(Get-NDTMachineEntry -LocalPath $LocalPath | Where-Object { $_.MAC -eq $normalMAC }) | Select-Object -First 1
+                if ($hit -and $hit.Value.Computername) { $targetName = $hit.Value.Computername }
+            } catch {
+                # Fall through to the throw below.
             }
             if (-not $targetName) {
-                throw "Could not resolve a Computername for MAC '$normalMAC' from CustomSettings.json. Supply -Computername instead."
+                throw "Could not resolve a Computername for MAC '$normalMAC' from CustomSettings.json or Control\Projects. Supply -Computername instead."
             }
         }
         if (-not $targetName) {

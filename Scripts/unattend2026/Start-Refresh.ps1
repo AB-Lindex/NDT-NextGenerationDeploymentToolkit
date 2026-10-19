@@ -6,8 +6,8 @@
 
         \\dc01.corp.dev\Deploy2026\Scripts\unattend2026\Start-Refresh.ps1
 
-    1. Validates this machine against the share (MAC block in CustomSettings.json,
-       Install:NO guard, OS key -> OS.json -> WIM file exists, PE ISO exists).
+    1. Validates this machine against the share (MAC block in CustomSettings.json or
+       Control\Projects, Install:NO guard, OS key -> OS.json -> WIM file exists, PE ISO exists).
     2. Asks you to type the computer name (skip with -Force).
     3. Copies boot.wim + boot.sdi from Boot\boot2026.iso to C:\NDT-PE and adds a
        ONE-SHOT ramdisk BCD entry (bcdedit /bootsequence) for WinPE.
@@ -24,7 +24,7 @@
     Skip the "type the computer name" confirmation.
 .PARAMETER MacAddress
     Override MAC detection (colon- or dash-separated). Default: first IP-enabled adapter
-    whose MAC has a block in CustomSettings.json.
+    whose MAC has a block in CustomSettings.json or Control\Projects.
 #>
 [CmdletBinding()]
 param(
@@ -79,7 +79,10 @@ foreach ($f in @($csPath, (Join-Path $shareRoot 'Control\OS.json'), (Join-Path $
     if (-not (Test-Path $f)) { Write-Error "Not found: $f (is this script being run from the deploy share?)"; exit 1 }
 }
 
-$cs = Get-Content $csPath -Raw | ConvertFrom-Json
+. (Join-Path $PSScriptRoot 'Get-NDTMachine.ps1')
+$machineSource = @{}
+try { $cs = Get-NDTMachine -ControlPath (Join-Path $shareRoot 'Control') -SourceMap $machineSource }
+catch { Write-Error $_.Exception.Message; exit 1 }
 
 if ($MacAddress) {
     $candidates = @($MacAddress.ToUpper().Replace('-', ':'))
@@ -90,7 +93,7 @@ if ($candidates.Count -eq 0) { Write-Error 'No IP-enabled network adapter found.
 
 $mac = $candidates | Where-Object { $_ -and $cs.PSObject.Properties[$_] } | Select-Object -First 1
 if (-not $mac) {
-    Write-Error "None of this machine's MAC addresses ($($candidates -join ', ')) has a block in CustomSettings.json."
+    Write-Error "None of this machine's MAC addresses ($($candidates -join ', ')) has a block in CustomSettings.json or Control\Projects."
     exit 1
 }
 if ($mac -ne $candidates[0]) {
@@ -115,6 +118,7 @@ if (-not (Test-Path $isoPath)) { Write-Error "WinPE ISO not found: $isoPath (bui
 $firmware = if ($env:firmware_type -eq 'UEFI') { 'UEFI' } else { 'BIOS' }
 
 Write-Host "  MAC          : $mac"
+Write-Host "  Config file  : Control\$($machineSource[$mac.ToUpper()])"
 Write-Host "  Target name  : $($machine.Computername)"
 Write-Host "  OS           : $osKey"
 Write-Host "  WIM          : $wimPath (index $($osInfo.Index))"

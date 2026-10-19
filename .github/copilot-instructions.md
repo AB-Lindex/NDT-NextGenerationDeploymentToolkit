@@ -31,6 +31,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ├── Boot/boot2026.wim              ← WinPE image served by WDS
 ├── Control/
 │   ├── CustomSettings.json        ← per-machine config keyed by MAC address only
+│   ├── Projects/                  ← optional extra MAC files (Projects\**\*.json), merged with CustomSettings.json; empty (.gitkeep) in the public repo
 │   ├── Sections.json              ← shared named sections (locale, network, AD, deploy credentials)
 │   ├── DeploymentGroups.json      ← named groups: ordered steps referencing DeploymentActions.json keys
 │   ├── DeploymentActions.json     ← action definitions: scripts, Reboot, AutoLogon
@@ -46,7 +47,8 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── Get-MACAddress.ps1
 │   ├── Get-OS.ps1
 │   ├── Invoke-NDTSql.ps1         ← parameterised SQL query over TCP/SQL auth (System.Data.SqlClient; works in PE PS5 + PS7 and OS); settings from the `NDTSql` section of Sections.json (not used by deployment lookups yet)
-│   ├── Get-Settings.ps1           ← fills unattend.xml from CustomSettings.json (template chosen per OS via OS.json)
+│   ├── Get-Settings.ps1           ← fills unattend.xml from the machine's block (template chosen per OS via OS.json)
+│   ├── Get-NDTMachine.ps1         ← dot-sourced helper: merges CustomSettings.json + Control\Projects\**\*.json into one object keyed by MAC (PS 5.1 compatible; duplicate MAC / invalid JSON = terminating error)
 │   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
 │   ├── Start-Refresh.ps1          ← in-OS launcher: validates MAC/OS/WIM, stages boot2026.iso PE to C:\NDT-PE, one-shot ramdisk BCD entry, reboots into the normal WinPE install.ps1 flow (re-image in place)
 │   ├── test.ps1                   ← standalone test: runs Copy-Install + Get-Settings
@@ -77,7 +79,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 
 1. Check capture flag (`DeployCapture.flag` on any drive) → if set, remove flag, clean `C:\temp`, call `Capture-ReferenceImage.ps1`, exit.
 2. Detect BIOS/UEFI firmware type — recorded early but **disk is not touched** until all validations pass.
-3. Validate MAC address against `Control/CustomSettings.json`; abort with error if not found.
+3. Validate MAC address against the merged machine set (`Control/CustomSettings.json` + `Control/Projects/**/*.json`, via `Get-NDTMachine.ps1`); abort with error if not found, if the MAC is duplicated, or if any file is invalid JSON (reported in the same "press Enter to retry" loop, before the disk is touched).
    - **`Install:NO` guard** — if the MAC block has `"Install": "NO"` (case-insensitive), skip deployment entirely: reboot without touching the disk. Prevents accidental re-imaging. Any other value (or absent) deploys normally.
 4. Resolve and validate WIM path + index from `Control/OS.json`; abort if WIM file not found.
 5. All pre-flight checks passed → partition disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
@@ -107,7 +109,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
-1. Read machine's `DeploymentGroups` from `CustomSettings.json` (matched by MAC).
+1. Read machine's `DeploymentGroups` from its MAC block (merged `CustomSettings.json` + `Control\Projects`, matched by MAC).
    - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentGroups`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
 2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `DeploymentActions.json`.
 3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
@@ -145,6 +147,17 @@ MAC address blocks only — one per machine:
   "FinishAction": "PROMPT"     // optional: DESKTOP (default) | PROMPT | REBOOT | SHUTDOWN | LOGOFF; overrides the deploy section
 }
 ```
+
+#### Control\Projects (per-project MAC files)
+
+`Control\Projects\**\*.json` (recursive, `*.json` only) holds extra MAC blocks in exactly the same format; one file may hold one or many MACs, folder/file names are free. Effective machine set = `CustomSettings.json` + every Projects file, resolved by the shared `Scripts\unattend2026\Get-NDTMachine.ps1` (drop-in for `Get-Content CustomSettings.json | ConvertFrom-Json`, optional `-SourceMap`). The module carries its own copy of the lookup (`Get-NDTMachineEntry` in `ndt.psm1`) since it cannot dot-source the share helper - keep the two in step.
+
+- Only MAC-shaped keys count (case-insensitive, normalised to upper case); other keys (e.g. `_Project`) are ignored. Empty files are skipped; a missing `Projects` folder adds nothing.
+- **Duplicate MAC = hard error** (same or different files) and **invalid JSON in any file = hard error**: deployment aborts in WinPE before the disk is touched; `Test-NDTDeployment` flags both. No precedence rules, no `_` parking prefix - park a machine with `Install:NO`.
+- Public repo: `Control\Projects\.gitkeep` only (`.gitignore`: `Control/Projects/*` + `!Control/Projects/.gitkeep`). `Update-NDT` never removes or overwrites anything in it (Control is preserved, add-only).
+- Scope is MAC blocks only (not Sections / DeploymentGroups / DeploymentActions). The TUI still writes to `CustomSettings.json`.
+- Module: `Get-NDTComputer` adds `SourceFile` (relative to `Control`; skipped when cloning via pipeline); `Add-NDTComputer -File` (relative to `Projects`, `.json` appended, folders created, rooted/`..` rejected; default `CustomSettings.json`); `Set-`/`Remove-NDTComputer` write back to the owning file and refuse a duplicated MAC; `Remove-` leaves `{}` rather than deleting the file.
+- Gotcha: `[bool][pscustomobject]@{}` can be `$false` - use `$null -eq` when testing an empty file.
 
 ### Sections.json
 
@@ -229,7 +242,7 @@ Also exported by the module (see `ndt.psd1`):
 - `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer`
 - `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs`
 - `Move-NDTReferenceImage` — moves captured WIM files from `\Reference\` into `\Operating Systems\`. For each `ref-<name>.wim` the destination is `Operating Systems\ref-<name>\<name>.wim` (folder = full stem, file = stem without the `ref-` prefix). Always overwrites; use `-WhatIf` for a dry run.
-- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks CustomSettings.json entry, referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentGroups.json groups, DeploymentActions.json references, and script file paths. Returns `$true` / `$false`.
+- `Test-NDTDeployment` — dry-run validation for a given MAC address: checks the MAC entry (merged CustomSettings.json + Control\Projects, shows the source file, fails on duplicate MACs / unreadable files), referenced sections in Sections.json, OS.json key, WIM file existence, DeploymentGroups.json groups, DeploymentActions.json references, and script file paths. Returns `$true` / `$false`.
 
 ---
 
@@ -239,8 +252,8 @@ Also exported by the module (see `ndt.psd1`):
 
 - **Always use standard ASCII characters in `.ps1`/`.psm1` files** — never em dashes (—), en dashes (–), curly quotes, arrows, or any codepoint > 0x7F, even in comments or string literals. Windows PowerShell 5.1 reads no-BOM files as Windows-1252 and mangles multibyte UTF-8 into parser errors. Use plain substitutes: em/en dash → `-` or ` - `, arrows → `->`.
 - All paths inside JSON files use **backslash**, rooted at the deploy share root (e.g. `\Applications\App2026\install01.ps1`).
-- MAC addresses in `CustomSettings.json` are **colon-separated, uppercase**.
-- Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` contains MAC address blocks only.
+- MAC addresses in `CustomSettings.json` and `Control\Projects` files are **colon-separated, uppercase** (lookup is case-insensitive).
+- Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` and `Control\Projects\*.json` contain MAC address blocks only.
 - `install2026.ps1` runs as **PS 5** (RunOnce/FirstLogonCommands constraint); anything needing PS 7 runs inside `Install-NDT.ps1`.
 - Step progress is persisted to `C:\temp\install-steps.json` — never delete this during a deployment.
 - `C:\temp\settings.json` contains plaintext credentials and is deleted at the end of deployment.

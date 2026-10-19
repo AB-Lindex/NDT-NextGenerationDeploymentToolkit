@@ -85,14 +85,14 @@ The machine boots WinPE (via PXE/WDS, a boot ISO, or `Start-Refresh.ps1`) and lo
 
 1. Checks for a capture-mode flag — if present it runs reference image capture instead of a normal deployment.
 2. Detects firmware type (BIOS/Gen1 or UEFI/Gen2) and hardware (`Get-Hardware.ps1`: physical or virtual, hypervisor, vendor, model, serial) — disk is not touched until all validations pass.
-3. Looks up the machine by MAC address in `Control/CustomSettings.json`; aborts if not found. If the block has `"Install": "NO"` the machine reboots without touching the disk.
+3. Looks up the machine by MAC address in `Control/CustomSettings.json` and `Control/Projects/**/*.json` (merged, see [Projects](#projects-per-project-machine-files)); aborts (with a retry prompt, before the disk is touched) if not found, if the MAC is defined more than once, or if a JSON file is invalid. If the block has `"Install": "NO"` the machine reboots without touching the disk.
 4. Resolves and validates the OS image path and index from `Control/OS.json`; aborts if the WIM file is not found.
 5. All pre-flight checks passed — partitions disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
 6. Applies the OS image to `C:\` with DISM.
 7. Injects OS drivers from `Drivers\OS\<Platform>` whose folder name matches the detected hardware (best-effort, see [Drivers](#drivers)).
 8. Runs the optional `PostPEScript` from the machine's block (PowerShell 5, after the image is applied).
 9. Copies `install2026.ps1` and a `settings.json` (deploy share credentials, local admin password, monitor URL, finish action, start time) to `C:\temp`.
-10. Generates `unattend.xml` from the template, replacing placeholders with values from `CustomSettings.json`. An OS can point at its own template via `Unattend` in `OS.json`.
+10. Generates `unattend.xml` from the template, replacing placeholders with values from the machine's block (`CustomSettings.json` or `Control/Projects`). An OS can point at its own template via `Unattend` in `OS.json`.
 11. Applies `unattend.xml` to the offline image, runs BCDBoot and reboots.
 
 Throughout Phase 1 progress is reported to the [NDT Monitor](#ndt-monitor) (best-effort, never blocks deployment), and the log is written to `X:\install.log` and relocated to `C:\temp\install.log` once the disk is partitioned.
@@ -105,7 +105,7 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 \\<server>\Deploy2026\Scripts\unattend2026\Start-Refresh.ps1
 ```
 
-`Start-Refresh.ps1` checks the machine against the share (MAC block in `CustomSettings.json`, `Install:NO` guard, OS key, WIM and `Boot/boot2026.iso` exist) and asks you to type the computer name (`-Force` skips this). It then stages `boot.wim` and `boot.sdi` from the ISO to `C:\NDT-PE`, adds a one-shot ramdisk BCD entry (`bcdedit /bootsequence`) and reboots. WinPE then runs the normal `install.ps1` flow above. The script wipes nothing itself; if WinPE aborts before partitioning, the next boot returns to the current Windows. There is no user-state backup/restore.
+`Start-Refresh.ps1` checks the machine against the share (MAC block in `CustomSettings.json` or `Control/Projects`, `Install:NO` guard, OS key, WIM and `Boot/boot2026.iso` exist) and asks you to type the computer name (`-Force` skips this). It then stages `boot.wim` and `boot.sdi` from the ISO to `C:\NDT-PE`, adds a one-shot ramdisk BCD entry (`bcdedit /bootsequence`) and reboots. WinPE then runs the normal `install.ps1` flow above. The script wipes nothing itself; if WinPE aborts before partitioning, the next boot returns to the current Windows. There is no user-state backup/restore.
 
 ### Phase 2 — First boot and post-deployment steps
 
@@ -125,7 +125,7 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 
 `Install-NDT.ps1` runs under PowerShell 7 and drives all post-deployment work:
 
-1. Reads the machine's deployment groups from `CustomSettings.json` (matched by MAC address). A machine without `DeploymentGroups` is an OS-only deployment and is reported as done immediately.
+1. Reads the machine's deployment groups from its MAC block (`CustomSettings.json` or `Control/Projects`, matched by MAC address). A machine without `DeploymentGroups` is an OS-only deployment and is reported as done immediately.
 2. Loads the ordered steps for each group from `DeploymentGroups.json`; resolves each step's action from `DeploymentActions.json`.
 3. Tracks completed steps in `C:\temp\install-steps.json` so deployment can resume after a reboot exactly where it left off.
 4. Supports five step types:
@@ -235,6 +235,7 @@ Deploy2026/
 │   └── boot2026-uefi.iso         # UEFI-only, no-prompt boot ISO (Gen 2)
 ├── Control/
 │   ├── CustomSettings.json       # Per-machine config (keyed by MAC address only)
+│   ├── Projects/                 # Optional extra MAC files, any depth (empty in the public repo, never overwritten by Update-NDT)
 │   ├── Sections.json             # Shared named sections (locale, network, AD, deploy creds)
 │   ├── DeploymentGroups.json     # Named groups of ordered steps referencing DeploymentActions.json keys
 │   ├── DeploymentActions.json    # Action definitions: scripts, Reboot, AutoLogon, etc.
@@ -257,7 +258,8 @@ Deploy2026/
 │       ├── Get-OS.ps1            # Resolves WIM path/index from OS.json (-ShareRoot, default Z:\)
 │       ├── Get-Hardware.ps1      # Physical/virtual, hypervisor, vendor, model, serial
 │       ├── Invoke-NDTSql.ps1     # Parameterised SQL query over TCP with SQL authentication (WinPE PS5/PS7 and OS)
-│       ├── Get-Settings.ps1      # Generates unattend.xml from template + CustomSettings.json
+│       ├── Get-Settings.ps1      # Generates unattend.xml from template + the machine's block
+│       ├── Get-NDTMachine.ps1    # Dot-sourced helper: merges CustomSettings.json + Control\Projects\**\*.json
 │       ├── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json on C:\temp
 │       ├── Start-Refresh.ps1     # Run from inside Windows: stages WinPE, one-shot BCD entry, reboots to re-image in place
 │       ├── test.ps1              # Standalone test: runs Copy-Install + Get-Settings
@@ -306,6 +308,28 @@ The central configuration file. Contains one entry per machine, keyed by MAC add
 | any other key | Passed as a script parameter when a `DeploymentActions.json` entry lists it under `Parameters`. |
 
 Merge rule: machine keys always win; sections only fill keys the machine does not set, and between sections the first one in order wins.
+
+#### Projects (per-project machine files)
+
+To keep groups of servers apart (per project, per customer, one file per server), put JSON files with MAC blocks under `Control/Projects/`. The format is identical to `CustomSettings.json`; one file may hold one or many MAC blocks, and folder and file names are free (any depth, `*.json` only).
+
+```
+Control/
+├── CustomSettings.json          # still read, merged with Projects
+└── Projects/
+    ├── ProjectA/
+    │   ├── web-tier.json        # many MAC blocks
+    │   └── sql01.json           # one server
+    └── Customer-X.json
+```
+
+- The effective machine set is `CustomSettings.json` plus every `Projects/**/*.json`. Only MAC-shaped keys count (case-insensitive, normalised to upper case); other keys (e.g. `"_Project": "..."`) are ignored. Empty files are skipped; a missing `Projects` folder adds nothing.
+- **A MAC defined more than once (in the same or different files) aborts deployment**, as does an invalid JSON file. Both are reported in WinPE before the disk is touched, and `Test-NDTDeployment` flags them. Because uniqueness is checked across the whole set, one bad file blocks every deployment on the share until fixed.
+- To park a machine, set `"Install": "NO"` in its block.
+- `Control/Projects` is empty in the public repo (only a `.gitkeep`), and `Update-NDT` never removes or overwrites anything in it.
+- `Get-NDTComputer` returns a `SourceFile` property (relative to `Control`); `Add-NDTComputer -File <name>` writes to `Control\Projects\<name>.json`; `Set-`/`Remove-NDTComputer` write back to whichever file holds the MAC (removing the last MAC leaves `{}`, the file is never deleted).
+- `AdminPassword` lives in each MAC block, so it ends up in every project file - same share ACL, but more places to clean up.
+- Only MAC blocks are split this way; `Sections.json`, `DeploymentGroups.json` and `DeploymentActions.json` stay single files.
 
 ### Sections.json
 
@@ -397,10 +421,10 @@ The `NDT` module (`install\NDT`, published to the PowerShell Gallery) is used to
 | `Update-NDT` | In-place upgrade of code; see [Updating NDT](#updating-ndt). |
 | `Install-NDTMonitor` | Install the NDT Monitor IIS service (idempotent). |
 | `New-NDTPEImage` | Build the WinPE WIM and both ISOs, inject drivers, update the WDS boot image (`-SkipISO`, `-SkipWDS`, `-RegisterOnly`, `-DriverPath`, `-RootCACertName`, `-PS7`). |
-| `Get-/Add-/Set-/Remove-NDTComputer` | Manage machine blocks in `CustomSettings.json`. |
+| `Get-/Add-/Set-/Remove-NDTComputer` | Manage machine blocks in `CustomSettings.json` and `Control\Projects\**\*.json` (`Add-NDTComputer -File` picks the Projects file; `SourceFile` on `Get-NDTComputer` output). |
 | `Get-/Add-/Set-/Remove-NDTOs` | Manage the OS catalog in `OS.json` (`-Unattend` sets the per-OS template). |
 | `Move-NDTReferenceImage` | Publish captured WIMs from `Reference\` to `Operating Systems\`. |
-| `Test-NDTDeployment` | Read-only dry run for a MAC: machine block, sections, OS key, WIM, groups, actions, script paths, finish action. Returns `$true`/`$false`. |
+| `Test-NDTDeployment` | Read-only dry run for a MAC: machine block and its source file, duplicate/unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action. Returns `$true`/`$false`. |
 | `Watch-NDTDeployment` | Live progress bar for a machine until it reports Done. |
 | `Remove-NDTProgress` | Delete a machine's monitor progress file. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). |
@@ -412,7 +436,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 
 ## Updating NDT
 
-- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). After `Install-NDT`/`Update-NDT` the module and repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) are removed from the live share.
+- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` and `Control\Projects\` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). After `Install-NDT`/`Update-NDT` the module and repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) are removed from the live share.
 - **The module itself**: update an AllUsers install with `Install-Module NDT -Force -Scope AllUsers`. Do **not** use `Update-Module` on PowerShellGet 2.x; it installs to CurrentUser and the newer copy then shadows the AllUsers one.
 - **Boot image**: rebuild with `New-NDTPEImage` after changing `install.ps1`, drivers or the WinPE launcher, since those are baked into the WIM.
 

@@ -6,6 +6,7 @@
 # Exclude a folder at the root of the repository
 Applications2026/
 Operating Systems/*
+Control/Projects/*
 Scratch/
 Scripts/MDT Scripts/
 
@@ -17,6 +18,7 @@ Scripts/MDT Scripts/
 !Operating Systems/*/
 Operating Systems/*/*
 !Operating Systems/*/.gitkeep
+!Control/Projects/.gitkeep
 !Scratch/.gitkeep
 
 # User-specific files

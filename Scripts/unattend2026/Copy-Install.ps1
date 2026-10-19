@@ -4,8 +4,9 @@
 $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 
 # Get Deploy settings
-$customSettingsPath = "Z:\Control\CustomSettings.json"
-$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+. "Z:\Scripts\Unattend2026\Get-NDTMachine.ps1"
+try { $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' }
+catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsPath = "Z:\Control\Sections.json"
 $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 

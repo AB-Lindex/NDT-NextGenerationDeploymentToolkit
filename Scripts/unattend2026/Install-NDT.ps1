@@ -89,9 +89,15 @@ Write-Log "IP       : $sysIP"
 Write-Log "MAC      : $macAddress (from settings.json)"
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 
-# Load CustomSettings.json
-$customSettingsPath = "Z:\Control\CustomSettings.json"
-$customSettings = Get-Content -Path $customSettingsPath -Raw | ConvertFrom-Json
+# Load machine config: CustomSettings.json merged with Control\Projects\**\*.json
+. "Z:\Scripts\unattend2026\Get-NDTMachine.ps1"
+$machineSource = @{}
+try {
+    $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' -SourceMap $machineSource
+} catch {
+    Write-Log "Could not load machine configuration: $($_.Exception.Message)" -Level ERROR
+    exit 1
+}
 
 # Load Sections.json (shared named sections)
 $sectionsPath = "Z:\Control\Sections.json"
@@ -109,6 +115,7 @@ if (-not $machineConfig) {
     Write-Log "No configuration found for MAC address: $macAddress" -Level ERROR
     exit 1
 }
+Write-Log "Machine config source: Control\$($machineSource[$macAddress.ToUpper()])" -ForegroundColor Gray
 
 # Resolve the NDT Monitor URL early (from C:\temp\settings.json, written by Copy-Install.ps1)
 # so that even early-exit paths below can report a final status to the monitor.
