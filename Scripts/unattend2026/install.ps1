@@ -81,16 +81,34 @@ function Send-PEProgress {
         Percent      = $Percent
         Timestamp    = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
     } | ConvertTo-Json -Compress
-    try {
-        # Bypass TLS cert validation for the internal monitoring endpoint (best-effort, PS5.1).
-        # The monitor uses an internal-CA cert that WinPE does not trust by default.
-        if ($script:MonitorUrl -like 'https://*') {
+    $rest = @{
+        Uri         = "$script:MonitorUrl/progress"
+        Method      = 'Post'
+        Body        = $body
+        ContentType = 'application/json'
+        TimeoutSec  = 5
+        ErrorAction = 'Stop'
+    }
+    # The monitor uses an internal-CA cert that WinPE does not trust by default, so
+    # bypass TLS cert validation. PS 5.1 honours ServicePointManager; PS 7 uses
+    # HttpClient, which ignores it and needs -SkipCertificateCheck instead.
+    if ($script:MonitorUrl -like 'https://*') {
+        if ($PSVersionTable.PSVersion.Major -ge 6) {
+            $rest.SkipCertificateCheck = $true
+        } else {
             [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
         }
-        Invoke-RestMethod -Uri "$script:MonitorUrl/progress" -Method Post -Body $body `
-            -ContentType 'application/json' -TimeoutSec 5 -ErrorAction Stop | Out-Null
-    } catch {
-        # Non-critical - never block deployment on a monitor outage.
+    }
+    # Retry: the first post after an idle gap often times out on a cold connection.
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            Invoke-RestMethod @rest | Out-Null
+            return
+        } catch {
+            # Non-critical - never block deployment on a monitor outage.
+            if ($attempt -eq 2) { Write-Log "Monitor POST failed: $($_.Exception.Message)" -Level WARN }
+            else { Start-Sleep -Milliseconds 500 }
+        }
     }
 }
 

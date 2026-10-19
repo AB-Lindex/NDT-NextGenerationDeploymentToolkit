@@ -2263,16 +2263,22 @@ function Set-NDTComputer {
     $entry    = $settings.PSObject.Properties[$found.Key]
 
     if ($PSCmdlet.ShouldProcess($normalMAC, 'Update computer entry')) {
-        if ($PSBoundParameters.ContainsKey('Computername'))   { $entry.Value.Computername   = $Computername }
-        if ($PSBoundParameters.ContainsKey('OS'))             { $entry.Value.OS             = $OS }
-        if ($PSBoundParameters.ContainsKey('IPAddress'))      { $entry.Value.IPAddress      = $IPAddress }
-        if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { $entry.Value.AdminPassword  = $LocalAdmin }
+        # Sets a property, adding it when the entry does not have it yet.
+        $setValue = {
+            param([string]$Name, $Value)
+            if ($entry.Value.PSObject.Properties[$Name]) { $entry.Value.PSObject.Properties[$Name].Value = $Value }
+            else { $entry.Value | Add-Member -MemberType NoteProperty -Name $Name -Value $Value }
+        }
+        if ($PSBoundParameters.ContainsKey('Computername'))   { & $setValue 'Computername'   $Computername }
+        if ($PSBoundParameters.ContainsKey('OS'))             { & $setValue 'OS'             $OS }
+        if ($PSBoundParameters.ContainsKey('IPAddress'))      { & $setValue 'IPAddress'      $IPAddress }
+        if ($PSBoundParameters.ContainsKey('LocalAdmin'))     { & $setValue 'AdminPassword'  $LocalAdmin }
         if ($PSBoundParameters.ContainsKey('Install')) {
             if ($entry.Value.PSObject.Properties['Install']) { $entry.Value.Install = $Install }
             else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'Install' -Value $Install }
         }
-        if ($PSBoundParameters.ContainsKey('Sections'))       { $entry.Value.Sections       = $Sections }
-        if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ $entry.Value.DeploymentGroups = $DeploymentGroups }
+        if ($PSBoundParameters.ContainsKey('Sections'))       { & $setValue 'Sections'       $Sections }
+        if ($PSBoundParameters.ContainsKey('DeploymentGroups')){ & $setValue 'DeploymentGroups' $DeploymentGroups }
         if ($PSBoundParameters.ContainsKey('FinishAction')) {
             if ($entry.Value.PSObject.Properties['FinishAction']) { $entry.Value.FinishAction = $FinishAction.ToUpper() }
             else { $entry.Value | Add-Member -MemberType NoteProperty -Name 'FinishAction' -Value $FinishAction.ToUpper() }
