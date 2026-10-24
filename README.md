@@ -116,7 +116,7 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 
 `install2026.ps1` runs under PowerShell 5 (via RunOnce/FirstLogonCommands) and:
 
-1. Exits immediately if `C:\temp\deploy-complete.flag` exists (prevents double-run caused by both mechanisms firing on the same logon).
+1. Exits immediately if `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag` exists (prevents double-run caused by both mechanisms firing on the same logon), unless it is started with `-AdminPassword`/`-DeployPassword` to rerun a finished deployment (see below).
 2. Handles the reboot-flag (`C:\temp\reboot.flag`) to distinguish a re-logon loop from a genuine completed reboot.
 3. Re-registers `RunOnce\Deploy2026` so deployment survives any intermediate reboots.
 4. Waits for a usable IPv4 address, then maps the deployment share from the credentials in `C:\temp\settings.json`, retrying until `Z:\Control\CustomSettings.json` is reachable (timeout `MapTimeoutSec` in the deploy section, default 120 s). This matters on physical NICs that are slow to get a link.
@@ -138,11 +138,19 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 When all steps are done with no pending reboot, `install2026.ps1`:
 - Unmounts the deployment share.
 - Removes `RunOnce\Deploy2026` and disables AutoAdminLogon.
-- Writes `C:\temp\deploy-complete.flag`.
-- Removes `C:\temp\settings.json` and `C:\temp\install2026.ps1`.
+- Writes `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag`.
+- Moves the deployment files out of `C:\temp` into `C:\Windows\Temp\DeploymentLogs` (the folder MDT uses): `install.log`, `install2026.log`, `install-NDT.log`, `install-steps.json` and `settings.json`, with the Administrator and Deploy passwords blanked in the archived `settings.json`. `install2026.ps1` stays in `C:\temp`.
 - Runs the **finish action**.
 
-If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in place and the finish action runs with a failure status.
+If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in place, the files stay in `C:\temp`, and the finish action runs with a failure status.
+
+**Rerunning a finished deployment.** To re-run steps or run steps added since, start the script from `C:\temp` with the two passwords that were blanked:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File C:\temp\install2026.ps1 -AdminPassword '<local admin password>' -DeployPassword '<deploy account password>'
+```
+
+Supplying either parameter while `deploy-complete.flag` exists starts the rerun (`-DeployPassword` is required to map the share; without `-AdminPassword` a Reboot step cannot sign in automatically). The files return to `C:\temp`, only steps not yet in `install-steps.json` run, logs are appended, and the files move back to `DeploymentLogs` when the rerun finishes. The parameters also override the stored passwords on a normal run.
 
 ### Finish action
 
@@ -455,7 +463,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 - **Secure Boot.** Hyper-V Gen 2 VMs boot the Microsoft-signed WDS/WinPE chain with Secure Boot on. The iPXE option in `Applications\iPXE` is unsigned and therefore only for lab, physical or Secure-Boot-off use.
 - **WDS on Hyper-V.** If PXE transfers are flaky, disable the TFTP variable window (`wdsutil /Set-Server /Transport /EnableTFTPVariableWindowExtension:No`); `Applications\WDS\install.ps1` does this.
 - **Start-Refresh.ps1** wipes disk 0 and has no user-state backup/restore (not an MDT Refresh with USMT).
-- **Credentials.** `Control\*.json` and `C:\temp\settings.json` contain plaintext credentials. Restrict the share to the deploy account; `settings.json` is deleted when deployment completes.
+- **Credentials.** `Control\*.json` and `C:\temp\settings.json` contain plaintext credentials. Restrict the share to the deploy account; when deployment completes `settings.json` is moved to `C:\Windows\Temp\DeploymentLogs` with the Administrator and Deploy passwords blanked.
 - **PE build.** DISM unmount error `0xc1420117` means something (usually Defender) holds a handle in the mount folder; `New-NDTPEImage` adds Defender exclusions and retries the unmount.
 - **Windows 11.** The shared `unattend.xml` skips machine/user OOBE and pins AutoLogon to the local account; without that, Win11 clears AutoLogon on domain-joined machines.
 
@@ -464,7 +472,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 - `.ps1`/`.psm1` files must be **plain ASCII** (no em/en dashes, curly quotes or arrows, even in comments): Windows PowerShell 5.1 reads BOM-less files as Windows-1252 and fails to parse them.
 - Scripts that run in WinPE, `install2026.ps1` or both must stay **PowerShell 5.1-compatible**.
 - Paths inside the JSON files use backslashes rooted at the share root; MAC addresses are colon-separated and uppercase.
-- `C:\temp\install-steps.json` tracks step progress; never delete it during a deployment.
+- `C:\temp\install-steps.json` tracks step progress; never delete it during a deployment (after completion it is in `C:\Windows\Temp\DeploymentLogs`).
 
 ---
 

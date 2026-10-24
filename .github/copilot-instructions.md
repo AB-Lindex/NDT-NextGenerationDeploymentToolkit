@@ -92,9 +92,9 @@ Throughout Phase 1, `install.ps1` reports progress to the NDT Monitor (best-effo
 
 ### Phase 2 — First boot (`install2026.ps1`, PS 5)
 
-Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop shortcut after a Pause step).
+Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop shortcut after a Pause step) and optional `-AdminPassword` / `-DeployPassword` (rerun of a finished deployment, see step 1).
 
-1. Skip if `C:\temp\deploy-complete.flag` exists (prevents double-run).
+1. Skip if `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag` exists (prevents double-run) - unless `-AdminPassword` and/or `-DeployPassword` is passed: that is a **rerun** (needs `-DeployPassword` to map the share; no `-AdminPassword` = warning, a Reboot step then cannot auto-logon). A rerun moves the archived files back to `C:\temp`, deletes the flag and continues as a normal run, so only steps not yet in `install-steps.json` run and logs append. On any run the parameters override the passwords stored in `settings.json`; `-AdminPassword` also resets AutoLogon to `.\Administrator` (an AutoLogon step may have switched it).
 2. Check `C:\temp\pause.flag` — if present and `-Resume` not passed, exit immediately (deployment is paused); if `-Resume`, delete the flag and continue.
 3. Handle `C:\temp\reboot.flag` — compare flag timestamp to last-boot time to distinguish re-logon from completed reboot. If flag is newer than boot time, exit (reboot still pending); otherwise delete flag and continue.
 4. Re-register `RunOnce\Deploy2026` to survive intermediate reboots.
@@ -102,7 +102,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 6. Map the deploy share using credentials from `C:\temp\settings.json`. **Waits for the network first**: polls for a usable IPv4 address (skips loopback/tunnel/APIPA `169.254.*`), then retries `net use Z:` on a loop, confirming success via `Test-Path Z:\Control\CustomSettings.json` (not `net use`'s exit code) rather than assuming the first attempt worked. This handles slow physical NICs (DHCP/PHY negotiation) that a VM never hits; without it a slow NIC left `Z:` unmapped and `pwsh -File 'Z:\...\Install-NDT.ps1'` aborted with **exit code 64** (missing `-File` target) before the engine could run. Timeout = `Deploy.MapTimeoutSec` from `settings.json` (**default 120 s**, forwarded by `Copy-Install.ps1` only when set; absent = 120); on timeout it logs an explicit error and exits 1. Mirrors MDT's `ZTIConnect.wsf` → `ValidateNetworkConnectivity` (`ipconfig /renew` if no lease) + `ValidateConnectionEx` (5-try backoff map loop).
 7. Install PS 7 if absent (probes `%ProgramFiles%\PowerShell\7\pwsh.exe` directly — not `Get-Command`, since PS 5 `$PATH` is frozen at launch).
 8. Launch `Install-NDT.ps1` via `pwsh.exe` (PS 7) as a **child process**; inspect `$LASTEXITCODE`:
-   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag`, then run the **FinishAction** (see Key conventions).
+   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag` into `C:\Windows\Temp\DeploymentLogs` (MDT's folder), move `install.log`, `install2026.log`, `install-NDT.log`, `install-steps.json` and `settings.json` there from `C:\temp` (passwords blanked in the archived `settings.json`; `install2026.ps1` stays in `C:\temp` because the shell starts it a second time and a rerun starts from it), then run the **FinishAction** (see Key conventions). Nothing is moved on failure.
    - `3010` → reboot step; write `reboot.flag`, unmap share, exit 0 (RunOnce remains, resumes after reboot).
    - `3011` → pause step; write `pause.flag`, **remove** RunOnce (so reboot while paused does NOT auto-resume), unmap share.
    - any other code (and early failures after `settings.json` is read: share map timeout, PS 7 install failure) → FinishAction runs with failure status; RunOnce/AutoLogon stay in place.
@@ -119,7 +119,7 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
    - **AutoLogon** — switch the AutoAdminLogon account mid-deployment (used for AD/SQL operations); also updates `settings.json` so subsequent Reboot steps use the new credentials. Credentials are resolved by looking up the step's `Reference` name as a key in `Sections.json` (`Username` + `Password`). Multiple named entries (e.g. `ADLogon-AD01`, `ADLogon-AD02`) allow logging on to different Active Directories from the same step engine.
    - **WindowsUpdate** — runs the WU script; if it exits 3010 the step is **not** marked complete and the engine exits 3010 (iterates until no reboot is needed); if it exits 0 the step is marked complete.
    - **Pause** — creates a "Continue Deployment" shortcut on `C:\Users\Public\Desktop`, marks step complete, exits 3011.
-5. On completion: engine exits 0. `install2026.ps1` then unmaps share, removes RunOnce + AutoLogon, writes `deploy-complete.flag`.
+5. On completion: engine exits 0. `install2026.ps1` then unmaps share, removes RunOnce + AutoLogon, writes `deploy-complete.flag` and archives the deployment files to `C:\Windows\Temp\DeploymentLogs`.
 
 Throughout Phase 2, `Install-NDT.ps1` reports `Phase: Windows` progress to the NDT Monitor via `Send-NDTProgress` (best-effort): `Starting`, `Running`/`Completed` per step, `Rebooting`, `Paused`, `Failed`, and `Done`. Percent is step-based (completed / total). Requires `MonitorUrl` in `settings.json` (carried from the deploy section by `Copy-Install.ps1`); absent = silently disabled.
 
@@ -255,8 +255,9 @@ Also exported by the module (see `ndt.psd1`):
 - MAC addresses in `CustomSettings.json` and `Control\Projects` files are **colon-separated, uppercase** (lookup is case-insensitive).
 - Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` and `Control\Projects\*.json` contain MAC address blocks only.
 - `install2026.ps1` runs as **PS 5** (RunOnce/FirstLogonCommands constraint); anything needing PS 7 runs inside `Install-NDT.ps1`.
-- Step progress is persisted to `C:\temp\install-steps.json` — never delete this during a deployment.
-- `C:\temp\settings.json` contains plaintext credentials and is deleted at the end of deployment.
+- Step progress is persisted to `C:\temp\install-steps.json` — never delete this during a deployment (after completion it lives in `C:\Windows\Temp\DeploymentLogs`, and a rerun restores it).
+- `C:\temp\settings.json` contains plaintext credentials during deployment; at the end it moves to `C:\Windows\Temp\DeploymentLogs` with `AutoLogon.Password` and `Deploy.Password` blanked.
+- `DeploymentLogs` must never be baked into a captured image: its `deploy-complete.flag` would make first boot skip the deployment. `install.ps1` removes it from the applied image and from the reference drive before capture.
 - Exit code `3010` from `Install-NDT.ps1` means "reboot pending" — `install2026.ps1` writes `reboot.flag` and exits cleanly (RunOnce remains).
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
 - **NDT Monitor** — IIS web service (`install/NDTMonitor`) providing centralized deployment progress (MDT-monitoring replacement). Endpoints: `POST /progress` (receive update), `GET /progress` (all machines as JSON array), `GET /progress?mac=..` (single machine), `GET /` (dashboard). Data lives in `Logs\progress\`: `<MAC>.json` (latest state) and `audit-<date>.jsonl` (daily-rolling append-only history, retry-on-lock, retained indefinitely). Reporting is best-effort and never blocks deployment; no credentials are stored in progress data. Uses JSON only (`JavaScriptSerializer`) — **not** XML — so it is not exposed to the MDT-monitor XXE vulnerability.

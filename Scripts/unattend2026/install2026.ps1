@@ -3,7 +3,13 @@ Param(
     # desktop shortcut).  Without this switch the script exits immediately if
     # a pause.flag is present, preventing the spurious double-invocation that
     # the Windows shell causes after any RunOnce-triggered session.
-    [switch]$Resume
+    [switch]$Resume,
+
+    # Rerun a finished deployment (re-run steps or run newly added ones): the passwords are blanked
+    # in the archived settings.json when deployment finishes, so supply them again here.
+    # Passing either parameter while deploy-complete.flag exists starts the rerun.
+    [string]$AdminPassword,
+    [string]$DeployPassword
 )
 
 $LogPath    = 'C:\temp\install2026.log'
@@ -11,9 +17,16 @@ $winlogonKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 $runOnceKey  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
 $runOnceValue = 'Deploy2026'
 $runOnceCmd   = 'powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1'
-$deployCompleteFlagPath = 'C:\temp\deploy-complete.flag'
+$deployCompleteFlagPath = Join-Path $env:SystemRoot 'Temp\DeploymentLogs\deploy-complete.flag'
 $pauseFlagPath           = 'C:\temp\pause.flag'
 $deployWallpaperPath     = 'C:\temp\deploy-wallpaper.bmp'
+
+# When deployment finishes these move from C:\temp to the DeploymentLogs folder (same place MDT uses).
+$deploymentLogsDir = Split-Path $deployCompleteFlagPath -Parent
+$archiveFiles      = @('install.log', 'install2026.log', 'install-NDT.log', 'install-steps.json', 'settings.json')
+
+# After a finished deployment the log lives in DeploymentLogs, so a late second start logs there too.
+if (Test-Path $deployCompleteFlagPath) { $LogPath = Join-Path $deploymentLogsDir 'install2026.log' }
 
 function Write-Log {
     param(
@@ -28,6 +41,41 @@ function Write-Log {
         'ERROR' { Write-Host $Message -ForegroundColor Red }
         default { Write-Host $Message -ForegroundColor $ForegroundColor }
     }
+}
+
+# Finished deployment: move the deployment files out of C:\temp into DeploymentLogs. The passwords
+# in settings.json are blanked in the archived copy; a rerun supplies them again as parameters.
+function Move-DeploymentFiles {
+    New-Item -ItemType Directory -Path $deploymentLogsDir -Force | Out-Null
+    foreach ($name in $archiveFiles) {
+        $src = Join-Path 'C:\temp' $name
+        if (-not (Test-Path $src)) { continue }
+        $dst = Join-Path $deploymentLogsDir $name
+        try {
+            if ($name -eq 'settings.json') {
+                $s = Get-Content $src -Raw | ConvertFrom-Json
+                if ($s.AutoLogon) { $s.AutoLogon.Password = '' }
+                if ($s.Deploy)    { $s.Deploy.Password    = '' }
+                $s | ConvertTo-Json -Depth 4 | Set-Content -Path $dst -Encoding UTF8
+                Remove-Item $src -Force
+            } else {
+                Move-Item -Path $src -Destination $dst -Force
+            }
+        } catch {
+            Write-Log "Could not move $src to ${deploymentLogsDir}: $($_.Exception.Message)" -Level WARN
+        }
+    }
+}
+
+# Rerun of a finished deployment: bring the files back to C:\temp so the normal flow (and its
+# log appends) continues, and drop the sentinel so the double-run guard no longer applies.
+function Restore-DeploymentFiles {
+    New-Item -ItemType Directory -Path 'C:\temp' -Force | Out-Null
+    foreach ($name in $archiveFiles) {
+        $src = Join-Path $deploymentLogsDir $name
+        if (Test-Path $src) { Move-Item -Path $src -Destination (Join-Path 'C:\temp' $name) -Force }
+    }
+    Remove-Item $deployCompleteFlagPath -Force
 }
 
 # ---------------------------------------------------------------------------
@@ -184,8 +232,24 @@ Write-Log "-----------------------------------" -ForegroundColor Cyan
 # Writing a sentinel file on successful completion and exiting immediately when it is
 # present prevents that spurious second run.
 if (Test-Path $deployCompleteFlagPath) {
-    Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting' -ForegroundColor Yellow
-    exit 0
+    $rerunRequested = $PSBoundParameters.ContainsKey('AdminPassword') -or $PSBoundParameters.ContainsKey('DeployPassword')
+    if (-not $rerunRequested) {
+        Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting' -ForegroundColor Yellow
+        exit 0
+    }
+
+    # Rerun: the archived settings.json has blank passwords, and the share cannot be mapped without one.
+    if (-not $DeployPassword) {
+        Write-Log 'ERROR: -DeployPassword is required to rerun a finished deployment (the share cannot be mapped without it)' -Level ERROR
+        exit 1
+    }
+    if (-not (Test-Path (Join-Path $deploymentLogsDir 'settings.json'))) {
+        Write-Log "ERROR: $(Join-Path $deploymentLogsDir 'settings.json') not found - cannot rerun" -Level ERROR
+        exit 1
+    }
+    Write-Log 'Rerunning a finished deployment - restoring deployment files from DeploymentLogs' -ForegroundColor Cyan
+    Restore-DeploymentFiles
+    $LogPath = 'C:\temp\install2026.log'
 }
 
 # Guard against the spurious re-invocation that occurs after a Pause step.
@@ -247,6 +311,21 @@ if (-not (Test-Path $settingsPath)) {
     exit 1
 }
 $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+
+# Passwords supplied as parameters override the stored ones (they are blank after a finished deployment).
+if ($PSBoundParameters.ContainsKey('DeployPassword') -or $PSBoundParameters.ContainsKey('AdminPassword')) {
+    if ($PSBoundParameters.ContainsKey('DeployPassword')) { $settings.Deploy.Password = $DeployPassword }
+    if ($PSBoundParameters.ContainsKey('AdminPassword')) {
+        # AutoLogon may have been switched to another account by an AutoLogon step; -AdminPassword is the local Administrator's.
+        $settings.AutoLogon.Domain   = '.'
+        $settings.AutoLogon.Username = 'Administrator'
+        $settings.AutoLogon.Password = $AdminPassword
+    } elseif ($rerunRequested) {
+        Write-Log '-AdminPassword not supplied - a Reboot step will not be able to sign in automatically' -Level WARN
+    }
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -Path $settingsPath -Encoding UTF8
+    Write-Log 'Passwords supplied as parameters stored in C:\temp\settings.json for this run'
+}
 
 # Map the deployment share, waiting patiently for the network to come up.
 # Physical NICs can take far longer than a VM to negotiate link + obtain a DHCP
@@ -330,7 +409,7 @@ $ndtExitCode = $LASTEXITCODE
 Write-Log "Install-NDT.ps1 exited with code $ndtExitCode"
 
 if ($ndtExitCode -eq 3010) {
-    # Reboot step — write reboot flag so the next logon knows a reboot was expected.
+    # Reboot step - write reboot flag so the next logon knows a reboot was expected.
     # RunOnce\Deploy2026 remains registered; deployment resumes automatically after reboot.
     Write-Log 'Reboot pending - writing reboot flag and exiting' -ForegroundColor Yellow
     New-Item -Path $rebootFlagPath -ItemType File -Force | Out-Null
@@ -338,7 +417,7 @@ if ($ndtExitCode -eq 3010) {
     exit 0
 
 } elseif ($ndtExitCode -eq 3011) {
-    # Pause step — write pause.flag before removing RunOnce so that the spurious
+    # Pause step - write pause.flag before removing RunOnce so that the spurious
     # second invocation (shell double-fire) exits at the early-exit guard above
     # instead of re-registering RunOnce and continuing deployment.
     Write-Log 'Deployment paused - writing pause.flag and removing RunOnce\Deploy2026' -ForegroundColor Yellow
@@ -348,7 +427,7 @@ if ($ndtExitCode -eq 3010) {
     exit 0
 
 } elseif ($ndtExitCode -eq 0) {
-    # All steps completed — run end-of-deployment cleanup.
+    # All steps completed - run end-of-deployment cleanup.
     net use Z: /delete /yes
     Write-Log "Z: unmapped at $(Get-Date)"
 
@@ -362,6 +441,7 @@ if ($ndtExitCode -eq 3010) {
     Clear-DeploymentWallpaper
 
     # Write sentinel so any duplicate invocations in the same logon session exit immediately.
+    New-Item -ItemType Directory -Path $deploymentLogsDir -Force | Out-Null
     $flagLines = @(
         'NDT deployment is now FINISHED.',
         '',
@@ -373,22 +453,28 @@ if ($ndtExitCode -eq 3010) {
         '',
         'This file is a sentinel: while it exists, install2026.ps1 will not run again.',
         '',
-        'Log files in C:\temp:',
+        "Log files in $deploymentLogsDir (moved here from C:\temp):",
         '  install.log      - Phase 1 (WinPE): config validation, disk partitioning, DISM image apply,',
-        '                     unattend generation, BCDBoot. Copied here from X:\install.log before the',
+        '                     unattend generation, BCDBoot. Copied to C:\temp from X:\install.log before the',
         '                     first reboot.',
         '  install2026.log  - Phase 2 bootstrap (PS 5, install2026.ps1): network wait, share mapping,',
         '                     PowerShell 7 install, launching the step engine, reboot/pause handling,',
         '                     cleanup and FinishAction.',
         '  install-ndt.log  - Step engine (PS 7, Install-NDT.ps1): the ordered deployment steps from',
-        '                     DeploymentGroups.json - per-step start/finish, script output, exit codes.'
+        '                     DeploymentGroups.json - per-step start/finish, script output, exit codes.',
+        '  install-steps.json - Completed steps; a rerun only runs steps that are not in this list.',
+        '  settings.json    - Deployment settings; the Administrator and Deploy passwords are blanked.',
+        '',
+        'To rerun the deployment (re-run failed steps or run newly added ones), run:',
+        '  powershell.exe -ExecutionPolicy Bypass -File C:\temp\install2026.ps1 -AdminPassword <pw> -DeployPassword <pw>'
     )
     Set-Content -Path $deployCompleteFlagPath -Value $flagLines -Encoding ASCII -Force
 
-    # Remove sensitive/temporary deployment files from C:\temp.
-    # Commented out for debugging purposes - enable in production.
-    #Remove-Item -Path 'C:\temp\settings.json'    -Force -ErrorAction SilentlyContinue
-    #Remove-Item -Path 'C:\temp\install2026.ps1'  -Force -ErrorAction SilentlyContinue
+    # Move the deployment files (logs, step state, settings without passwords) out of C:\temp.
+    # install2026.ps1 stays in C:\temp: the shell starts it a second time right after completion
+    # and a rerun starts from it.
+    Move-DeploymentFiles
+    $LogPath = Join-Path $deploymentLogsDir 'install2026.log'
 
     Write-Log "Deployment complete - cleanup done at $(Get-Date)" -ForegroundColor Green
     Invoke-FinishAction -Success $true

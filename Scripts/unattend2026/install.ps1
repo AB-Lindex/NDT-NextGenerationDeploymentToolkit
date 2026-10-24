@@ -154,6 +154,7 @@ if ($captureMode) {
             Write-Log "Cleaning $tempPath before capture..." -ForegroundColor Yellow
             Remove-Item -Path "$tempPath\*" -Recurse -Force -ErrorAction SilentlyContinue
         }
+        Remove-Item -Path "${referenceDrive}:\Windows\Temp\DeploymentLogs" -Recurse -Force -ErrorAction SilentlyContinue
 
         Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"
@@ -385,6 +386,10 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 Send-PEProgress -Description 'OS image applied' -Percent 45
+
+# A captured image can carry the DeploymentLogs of the machine it came from; its deploy-complete.flag
+# would make first boot skip the whole deployment.
+Remove-Item -Path 'C:\Windows\Temp\DeploymentLogs' -Recurse -Force -ErrorAction SilentlyContinue
 
 # ------------------------------------------------------------------
 # STEP 4a - Inject OS drivers into the offline image (NOT the PE image).
