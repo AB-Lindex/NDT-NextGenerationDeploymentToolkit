@@ -37,11 +37,13 @@ function Write-Log {
 # Read by Copy-Install.ps1 so the FinishAction prompt can show total deployment duration.
 $env:NDT_DEPLOY_START = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
-# Get-NetIPAddress (NetTCPIP module) is not available in WinPE PS5.1 - use WMI instead.
+# Get-NetIPAddress (NetTCPIP) is missing in WinPE PS5.1 and Get-WmiObject is missing in PS7 - .NET works in both.
 try {
-    $sysIP = Get-WmiObject -Class Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=TRUE' |
-        ForEach-Object { $_.IPAddress } |
-        Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notmatch '^169\.254\.' -and $_ -ne '127.0.0.1' } |
+    $sysIP = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+        Where-Object { $_.OperationalStatus -eq 'Up' -and $_.NetworkInterfaceType -ne 'Loopback' } |
+        ForEach-Object { $_.GetIPProperties().UnicastAddresses } |
+        ForEach-Object { $_.Address.ToString() } |
+        Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notmatch '^169\.254\.' } |
         Select-Object -First 1
     if (-not $sysIP) { $sysIP = 'unknown' }
 } catch { $sysIP = 'unknown' }
