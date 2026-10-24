@@ -73,6 +73,7 @@ Watch-NDTDeployment -Computername srv05
 | `Watch-NDTDeployment` | Live progress bar for a machine (by `-Computername` or `-MAC`) until the NDT Monitor reports Done. `-TimeoutMinutes`, `-PollSeconds`, `-MonitorUrl`, `-SkipCertificateCheck`. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). Add only. |
 | `Get-NDTCatalog` / `Test-NDTComputerEntry` | Read-only helpers for front ends: available OS/sections/groups, and validation + key-overlap check of a proposed entry. |
+| `Get-NDTMachine` / `Get-NDTEffectiveSetting` / `Resolve-NDTMachineOS` / `Resolve-NDTDeploySection` / `Test-NDTInstallDisabled` | Lookups the deploy scripts use at run time: merged machine set, effective settings, OS (machine block, else first referenced section) and deploy-section resolution, and the `Install:NO` guard. |
 
 ## Per-project machine files
 
@@ -134,6 +135,8 @@ Other `New-NDTPEImage` inputs:
 ## Updating a share
 
 `Update-NDT` refreshes the code of an existing share and preserves `Control\*.json`, credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Rebuild the boot image with `New-NDTPEImage` afterwards if `install.ps1`, drivers or the WinPE launcher changed.
+
+The module also stays on the share (`install\NDT`): the deploy scripts import it at run time for the machine, OS, deploy-section and settings lookups, and stop with an error if it is missing. Before copying anything, `Install-NDT` and `Update-NDT` import-test the new module under Windows PowerShell 5.1 and PowerShell 7 and abort if that fails; `Update-NDT` then replaces `install\NDT` through a temporary folder. Update the installed module first (`Install-Module NDT -Force -Scope AllUsers`), because an older module's `Update-NDT` still removes `install\NDT` from the share.
 
 ## SQL access
 

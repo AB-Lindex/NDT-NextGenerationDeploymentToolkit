@@ -4,8 +4,9 @@
 $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
 
 # Get Deploy settings
-. "Z:\Scripts\Unattend2026\Get-NDTMachine.ps1"
-try { $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' }
+try { . "$PSScriptRoot\Import-NDTModule.ps1" }
+catch { Write-Error $_.Exception.Message; exit 1 }
+try { $customSettings = Get-NDTMachine -LocalPath 'Z:\' }
 catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsPath = "Z:\Control\Sections.json"
 $sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
@@ -17,9 +18,10 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# If the machine block specifies a Deploy section name, use that; otherwise fall back to the global Deploy section.
-$deploySectionName = if ($machineConfig.Deploy) { $machineConfig.Deploy } else { 'Deploy' }
-$deploySettings = $sections.$deploySectionName
+# The machine block may name its own deploy section in "Deploy"; otherwise the global 'Deploy' section is used.
+$deployResolved = Resolve-NDTDeploySection -Machine $machineConfig -SectionCatalog $sections
+$deploySectionName = $deployResolved.Name
+$deploySettings = $deployResolved.Settings
 Write-Host "Using deploy section: '$deploySectionName'" -ForegroundColor Gray
 
 # Ensure C:\temp exists

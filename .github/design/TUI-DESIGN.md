@@ -50,7 +50,7 @@ site. The TUI must be built so that GUI reuses everything except presentation
   exists to define shared values once (avoid redundancy across machines).
 - **Deploy sections** (`Deploy`, `DeployDC01`) are *not* referenced via
   `Sections`. They are selected by the machine-level `Deploy` key
-  (default `Deploy`; reserved values `yes`/`no` are ignored) and read by
+  (default `Deploy`) and read by
   `Copy-Install.ps1` / `install.ps1` by named keys only.
 - **AutoLogon credential sections** (`ADLogon`, `ADLogon-AD01`) are *not*
   merged. They are reached via a name chain:

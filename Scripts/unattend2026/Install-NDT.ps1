@@ -101,10 +101,11 @@ Write-Log "MAC      : $macAddress (from settings.json)"
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 
 # Load machine config: CustomSettings.json merged with Control\Projects\**\*.json
-. "Z:\Scripts\unattend2026\Get-NDTMachine.ps1"
+# (lookup code comes from the NDT module on the share, install\NDT)
 $machineSource = @{}
 try {
-    $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' -SourceMap $machineSource
+    . "$PSScriptRoot\Import-NDTModule.ps1"
+    $customSettings = Get-NDTMachine -LocalPath 'Z:\' -SourceMap $machineSource
 } catch {
     Write-Log "Could not load machine configuration: $($_.Exception.Message)" -Level ERROR
     exit 1
@@ -155,37 +156,10 @@ if (-not $machineConfig.DeploymentGroups) {
 # Build a flat effective-settings hashtable: direct machine properties first,
 # then any properties from referenced Sections (machine-level values take precedence).
 # This allows script Parameters to be resolved from shared sections (e.g. SQLAO).
-$effectiveSettings = @{}
-foreach ($prop in $machineConfig.PSObject.Properties) {
-    if ($prop.Name -notin @('Sections', 'DeploymentGroups', 'DeploymentGroups_legacy')) {
-        $effectiveSettings[$prop.Name] = $prop.Value
-    }
-}
-if ($machineConfig.Sections) {
-    foreach ($sectionProp in $machineConfig.Sections.PSObject.Properties) {
-        $sectionData = $sections.($sectionProp.Value)
-        if ($sectionData) {
-            foreach ($p in $sectionData.PSObject.Properties) {
-                if (-not $effectiveSettings.ContainsKey($p.Name)) {
-                    $effectiveSettings[$p.Name] = $p.Value
-                }
-            }
-        }
-    }
-}
-# Resolve @-prefixed cross-references (e.g. "SafeNodeAdminPwd": "@AdminPassword")
-foreach ($key in @($effectiveSettings.Keys)) {
-    $val = $effectiveSettings[$key]
-    if ($val -is [string] -and $val.StartsWith('@')) {
-        $refKey = $val.Substring(1)
-        if ($effectiveSettings.ContainsKey($refKey)) {
-            $effectiveSettings[$key] = $effectiveSettings[$refKey]
-            Write-Log "Resolved reference: $key -> $refKey" -ForegroundColor Gray
-        } else {
-            Write-Log "Unresolved reference '@$refKey' for key '$key'" -Level WARN
-        }
-    }
-}
+$effective = Get-NDTEffectiveSetting -Machine $machineConfig -SectionCatalog $sections
+$effectiveSettings = $effective.Settings
+foreach ($note in $effective.Notes | Where-Object { $_ -like 'Resolved reference*' }) { Write-Log $note -ForegroundColor Gray }
+foreach ($warning in $effective.Warnings) { Write-Log $warning -Level WARN }
 
 Write-Log "Effective settings keys: $($effectiveSettings.Keys -join ', ')" -ForegroundColor Gray
 

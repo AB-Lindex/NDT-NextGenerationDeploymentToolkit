@@ -79,9 +79,9 @@ foreach ($f in @($csPath, (Join-Path $shareRoot 'Control\OS.json'), (Join-Path $
     if (-not (Test-Path $f)) { Write-Error "Not found: $f (is this script being run from the deploy share?)"; exit 1 }
 }
 
-. (Join-Path $PSScriptRoot 'Get-NDTMachine.ps1')
+. (Join-Path $PSScriptRoot 'Import-NDTModule.ps1')
 $machineSource = @{}
-try { $cs = Get-NDTMachine -ControlPath (Join-Path $shareRoot 'Control') -SourceMap $machineSource }
+try { $cs = Get-NDTMachine -LocalPath $shareRoot -SourceMap $machineSource }
 catch { Write-Error $_.Exception.Message; exit 1 }
 
 if ($MacAddress) {
@@ -102,7 +102,7 @@ if ($mac -ne $candidates[0]) {
 }
 
 $machine = $cs.$mac
-if ("$($machine.Install)" -eq 'NO') {
+if (Test-NDTInstallDisabled -Machine $machine) {
     Write-Error "Install is set to NO for $mac ($($machine.Computername)). Deployment is disabled for this machine."
     exit 1
 }

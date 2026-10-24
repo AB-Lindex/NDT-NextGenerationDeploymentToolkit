@@ -24,6 +24,7 @@
         'Move-NDTReferenceImage',
         'Test-NDTDeployment',
         'Get-NDTCatalog', 'Test-NDTComputerEntry',
+        'Get-NDTMachine', 'Get-NDTEffectiveSetting', 'Resolve-NDTMachineOS', 'Resolve-NDTDeploySection', 'Test-NDTInstallDisabled',
         'New-NDTComputerTui',
         'Watch-NDTDeployment'
     )

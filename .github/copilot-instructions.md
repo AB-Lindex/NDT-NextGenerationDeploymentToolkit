@@ -48,7 +48,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── Get-OS.ps1
 │   ├── Invoke-NDTSql.ps1         ← parameterised SQL query over TCP/SQL auth (System.Data.SqlClient; works in PE PS5 + PS7 and OS); settings from the `NDTSql` section of Sections.json (not used by deployment lookups yet)
 │   ├── Get-Settings.ps1           ← fills unattend.xml from the machine's block (template chosen per OS via OS.json)
-│   ├── Get-NDTMachine.ps1         ← dot-sourced helper: merges CustomSettings.json + Control\Projects\**\*.json into one object keyed by MAC (PS 5.1 compatible; duplicate MAC / invalid JSON = terminating error)
+│   ├── Import-NDTModule.ps1       ← dot-sourced by the deploy scripts: imports the NDT module from the share (`install\NDT`), throws if missing (run Update-NDT)
 │   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
 │   ├── Start-Refresh.ps1          ← in-OS launcher: validates MAC/OS/WIM, stages boot2026.iso PE to C:\NDT-PE, one-shot ramdisk BCD entry, reboots into the normal WinPE install.ps1 flow (re-image in place)
 │   ├── test.ps1                   ← standalone test: runs Copy-Install + Get-Settings
@@ -62,13 +62,13 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ├── MDT-Scripts/                   ← legacy MDT helper scripts (reference only)
 └── install/                       ← PowerShell module to bootstrap a new NDT server
     ├── NDT/
-    │   ├── ndt.psm1               ← module script (exports all NDT-* commands)
+    │   ├── ndt.psm1               ← module script (exports all NDT-* commands; also imported by the deploy scripts from the share)
     │   └── ndt.psd1               ← module manifest (requires PS 5.1)
     ├── NDTMonitor/                ← IIS progress web service (deployed by Install-NDTMonitor)
     │   ├── web.config             ← maps /progress to the handler; LogRoot appSetting
     │   ├── App_Code/ProgressHandler.cs ← ASP.NET handler (auto-compiled by IIS)
     │   └── Default.htm            ← live dashboard (MDT-style monitoring view)
-    └── Publish-NDT.ps1            ← publishes the module to PSGallery
+    └── Publish-NDT.ps1            ← publishes the module to PSGallery (developer only; removed from live shares)
 ```
 
 ---
@@ -79,7 +79,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 
 1. Check capture flag (`DeployCapture.flag` on any drive) → if set, remove flag, clean `C:\temp`, call `Capture-ReferenceImage.ps1`, exit.
 2. Detect BIOS/UEFI firmware type — recorded early but **disk is not touched** until all validations pass.
-3. Validate MAC address against the merged machine set (`Control/CustomSettings.json` + `Control/Projects/**/*.json`, via `Get-NDTMachine.ps1`); abort with error if not found, if the MAC is duplicated, or if any file is invalid JSON (reported in the same "press Enter to retry" loop, before the disk is touched).
+3. Validate MAC address against the merged machine set (`Control/CustomSettings.json` + `Control/Projects/**/*.json`, via `Get-NDTMachine` from the module); abort with error if not found, if the MAC is duplicated, or if any file is invalid JSON (reported in the same "press Enter to retry" loop, before the disk is touched).
    - **`Install:NO` guard** — if the MAC block has `"Install": "NO"` (case-insensitive), skip deployment entirely: reboot without touching the disk. Prevents accidental re-imaging. Any other value (or absent) deploys normally.
 4. Resolve and validate WIM path + index from `Control/OS.json`; abort if WIM file not found.
 5. All pre-flight checks passed → partition disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
@@ -150,7 +150,7 @@ MAC address blocks only — one per machine:
 
 #### Control\Projects (per-project MAC files)
 
-`Control\Projects\**\*.json` (recursive, `*.json` only) holds extra MAC blocks in exactly the same format; one file may hold one or many MACs, folder/file names are free. Effective machine set = `CustomSettings.json` + every Projects file, resolved by the shared `Scripts\unattend2026\Get-NDTMachine.ps1` (drop-in for `Get-Content CustomSettings.json | ConvertFrom-Json`, optional `-SourceMap`). The module carries its own copy of the lookup (`Get-NDTMachineEntry` in `ndt.psm1`) since it cannot dot-source the share helper - keep the two in step.
+`Control\Projects\**\*.json` (recursive, `*.json` only) holds extra MAC blocks in exactly the same format; one file may hold one or many MACs, folder/file names are free. Effective machine set = `CustomSettings.json` + every Projects file, resolved by `Get-NDTMachine` (the NDT module on the share, `install\NDT`; drop-in for `Get-Content CustomSettings.json | ConvertFrom-Json`, optional `-SourceMap`). The admin commands (`Get-/Add-/Set-/Remove-NDTComputer`, `Test-NDTDeployment`) use the same module code, so there is one implementation.
 
 - Only MAC-shaped keys count (case-insensitive, normalised to upper case); other keys (e.g. `_Project`) are ignored. Empty files are skipped; a missing `Projects` folder adds nothing.
 - **Duplicate MAC = hard error** (same or different files) and **invalid JSON in any file = hard error**: deployment aborts in WinPE before the disk is touched; `Test-NDTDeployment` flags both. No precedence rules, no `_` parking prefix - park a machine with `Install:NO`.
@@ -260,7 +260,8 @@ Also exported by the module (see `ndt.psd1`):
 - Exit code `3010` from `Install-NDT.ps1` means "reboot pending" — `install2026.ps1` writes `reboot.flag` and exits cleanly (RunOnce remains).
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
 - **NDT Monitor** — IIS web service (`install/NDTMonitor`) providing centralized deployment progress (MDT-monitoring replacement). Endpoints: `POST /progress` (receive update), `GET /progress` (all machines as JSON array), `GET /progress?mac=..` (single machine), `GET /` (dashboard). Data lives in `Logs\progress\`: `<MAC>.json` (latest state) and `audit-<date>.jsonl` (daily-rolling append-only history, retry-on-lock, retained indefinitely). Reporting is best-effort and never blocks deployment; no credentials are stored in progress data. Uses JSON only (`JavaScriptSerializer`) — **not** XML — so it is not exposed to the MDT-monitor XXE vulnerability.
-- **`Install:NO`** in a MAC block disables deployment for that machine (reboot, no disk wipe). This is distinct from `Deploy` (a section-name reference); the reserved values `yes`/`no` are never treated as section names by `Copy-Install.ps1`.
+- **`Install:NO`** in a MAC block disables deployment for that machine (reboot, no disk wipe); `Test-NDTInstallDisabled` is the single check. This is distinct from `Deploy`, an optional MAC-block key naming a deploy section in `Sections.json` (default section `Deploy`); `Resolve-NDTDeploySection` resolves it.
+- **The NDT module lives on the share too** (`install\NDT`, taken from the repo ZIP by `Install-NDT`/`Update-NDT`; only `install\Publish-NDT.ps1` is removed). WinPE (`install.ps1`, `Get-OS.ps1`, `Copy-Install.ps1`, `Get-Settings.ps1`), the step engine (`Install-NDT.ps1`) and `Start-Refresh.ps1` import it via `Import-NDTModule.ps1` and fail hard if it is missing. Shared rules live there as exported functions: `Get-NDTMachine`, `Get-NDTEffectiveSetting`, `Resolve-NDTMachineOS` (OS from the MAC block, else the first referenced section that sets one), `Resolve-NDTDeploySection`, `Test-NDTInstallDisabled`. Keep logic changes in the module, not in the PE image. The module must import cleanly under Windows PowerShell 5.1 (WinPE, first boot) and PowerShell 7 (engine); `Install-NDT`/`Update-NDT` import-test the new copy in both before touching the share and `Update-NDT` swaps the folder through a temp name. Update the admin copy from PSGallery first, or the old `Update-NDT` will still delete `install\NDT` from the share. The PS 7 -> PS 5.1 relaunch in `Install-NDTMonitor` still imports from the module's own loaded location.
 - **`FinishAction`** (MDT equivalent) - what `install2026.ps1` does when deployment ends: `DESKTOP` (default, leave the desktop as-is), `PROMPT` (system-modal `WScript.Shell` popup - works on Desktop Experience and Server Core - showing computer name, finished timestamp, duration since `DeployStart`, and on failure the reason), `REBOOT` / `SHUTDOWN` (`shutdown.exe /r|/s /t 10`; `RESTART` is accepted as an alias for `REBOOT`, as in MDT), `LOGOFF` (`shutdown.exe /l /f`). Resolved by `Copy-Install.ps1` (MAC block overrides the deploy section) into `settings.json`. Runs on success **and** on failure (like MDT), but on failure `REBOOT`/`SHUTDOWN`/`LOGOFF` are downgraded to `PROMPT` because RunOnce/AutoLogon are still in place and would loop the failed deployment. Unknown values fall back to `DESKTOP`. CRUD via `-FinishAction` on `Add-NDTComputer`/`Set-NDTComputer`; validated by `Test-NDTDeployment`.
 - **`Unattend` (optional, OS-level)** — an `OS.json` entry may point at an OS-specific unattend template via its `Unattend` key (share-relative, backslash-rooted, e.g. `\Scripts\unattend2026\unattend-win11.xml`). `Get-Settings.ps1` resolves it from the machine's `OS` key as `Z:$($osEntry.Unattend)`; absent or missing file falls back to the default `Scripts\unattend2026\unattend.xml`. The override is OS-bound (every machine of that OS gets the same answer file) and is CRUD-managed via `-Unattend` on `Add-NDTOs`/`Set-NDTOs` (and validated by `Test-NDTDeployment`).
   - **DECISION (2026-10):** the unattend override lives at the **OS tier** (`OS.json`), not per-machine, since the differences are OS-bound. The single default `unattend.xml` remains the canonical source of truth; small deltas between Server 2022/2025/Win11 stay expressed through placeholders + conditional post-processing (DHCP/workgroup) rather than duplicated files, to avoid drift. A dedicated file is justified only when an OS needs a structurally different answer file (Win11 Home/Pro OOBE / Microsoft-account bypass / TPM+SecureBoot bypass — note Win11 **Enterprise** needs none of these and runs on the shared template). Originally built per-machine (2026-09); relocated to the OS tier (2026-10) once Win11 Enterprise confirmed no machine-specific delta was needed.

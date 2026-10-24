@@ -190,15 +190,21 @@ $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
 
 # Machine config = CustomSettings.json merged with Control\Projects\**\*.json.
 # A duplicate MAC or an invalid JSON file is reported here, before the disk is touched,
-# and retried after the operator fixes the file.
-. "Z:\Scripts\Unattend2026\Get-NDTMachine.ps1"
+# and retried after the operator fixes the file. The lookup code lives in the NDT module on
+# the share (install\NDT), not in the PE image.
+try { . "$PSScriptRoot\Import-NDTModule.ps1" }
+catch {
+    Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
+    Read-Host "Press Enter to exit"
+    exit 1
+}
 
 $customSettings = $null
 $machineSource  = @{}
 while ($true) {
     $machineSource = @{}
     try {
-        $customSettings = Get-NDTMachine -ControlPath 'Z:\Control' -SourceMap $machineSource
+        $customSettings = Get-NDTMachine -LocalPath 'Z:\' -SourceMap $machineSource
     } catch {
         $customSettings = $null
         Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
@@ -222,7 +228,7 @@ Write-Log "Machine config source: Control\$($machineSource[$macAddress.ToUpper()
 # ------------------------------------------------------------------
 # SAFETY CHECK - Install:NO prevents accidental disk wipe
 # ------------------------------------------------------------------
-if ($machineConfig.Install -eq "NO") {
+if (Test-NDTInstallDisabled -Machine $machineConfig) {
     Write-Log "Install is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
     Write-Log "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 10
@@ -238,9 +244,9 @@ $script:PEMac          = $macAddress
 $script:PEComputername = $machineConfig.Computername
 try {
     $peSections = Get-Content 'Z:\Control\Sections.json' -Raw | ConvertFrom-Json
-    $peDeploySection = if ($machineConfig.Deploy -and $machineConfig.Deploy -notmatch '^(yes|no)$') { $machineConfig.Deploy } else { 'Deploy' }
-    if ($peSections.$peDeploySection -and $peSections.$peDeploySection.MonitorUrl) {
-        $script:MonitorUrl = $peSections.$peDeploySection.MonitorUrl.TrimEnd('/')
+    $peDeploySettings = (Resolve-NDTDeploySection -Machine $machineConfig -SectionCatalog $peSections).Settings
+    if ($peDeploySettings -and $peDeploySettings.MonitorUrl) {
+        $script:MonitorUrl = $peDeploySettings.MonitorUrl.TrimEnd('/')
         Write-Log "NDT Monitor: $script:MonitorUrl" -ForegroundColor Gray
     }
 } catch {

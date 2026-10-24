@@ -4,14 +4,15 @@ param(
     [string]$MACAddress
 )
 
-. "Z:\Scripts\unattend2026\Get-NDTMachine.ps1"
+try { . "$PSScriptRoot\Import-NDTModule.ps1" }
+catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsPath = "Z:\Control\Sections.json"
 $osPath = "Z:\Control\OS.json"
 $defaultTemplatePath = "Z:\Scripts\unattend2026\unattend.xml"
 $outputPath = "c:\temp\unattend.xml"
 
 # Load JSON content (machine config = CustomSettings.json merged with Control\Projects)
-try { $config = Get-NDTMachine -ControlPath 'Z:\Control' }
+try { $config = Get-NDTMachine -LocalPath 'Z:\' }
 catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsCatalog = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 
@@ -24,14 +25,16 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# Resolve the unattend template. The machine's OS entry in OS.json may point at an
-# OS-specific template via its 'Unattend' key (share-relative, backslash-rooted, like
-# PostPEScript); otherwise the default template is used. The override is OS-bound, not
-# per-machine, so every machine of that OS gets the same answer file automatically.
+# Resolve the unattend template. The machine's OS entry in OS.json (the OS may come from the
+# MAC block or a referenced section) can point at an OS-specific template via its 'Unattend'
+# key (share-relative, backslash-rooted, like PostPEScript); otherwise the default template is
+# used. The override is OS-bound, not per-machine, so every machine of that OS gets the same
+# answer file automatically.
 $templatePath = $defaultTemplatePath
-if ($machineConfig.OS) {
+$osResolved = Resolve-NDTMachineOS -Machine $machineConfig -SectionCatalog $sectionsCatalog
+if ($osResolved) {
     $osCatalog = Get-Content -Path $osPath -Raw | ConvertFrom-Json
-    $osEntry = $osCatalog.$($machineConfig.OS)
+    $osEntry = $osCatalog.$($osResolved.OsKey)
     if ($osEntry -and $osEntry.Unattend) {
         $candidatePath = "Z:$($osEntry.Unattend)"
         if (-not (Test-Path $candidatePath)) {
@@ -43,52 +46,13 @@ if ($machineConfig.OS) {
     }
 }
 
-# Iterate through all sections and load their data
-# Ordered so the first section in JSON order wins on key overlap, matching Install-NDT.ps1.
-$sections = [ordered]@{}
-if ($machineConfig.Sections) {
-    foreach ($sectionProperty in $machineConfig.Sections.PSObject.Properties) {
-        $sectionName = $sectionProperty.Name
-        $sectionReference = $sectionProperty.Value
-        $sectionData = $sectionsCatalog.$sectionReference
-        
-        if ($sectionData) {
-            $sections[$sectionName] = $sectionData
-            Write-Host "Loaded section: $sectionName -> $sectionReference" -ForegroundColor Cyan
-        } else {
-            Write-Warning "Section reference '$sectionReference' not found for $sectionName"
-        }
-    }
-}
-
-# Build merged effective settings (machine config takes precedence over sections)
-$effectiveSettings = @{}
-foreach ($property in $machineConfig.PSObject.Properties) {
-    if ($property.Name -notin @('Sections', 'DeploymentGroups')) {
-        $effectiveSettings[$property.Name] = $property.Value
-    }
-}
-foreach ($section in $sections.GetEnumerator()) {
-    foreach ($property in $section.Value.PSObject.Properties) {
-        if (-not $effectiveSettings.ContainsKey($property.Name)) {
-            $effectiveSettings[$property.Name] = $property.Value
-        }
-    }
-}
-
-# Resolve @-prefixed cross-references (e.g. "SafeNodeAdminPwd": "@AdminPassword")
-foreach ($key in @($effectiveSettings.Keys)) {
-    $val = $effectiveSettings[$key]
-    if ($val -is [string] -and $val.StartsWith('@')) {
-        $refKey = $val.Substring(1)
-        if ($effectiveSettings.ContainsKey($refKey)) {
-            $effectiveSettings[$key] = $effectiveSettings[$refKey]
-            Write-Host "Resolved reference: $key -> $refKey" -ForegroundColor Gray
-        } else {
-            Write-Warning "Unresolved reference '@$refKey' for key '$key'"
-        }
-    }
-}
+# Effective settings: machine config wins over the referenced sections (first section wins on
+# overlap), then @-prefixed cross-references are resolved (e.g. "SafeNodeAdminPwd": "@AdminPassword").
+$effective = Get-NDTEffectiveSetting -Machine $machineConfig -SectionCatalog $sectionsCatalog
+$sections = $effective.Sections
+$effectiveSettings = $effective.Settings
+foreach ($note in $effective.Notes) { Write-Host $note -ForegroundColor Gray }
+foreach ($warning in $effective.Warnings) { Write-Warning $warning }
 
 # Read the template
 $unattendContent = Get-Content -Path $templatePath -Raw

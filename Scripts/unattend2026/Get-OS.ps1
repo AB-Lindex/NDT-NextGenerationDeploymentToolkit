@@ -6,13 +6,15 @@ param(
     [string]$ShareRoot = 'Z:\'
 )
 
-. (Join-Path $PSScriptRoot 'Get-NDTMachine.ps1')
+try { . (Join-Path $PSScriptRoot 'Import-NDTModule.ps1') }
+catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsPath = Join-Path $ShareRoot 'Control\Sections.json'
 $osJsonPath = Join-Path $ShareRoot 'Control\OS.json'
 
 # Load JSON files (machine config = CustomSettings.json merged with Control\Projects)
-try { $customSettings = Get-NDTMachine -ControlPath (Join-Path $ShareRoot 'Control') }
-catch { Write-Error $_.Exception.Message; exit 1 }$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
+try { $customSettings = Get-NDTMachine -LocalPath $ShareRoot }
+catch { Write-Error $_.Exception.Message; exit 1 }
+$sections = Get-Content -Path $sectionsPath -Raw | ConvertFrom-Json
 $osConfig = Get-Content -Path $osJsonPath -Raw | ConvertFrom-Json
 
 Write-Host "Using MAC Address: $MACAddress" -ForegroundColor Yellow
@@ -24,21 +26,15 @@ if (-not $machineConfig) {
     exit 1
 }
 
-# Get OS reference - check MAC block first, then fall back to referenced sections
-$osName = $machineConfig.OS
-if (-not $osName -and $machineConfig.Sections) {
-    foreach ($sectionRef in $machineConfig.Sections.PSObject.Properties.Value) {
-        $sectionData = $sections.$sectionRef
-        if ($sectionData -and $sectionData.OS) {
-            $osName = $sectionData.OS
-            Write-Host "OS resolved from section '$sectionRef': $osName" -ForegroundColor Cyan
-            break
-        }
-    }
-}
-if (-not $osName) {
+# OS comes from the MAC block first, then from the first referenced section that sets one
+$osResolved = Resolve-NDTMachineOS -Machine $machineConfig -SectionCatalog $sections
+if (-not $osResolved) {
     Write-Error "No OS specified in configuration for MAC address: $MACAddress"
     exit 1
+}
+$osName = $osResolved.OsKey
+if ($osResolved.Source -ne 'machine') {
+    Write-Host "OS resolved from $($osResolved.Source): $osName" -ForegroundColor Cyan
 }
 
 Write-Host "OS Reference: $osName" -ForegroundColor Cyan

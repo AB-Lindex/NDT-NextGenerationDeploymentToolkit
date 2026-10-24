@@ -259,7 +259,7 @@ Deploy2026/
 │       ├── Get-Hardware.ps1      # Physical/virtual, hypervisor, vendor, model, serial
 │       ├── Invoke-NDTSql.ps1     # Parameterised SQL query over TCP with SQL authentication (WinPE PS5/PS7 and OS)
 │       ├── Get-Settings.ps1      # Generates unattend.xml from template + the machine's block
-│       ├── Get-NDTMachine.ps1    # Dot-sourced helper: merges CustomSettings.json + Control\Projects\**\*.json
+│       ├── Import-NDTModule.ps1  # Dot-sourced by the deploy scripts: imports the NDT module from the share (install\NDT)
 │       ├── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json on C:\temp
 │       ├── Start-Refresh.ps1     # Run from inside Windows: stages WinPE, one-shot BCD entry, reboots to re-image in place
 │       ├── test.ps1              # Standalone test: runs Copy-Install + Get-Settings
@@ -267,9 +267,9 @@ Deploy2026/
 │       └── wds/nuke-wds.ps1      # WDS reset utility
 ├── Scripts/MDT Scripts/          # Legacy MDT scripts, kept for reference only
 └── install/
-    ├── NDT/                      # The PowerShell module (published to the PowerShell Gallery)
+    ├── NDT/                      # The PowerShell module (published to the PowerShell Gallery; also imported by the deploy scripts from the share)
     ├── NDTMonitor/               # IIS progress web service content
-    └── Publish-NDT.ps1           # Publishes the module
+    └── Publish-NDT.ps1           # Publishes the module (developer only, not kept on live shares)
 ```
 
 ---
@@ -302,7 +302,7 @@ The central configuration file. Contains one entry per machine, keyed by MAC add
 | `Sections` | Label to section-name map into `Sections.json`. Only the value is used; the label is cosmetic. |
 | `DeploymentGroups` | Ordered list of groups from `DeploymentGroups.json`. Omit for an OS-only deployment. |
 | `Install` | `"NO"` disables deployment for this machine (reboot, no disk wipe). Any other value deploys. |
-| `Deploy` | Name of the deploy section to use (default `Deploy`). The reserved values `yes`/`no` are ignored. |
+| `Deploy` | Name of the deploy section to use (default `Deploy`). |
 | `FinishAction` | `DESKTOP` (default), `PROMPT`, `REBOOT`, `SHUTDOWN`, `LOGOFF`; overrides the deploy section. |
 | `PostPEScript` | Share-relative PowerShell 5 script run in WinPE right after the image is applied. |
 | any other key | Passed as a script parameter when a `DeploymentActions.json` entry lists it under `Parameters`. |
@@ -419,6 +419,8 @@ A `Script` action runs `.ps1` with PowerShell 7 by default, `"PowerShell": "powe
 
 The `NDT` module (`install\NDT`, published to the PowerShell Gallery) is used to provision, upgrade and administer the share. Use PowerShell 7 to import it; commands that need Windows PowerShell 5.1 (IIS, WDS) relaunch themselves under `powershell.exe`.
 
+The module also lives on the share (`install\NDT`) and is imported by WinPE, the first-boot step engine and `Start-Refresh.ps1`, so the rules that decide which machine block, OS, deploy section and effective settings apply exist once and `Test-NDTDeployment` checks what deployment really does. The deploy scripts stop with an error if `install\NDT` is missing; run `Update-NDT` to restore it. The module is not part of the boot image.
+
 | Command | Purpose |
 |---|---|
 | `Install-NDT` | Bootstrap a new share: download code, stamp the `Deploy` section, create the SMB share (deploy account Full, Everyone revoked), install the monitor. |
@@ -433,6 +435,7 @@ The `NDT` module (`install\NDT`, published to the PowerShell Gallery) is used to
 | `Remove-NDTProgress` | Delete a machine's monitor progress file. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). |
 | `Get-NDTCatalog`, `Test-NDTComputerEntry` | Read-only helpers for front ends. |
+| `Get-NDTMachine`, `Get-NDTEffectiveSetting`, `Resolve-NDTMachineOS`, `Resolve-NDTDeploySection`, `Test-NDTInstallDisabled` | Lookups the deploy scripts use at run time (merged machine set, effective settings, OS and deploy-section resolution, the `Install:NO` guard). |
 
 See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 
@@ -440,8 +443,8 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 
 ## Updating NDT
 
-- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` and `Control\Projects\` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). After `Install-NDT`/`Update-NDT` the module and repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) are removed from the live share.
-- **The module itself**: update an AllUsers install with `Install-Module NDT -Force -Scope AllUsers`. Do **not** use `Update-Module` on PowerShellGet 2.x; it installs to CurrentUser and the newer copy then shadows the AllUsers one.
+- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` and `Control\Projects\` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Before anything is copied, the new module is import-tested under Windows PowerShell 5.1 and PowerShell 7; if it fails, nothing on the share is changed. `install\NDT` is replaced through a temporary folder. After `Install-NDT`/`Update-NDT` the repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) and `install\Publish-NDT.ps1` are removed from the live share; `install\NDT` stays because the deploy scripts import it.
+- **The module itself**: update an AllUsers install with `Install-Module NDT -Force -Scope AllUsers`, and do this **before** running `Update-NDT` (an older module's `Update-NDT` still removes `install\NDT` from the share, which stops the deploy scripts). Do **not** use `Update-Module` on PowerShellGet 2.x; it installs to CurrentUser and the newer copy then shadows the AllUsers one.
 - **Boot image**: rebuild with `New-NDTPEImage` after changing `install.ps1`, drivers or the WinPE launcher, since those are baked into the WIM.
 
 ---

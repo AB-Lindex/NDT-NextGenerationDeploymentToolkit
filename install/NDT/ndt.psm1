@@ -61,25 +61,60 @@ function ConvertTo-NDTJson {
 }
 
 function Remove-NDTBootstrapArtefact {
-    # Private helper (not exported). NDT runs from the PSGallery module install,
-    # never from the share, so the module copy and publish helper that ship inside
-    # the repo ZIP are bootstrap-only artefacts - remove them from a live share.
-    # install\NDTMonitor is intentionally KEPT (Install-NDTMonitor deploys its site
-    # content from there).
+    # Private helper (not exported). Publish-NDT.ps1 is developer-only tooling and must not
+    # live on a deployment share. install\NDT is KEPT: the deploy scripts import the module
+    # from there. install\NDTMonitor is KEPT too (Install-NDTMonitor deploys its site content).
     [CmdletBinding(SupportsShouldProcess)]
     param (
         [Parameter(Mandatory)]
         [string]$LocalPath
     )
 
-    $installDir = Join-Path $LocalPath 'install'
-    foreach ($artefact in @((Join-Path $installDir 'NDT'), (Join-Path $installDir 'Publish-NDT.ps1'))) {
-        if (Test-Path $artefact) {
-            if ($PSCmdlet.ShouldProcess($artefact, 'Remove bootstrap-only artefact from share')) {
-                Remove-Item -Path $artefact -Recurse -Force -ErrorAction SilentlyContinue
-                Write-Verbose "  Removed bootstrap artefact: $artefact"
-            }
+    $artefact = Join-Path $LocalPath 'install\Publish-NDT.ps1'
+    if (Test-Path $artefact) {
+        if ($PSCmdlet.ShouldProcess($artefact, 'Remove developer-only artefact from share')) {
+            Remove-Item -Path $artefact -Force -ErrorAction SilentlyContinue
+            Write-Verbose "  Removed developer-only artefact: $artefact"
         }
+    }
+}
+
+function Test-NDTModuleImport {
+    # Private helper (not exported). Imports the module manifest in fresh Windows PowerShell 5.1
+    # and PowerShell 7 processes (WinPE and first boot run 5.1, the step engine runs 7) and throws
+    # if either fails, so a broken module is caught before it replaces the one on the share.
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$ManifestPath
+    )
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        throw "Module manifest not found in the downloaded repository: $ManifestPath"
+    }
+
+    $hosts = [ordered]@{}
+    $ps5 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if (Test-Path $ps5) { $hosts['Windows PowerShell 5.1'] = $ps5 }
+
+    $pwsh = $null
+    if ($PSVersionTable.PSVersion.Major -ge 7) { $pwsh = (Get-Process -Id $PID).Path }
+    else {
+        $cmd = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $pwsh = $cmd.Source }
+        elseif (Test-Path (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')) { $pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe' }
+    }
+    if ($pwsh) { $hosts['PowerShell 7'] = $pwsh }
+    else { Write-Warning 'PowerShell 7 was not found - the new module was not import-tested under PowerShell 7.' }
+
+    $quoted = $ManifestPath -replace "'", "''"
+    $probe  = "`$ErrorActionPreference = 'Stop'; Import-Module '$quoted' -Force; Get-Command Get-NDTMachine | Out-Null"
+    foreach ($h in $hosts.GetEnumerator()) {
+        $out = & $h.Value -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command $probe 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "The new NDT module failed to import under $($h.Key); nothing on the share was changed.`n$(($out | Out-String).Trim())"
+        }
+        Write-Verbose "  Module import OK under $($h.Key)."
     }
 }
 
@@ -212,6 +247,10 @@ function Install-NDT {
         $repoRoot = Get-ChildItem -Path $tempDir -Directory | Select-Object -First 1 -ExpandProperty FullName
         if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
         Write-Verbose "  Repository root: $repoRoot"
+
+        # The deploy scripts import install\NDT from the share, so prove the module loads
+        # before anything is copied.
+        Test-NDTModuleImport -ManifestPath (Join-Path $repoRoot 'install\NDT\ndt.psd1')
 
         # Resolve the repo version being installed (latest commit on the branch).
         $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
@@ -361,7 +400,7 @@ function Install-NDT {
     }
     #endregion
 
-    #region -- Clean up bootstrap-only artefacts from the share ------------------
+    #region -- Remove developer-only artefacts from the share ---------------------
     Remove-NDTBootstrapArtefact -LocalPath $LocalPath
     #endregion
 
@@ -555,6 +594,10 @@ function Update-NDT {
         if (-not $repoRoot) { throw 'Could not locate repository root in the downloaded ZIP.' }
         Write-Verbose "  Repository root: $repoRoot"
 
+        # The deploy scripts import install\NDT from the share, so prove the new module loads
+        # before any share file is touched.
+        Test-NDTModuleImport -ManifestPath (Join-Path $repoRoot 'install\NDT\ndt.psd1')
+
         # Resolve the incoming repo version (latest commit on the branch; the project
         # commits a timestamp as the commit message, so it is readable and increasing).
         $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
@@ -569,6 +612,17 @@ function Update-NDT {
 
             foreach ($item in (Get-ChildItem -Path $repoRoot -Force)) {
                 if ($repoOnlyItems -contains $item.Name) { continue }
+
+                if ($item.Name -eq 'install') {
+                    # install\NDT is swapped atomically below and Publish-NDT.ps1 is developer-only.
+                    $installDest = Join-Path $LocalPath 'install'
+                    if (-not (Test-Path $installDest)) { New-Item -ItemType Directory -Path $installDest -Force | Out-Null }
+                    foreach ($child in (Get-ChildItem -Path $item.FullName -Force | Where-Object { $_.Name -notin 'NDT', 'Publish-NDT.ps1' })) {
+                        Copy-Item -Path $child.FullName -Destination $installDest -Recurse -Force
+                    }
+                    Write-Verbose '  Updated: install (except NDT)'
+                    continue
+                }
 
                 if ($preserveItems -contains $item.Name) {
                     # Preserve existing config. For a preserved folder, still copy in
@@ -597,6 +651,26 @@ function Update-NDT {
                 Copy-Item -Path $item.FullName -Destination $LocalPath -Recurse -Force
                 Write-Verbose "  Updated: $($item.Name)"
             }
+
+            # Swap the module folder through a temp name so a deployment that imports it
+            # never sees a half-copied module and files removed from the module do not linger.
+            $moduleSrc   = Join-Path $repoRoot 'install\NDT'
+            $moduleDest  = Join-Path $LocalPath 'install\NDT'
+            $moduleNew   = "$moduleDest.new"
+            $moduleOld   = "$moduleDest.old"
+            foreach ($leftover in $moduleNew, $moduleOld) {
+                if (Test-Path $leftover) { Remove-Item $leftover -Recurse -Force }
+            }
+            Copy-Item -Path $moduleSrc -Destination $moduleNew -Recurse -Force
+            if (Test-Path $moduleDest) { Rename-Item -Path $moduleDest -NewName (Split-Path $moduleOld -Leaf) }
+            try {
+                Rename-Item -Path $moduleNew -NewName (Split-Path $moduleDest -Leaf)
+            } catch {
+                if (Test-Path $moduleOld) { Rename-Item -Path $moduleOld -NewName (Split-Path $moduleDest -Leaf) }
+                throw
+            }
+            if (Test-Path $moduleOld) { Remove-Item $moduleOld -Recurse -Force -ErrorAction SilentlyContinue }
+            Write-Verbose '  Updated: install\NDT (module)'
 
             # Belt-and-braces: strip repo-only artefacts if any slipped in.
             foreach ($item in $repoOnlyItems) {
@@ -647,7 +721,7 @@ function Update-NDT {
     }
     #endregion
 
-    #region -- Clean up bootstrap-only artefacts from the share ------------------
+    #region -- Remove developer-only artefacts from the share ---------------------
     Remove-NDTBootstrapArtefact -LocalPath $LocalPath
     #endregion
 
@@ -657,7 +731,8 @@ function Update-NDT {
     if (-not $NoBackup) { Write-Host "  Backup     : $BackupPath" }
     Write-Host ''
     Write-Host 'Post-upgrade notes:' -ForegroundColor Cyan
-    Write-Host '  * The NDT module itself updates from PSGallery, not the share:' -ForegroundColor White
+    Write-Host '  * The deploy scripts import the module from the share (install\NDT, refreshed above).' -ForegroundColor White
+    Write-Host '    Update the admin copy of the module from PSGallery as well:' -ForegroundColor White
     Write-Host '      Install-Module NDT -Force -Scope AllUsers' -ForegroundColor Gray
     Write-Host '  * If WinPE scripts changed, rebuild the boot image:' -ForegroundColor White
     Write-Host '      New-NDTPEImage' -ForegroundColor Gray
@@ -1907,8 +1982,7 @@ function Get-NDTMachineEntry {
     # plus Control\Projects\**\*.json as objects: MAC (upper case), Key (name as written),
     # SourceFile (relative to Control), Path, Root (parsed file, for write-back) and Value.
     # Duplicates are returned as-is - callers decide. An invalid JSON file throws.
-    # NOTE: the share-side equivalent is Scripts\unattend2026\Get-NDTMachine.ps1 (cannot be
-    # shared: this module is installed from PSGallery). Keep the two in step.
+    # Deployment uses Get-NDTMachine (below), which turns duplicates into an error.
     [CmdletBinding()]
     param ([Parameter(Mandatory)][string]$LocalPath)
 
@@ -1992,6 +2066,180 @@ function Resolve-NDTProjectFile {
     $full
 }
 
+#region -- Runtime lookups (shared with the deploy scripts via install\NDT) ----
+# The deploy scripts (WinPE, first boot, step engine) import this module from the share and use
+# the functions below, so the rules for finding a machine, its OS, its deploy section and its
+# effective settings exist exactly once and Test-NDTDeployment checks what deployment really does.
+
+$script:NDTFinishActions = @('DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF')
+
+function Get-NDTMemberValue {
+    # Private helper (not exported). Reads a named member from a parsed JSON object or a
+    # dictionary (a proposed entry); $null when absent.
+    param ($InputObject, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $InputObject) { return $null }
+    if ($InputObject -is [System.Collections.IDictionary]) { return $InputObject[$Name] }
+    $p = $InputObject.PSObject.Properties[$Name]
+    if ($p) { $p.Value }
+}
+
+function Get-NDTMachine {
+    <#
+    .SYNOPSIS
+        All machine blocks of the share as one object keyed by upper-case MAC address.
+    .DESCRIPTION
+        Merges Control\CustomSettings.json with every Control\Projects\**\*.json. Only MAC-shaped
+        keys count. A MAC defined more than once, or an invalid JSON file, is a terminating error:
+        deployment must not run on an ambiguous configuration.
+    .PARAMETER LocalPath
+        Root of the NDT deployment share (Z:\ during deployment). Default: C:\Deploy2026
+    .PARAMETER SourceMap
+        Optional hashtable filled with MAC -> source file (relative to Control).
+    .EXAMPLE
+        $src = @{}; $machines = Get-NDTMachine -LocalPath Z:\ -SourceMap $src; $machines.'00:15:5D:02:56:01'
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]$LocalPath = 'C:\Deploy2026',
+        [Parameter()]
+        [hashtable]$SourceMap
+    )
+
+    $merged = [ordered]@{}
+    $owners = @{}
+    $dupes  = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in @(Get-NDTMachineEntry -LocalPath $LocalPath)) {
+        if ($owners.ContainsKey($e.MAC)) {
+            $dupes.Add("  $($e.MAC) in Control\$($owners[$e.MAC]) and Control\$($e.SourceFile)")
+            continue
+        }
+        $owners[$e.MAC] = $e.SourceFile
+        $merged[$e.MAC] = $e.Value
+    }
+    if ($dupes.Count -gt 0) {
+        throw "Duplicate MAC address(es) in the machine configuration - each MAC may appear only once:`n$($dupes -join "`n")"
+    }
+    if ($SourceMap) { foreach ($mac in $owners.Keys) { $SourceMap[$mac] = $owners[$mac] } }
+
+    [PSCustomObject]$merged
+}
+
+function Test-NDTInstallDisabled {
+    <#
+    .SYNOPSIS
+        $true when the machine block has "Install": "NO" (WinPE then reboots without touching the disk).
+    #>
+    [CmdletBinding()]
+    param ([Parameter(Mandatory)]$Machine)
+    $p = $Machine.PSObject.Properties['Install']
+    [bool]($p -and ("$($p.Value)" -eq 'NO'))
+}
+
+function Resolve-NDTDeploySection {
+    <#
+    .SYNOPSIS
+        The deploy section (share, credentials, MonitorUrl, FinishAction) that applies to a machine.
+    .DESCRIPTION
+        A machine block may name its own section in "Deploy"; otherwise the section called 'Deploy'
+        is used. Returns Name and Settings (Settings is $null when the section does not exist).
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]$Machine,
+        [Parameter(Mandatory)]$SectionCatalog
+    )
+    $override = $Machine.PSObject.Properties['Deploy']
+    $name     = if ($override -and $override.Value) { [string]$override.Value } else { 'Deploy' }
+    $section  = $SectionCatalog.PSObject.Properties[$name]
+    [PSCustomObject]@{ Name = $name; Settings = $(if ($section) { $section.Value } else { $null }) }
+}
+
+function Resolve-NDTMachineOS {
+    <#
+    .SYNOPSIS
+        The OS key a machine deploys: from its own block, else from the first referenced section that sets one.
+    .DESCRIPTION
+        Machine is a block from Get-NDTMachine or a proposed entry (dictionary). Returns OsKey and
+        Source, or $null when no OS is defined. The key is not checked against OS.json here.
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]$Machine,
+        [Parameter(Mandatory)]$SectionCatalog
+    )
+    $os = [string](Get-NDTMemberValue $Machine 'OS')
+    if ($os) { return [PSCustomObject]@{ OsKey = $os; Source = 'machine' } }
+
+    $refs = Get-NDTMemberValue $Machine 'Sections'
+    if (-not $refs) { return $null }
+    $names = if ($refs -is [System.Collections.IDictionary]) { @($refs.Values) } else { @($refs.PSObject.Properties | ForEach-Object { $_.Value }) }
+    foreach ($name in $names) {
+        $section = $SectionCatalog.PSObject.Properties[[string]$name]
+        $secOs   = if ($section) { [string](Get-NDTMemberValue $section.Value 'OS') } else { '' }
+        if ($secOs) { return [PSCustomObject]@{ OsKey = $secOs; Source = "section '$name'" } }
+    }
+    $null
+}
+
+function Get-NDTEffectiveSetting {
+    <#
+    .SYNOPSIS
+        Flat settings for a machine: its own keys win, then referenced sections in listed order, then @Key references resolved.
+    .DESCRIPTION
+        Returns Settings (hashtable), Sections (label -> section data, in listed order), Notes and
+        Warnings (strings for the caller to log).
+    #>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]$Machine,
+        [Parameter(Mandatory)]$SectionCatalog
+    )
+    $settings = @{}
+    $loaded   = [ordered]@{}
+    $notes    = [System.Collections.Generic.List[string]]::new()
+    $warnings = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($p in $Machine.PSObject.Properties) {
+        if ($p.Name -notin 'Sections', 'DeploymentGroups', 'DeploymentGroups_legacy') { $settings[$p.Name] = $p.Value }
+    }
+
+    $refs = $Machine.PSObject.Properties['Sections']
+    if ($refs -and $refs.Value) {
+        foreach ($sp in $refs.Value.PSObject.Properties) {
+            $section = $SectionCatalog.PSObject.Properties[[string]$sp.Value]
+            if ($section) {
+                $loaded[$sp.Name] = $section.Value
+                $notes.Add("Loaded section: $($sp.Name) -> $($sp.Value)")
+            } else {
+                $warnings.Add("Section reference '$($sp.Value)' not found for $($sp.Name)")
+            }
+        }
+    }
+    foreach ($section in $loaded.GetEnumerator()) {
+        foreach ($p in $section.Value.PSObject.Properties) {
+            if (-not $settings.ContainsKey($p.Name)) { $settings[$p.Name] = $p.Value }
+        }
+    }
+
+    foreach ($key in @($settings.Keys)) {
+        $val = $settings[$key]
+        if ($val -is [string] -and $val.StartsWith('@')) {
+            $refKey = $val.Substring(1)
+            if ($settings.ContainsKey($refKey)) {
+                $settings[$key] = $settings[$refKey]
+                $notes.Add("Resolved reference: $key -> $refKey")
+            } else {
+                $warnings.Add("Unresolved reference '@$refKey' for key '$key'")
+            }
+        }
+    }
+
+    [PSCustomObject]@{ Settings = $settings; Sections = $loaded; Notes = $notes.ToArray(); Warnings = $warnings.ToArray() }
+}
+
+#endregion
+
 function Get-NDTComputer {
     <#
     .SYNOPSIS
@@ -2063,7 +2311,7 @@ function Add-NDTComputer {
     .PARAMETER Computername
         Target computer name.
     .PARAMETER OS
-        OS key from OS.json to deploy.
+        OS key from OS.json to deploy. May be omitted when a referenced section in -Sections defines OS.
     .PARAMETER IPAddress
         Static IP in CIDR notation (e.g. 10.0.3.22/24), or 'DHCP'.
     .PARAMETER DefaultGateway
@@ -2113,7 +2361,7 @@ function Add-NDTComputer {
         [Parameter(Mandatory, ParameterSetName = 'Manual')]
         [Parameter(ParameterSetName = 'Clone')]
         [string]$Computername,
-        [Parameter(Mandatory, ParameterSetName = 'Manual')]
+        [Parameter(ParameterSetName = 'Manual')]
         [Parameter(ParameterSetName = 'Clone')]
         [string]$OS,
         [Parameter()]
@@ -2165,7 +2413,7 @@ function Add-NDTComputer {
                 $entry[$prop.Name] = $prop.Value
             }
         }
-        if ($PSBoundParameters.ContainsKey('OS'))              { $entry.OS              = $OS }
+        if ($PSBoundParameters.ContainsKey('OS') -and $OS)     { $entry.OS              = $OS }
         if ($PSBoundParameters.ContainsKey('Computername'))    { $entry.Computername    = $Computername }
         if ($PSBoundParameters.ContainsKey('IPAddress'))       { $entry.IPAddress       = $IPAddress }
         if ($PSBoundParameters.ContainsKey('DefaultGateway'))  { $entry.DefaultGateway  = $DefaultGateway }
@@ -2177,6 +2425,12 @@ function Add-NDTComputer {
         if ($PSBoundParameters.ContainsKey('Install'))         { $entry.Install         = $Install.ToUpper() }
         if ($PSBoundParameters.ContainsKey('Properties')) {
             foreach ($kv in $Properties.GetEnumerator()) { $entry[$kv.Key] = $kv.Value }
+        }
+
+        $sectionsFile = Join-Path $LocalPath 'Control\Sections.json'
+        $sectionCatalog = if (Test-Path $sectionsFile) { Get-Content $sectionsFile -Raw | ConvertFrom-Json } else { [PSCustomObject]@{} }
+        if (-not (Resolve-NDTMachineOS -Machine $entry -SectionCatalog $sectionCatalog)) {
+            throw 'No OS specified: pass -OS, or reference a section (-Sections) that defines OS.'
         }
 
         if ($PSCmdlet.ShouldProcess($normalMAC, 'Add computer entry')) {
@@ -2825,18 +3079,19 @@ function Test-NDTComputerEntry {
     if (-not $Entry['AdminPassword']) { $errors.Add('AdminPassword is required.') }
 
     $fin = [string]$Entry['FinishAction']
-    if ($fin -and $fin.ToUpper() -notin 'DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF') {
+    if ($fin -and $fin.ToUpper() -notin $script:NDTFinishActions) {
         $errors.Add("FinishAction '$fin' is not valid.")
     }
     $inst = [string]$Entry['Install']
     if ($inst -and $inst.ToUpper() -notin 'YES', 'NO') { $errors.Add("Install '$inst' must be YES or NO.") }
 
-    # -- OS and WIM
-    $osKey = [string]$Entry['OS']
-    if (-not $osKey) { $errors.Add('OS is required.') }
+    # -- OS and WIM (OS may come from a referenced section, as in deployment)
+    $osRes = Resolve-NDTMachineOS -Machine $Entry -SectionCatalog $snJson
+    if (-not $osRes) { $errors.Add('OS is required (in the entry or in one of its sections).') }
     else {
+        $osKey   = $osRes.OsKey
         $osEntry = $osJson.PSObject.Properties[$osKey]
-        if (-not $osEntry) { $errors.Add("OS '$osKey' not found in OS.json.") }
+        if (-not $osEntry) { $errors.Add("OS '$osKey' ($($osRes.Source)) not found in OS.json.") }
         else {
             $wim = Join-Path $LocalPath ([string]$osEntry.Value.Path).TrimStart('\')
             if (-not (Test-Path $wim)) { $errors.Add("WIM for OS '$osKey' not found: $($osEntry.Value.Path)") }
@@ -3007,22 +3262,27 @@ function Test-NDTDeployment {
 
     # -- [3] Required fields -----------------------------------------------------
     Write-Host "`n[3] Required fields" -ForegroundColor White
+    $osRes = Resolve-NDTMachineOS -Machine $machine -SectionCatalog $sectionsCatalog
     Write-Check 'Computername'    ([bool]$machine.Computername)    $machine.Computername
-    Write-Check 'OS'              ([bool]$machine.OS)               $machine.OS
+    Write-Check 'OS'              ([bool]$osRes)                    $(if ($osRes) { "$($osRes.OsKey) ($($osRes.Source))" } else { 'Not set in the machine block or in any referenced section.' })
     Write-Check 'AdminPassword'   ([bool]$machine.AdminPassword)   '(set)'
     Write-Check 'DeploymentGroups' ([bool]$machine.DeploymentGroups) ($machine.DeploymentGroups -join ', ')
 
+    # Deploy section (share + credentials): the machine's own 'Deploy' override, else 'Deploy'.
+    $deployRes = Resolve-NDTDeploySection -Machine $machine -SectionCatalog $sectionsCatalog
+    Write-Check "Deploy section '$($deployRes.Name)'" ([bool]$deployRes.Settings)
+
     # FinishAction: MAC block overrides the deploy section; absent = DESKTOP.
-    $deploySectionName = if ($machine.Deploy) { $machine.Deploy } else { 'Deploy' }
-    $deploySection     = $sectionsCatalog.PSObject.Properties[$deploySectionName]
+    $deploySectionName = $deployRes.Name
+    $deploySection     = $deployRes.Settings
     if ($machine.FinishAction) {
         $finishAction = [string]$machine.FinishAction; $finishSource = 'machine'
-    } elseif ($deploySection -and $deploySection.Value.FinishAction) {
-        $finishAction = [string]$deploySection.Value.FinishAction; $finishSource = "section '$deploySectionName'"
+    } elseif ($deploySection -and $deploySection.FinishAction) {
+        $finishAction = [string]$deploySection.FinishAction; $finishSource = "section '$deploySectionName'"
     } else {
         $finishAction = 'DESKTOP'; $finishSource = 'default'
     }
-    $finishValid = $finishAction.ToUpper() -in 'DESKTOP', 'PROMPT', 'REBOOT', 'RESTART', 'SHUTDOWN', 'LOGOFF'
+    $finishValid = $finishAction.ToUpper() -in $script:NDTFinishActions
     Write-Check 'FinishAction' $finishValid "$finishAction ($finishSource)"
 
     # -- [4] Sections ------------------------------------------------------------
@@ -3043,7 +3303,7 @@ function Test-NDTDeployment {
 
     # -- [5] Operating system ----------------------------------------------------
     Write-Host "`n[5] Operating system" -ForegroundColor White
-    $osKey = $machine.OS
+    $osKey = if ($osRes) { $osRes.OsKey } else { $null }
     if ($osKey) {
         $osEntry = $osCatalog.PSObject.Properties[$osKey]
         Write-Check "Key '$osKey' in OS.json" ([bool]$osEntry)
@@ -3190,6 +3450,7 @@ function Watch-NDTDeployment {
         # name; if only a MAC was supplied, resolve it via the merged machine set
         # (CustomSettings.json + Control\Projects).
         $targetName = $Computername
+        $hit = $null
         if (-not $targetName -and $MAC) {
             $normalMAC = $MAC.ToUpper().Replace('-', ':')
             try {
@@ -3212,8 +3473,9 @@ function Watch-NDTDeployment {
             if (Test-Path $sectionsPath) {
                 try {
                     $sections = Get-Content $sectionsPath -Raw | ConvertFrom-Json
-                    if ($sections.Deploy -and $sections.Deploy.MonitorUrl) {
-                        $MonitorUrl = $sections.Deploy.MonitorUrl
+                    $deploySection = if ($hit) { (Resolve-NDTDeploySection -Machine $hit.Value -SectionCatalog $sections).Settings } else { $sections.Deploy }
+                    if ($deploySection -and $deploySection.MonitorUrl) {
+                        $MonitorUrl = $deploySection.MonitorUrl
                     }
                 } catch {
                     # Fall through to the throw below.
