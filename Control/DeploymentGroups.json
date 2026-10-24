@@ -272,5 +272,11 @@
         "Description": "Create Certificate Templates",
         "Reference": "Create Certificate Templates"
       }
+   },
+   "VS Code": {
+     "Step10": {
+       "Description": "Install VS Code",
+       "Reference": "Install VS Code"
+     }
    }
 }

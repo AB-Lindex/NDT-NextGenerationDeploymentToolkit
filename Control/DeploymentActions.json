@@ -223,5 +223,9 @@
       "CertificateSubject",
       "ApiKey"
     ]
+  },
+  "Install VS Code": {
+    "Script": "\\Applications\\VS Code\\install.ps1",
+    "Description": "Install Visual Studio Code"
   }
 }
