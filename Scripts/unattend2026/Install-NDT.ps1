@@ -2,7 +2,18 @@
 # This script is designed to run on the deployed machine after the initial Windows PE phase, and will execute deployment steps defined in DeploymentActions.json based on the machine's MAC address.
 # It supports executing scripts, configuring autologon, and handling reboots as part of the deployment process.
 
-$LogPath = 'C:\temp\install-NDT.log'
+param(
+    # Deployment folder on the machine (passed by install2026.ps1): settings.json, logs and step state live there.
+    [Parameter(Mandatory)]
+    [string]$DeployDir
+)
+
+# Steps (PowerShell 5/7 scripts and cmd files) inherit this, e.g. to read settings.json.
+$env:NDT_DEPLOYDIR = $DeployDir
+
+$LogPath      = Join-Path $DeployDir 'install-NDT.log'
+$settingsPath = Join-Path $DeployDir 'settings.json'
+$progressPath = Join-Path $DeployDir 'install-steps.json'
 
 # Control file paths (single source of truth)
 $deploymentGroupsPath = 'Z:\Control\DeploymentGroups.json'    # groups → ordered steps with References
@@ -88,7 +99,7 @@ try { $sysIP = (Get-NetIPAddress -AddressFamily IPv4 -Type Unicast | Where-Objec
 # Get the MAC recorded in WinPE from settings.json (written fresh by Copy-Install.ps1).
 # A VM's live MAC can change across reboots in a Hyper-V farm, so the stored value
 # is authoritative rather than re-detecting the adapter here.
-$macAddress = (Get-Content -Path 'C:\temp\settings.json' -Raw | ConvertFrom-Json).MAC
+$macAddress = (Get-Content -Path $settingsPath -Raw | ConvertFrom-Json).MAC
 
 Write-Log 'Install-NDT.ps1 started' -ForegroundColor Cyan
 Write-Log '-----------------------------------' -ForegroundColor Cyan
@@ -129,13 +140,12 @@ if (-not $machineConfig) {
 }
 Write-Log "Machine config source: Control\$($machineSource[$macAddress.ToUpper()])" -ForegroundColor Gray
 
-# Resolve the NDT Monitor URL early (from C:\temp\settings.json, written by Copy-Install.ps1)
+# Resolve the NDT Monitor URL early (from settings.json, written by Copy-Install.ps1)
 # so that even early-exit paths below can report a final status to the monitor.
 $script:MonitorUrl = $null
-$earlySettingsPath = 'C:\temp\settings.json'
-if (Test-Path $earlySettingsPath) {
+if (Test-Path $settingsPath) {
     try {
-        $earlySettings = Get-Content -Path $earlySettingsPath -Raw | ConvertFrom-Json
+        $earlySettings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
         if ($earlySettings.Deploy -and $earlySettings.Deploy.MonitorUrl) {
             $script:MonitorUrl = $earlySettings.Deploy.MonitorUrl.TrimEnd('/')
         }
@@ -172,7 +182,6 @@ if ($deploymentGroupRefs -is [string]) {
 Write-Log "Deployment groups: $($deploymentGroupRefs -join ', ')" -ForegroundColor Cyan
 
 # Load settings.json for autologon credentials
-$settingsPath = "C:\temp\settings.json"
 if (Test-Path $settingsPath) {
     $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
     $autoLogonSettings = $settings.AutoLogon
@@ -191,7 +200,6 @@ if ($script:MonitorUrl) {
 }
 
 # Load or create install progress tracker
-$progressPath = "C:\temp\install-steps.json"
 if (Test-Path $progressPath) {
     $progress = Get-Content -Path $progressPath -Raw | ConvertFrom-Json
     $completedSteps = @($progress.CompletedSteps)

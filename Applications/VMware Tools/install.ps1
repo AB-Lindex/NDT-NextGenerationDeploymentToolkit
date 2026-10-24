@@ -1,7 +1,8 @@
 # VMware Tools install step.
 # Runs in Phase 2 (step engine). Only proceeds on VMware guests - detected hardware
-# is read from C:\temp\settings.json (written by Copy-Install.ps1); falls back to a
-# live Get-Hardware.ps1 query if the share is mapped and the block is missing.
+# is read from settings.json in the deployment folder ($env:NDT_DEPLOYDIR, set by the step
+# engine for every step); falls back to a live Get-Hardware.ps1 query if the share is mapped
+# and the block is missing.
 # NOTE: the actual setup.exe invocation is intentionally NOT wired up yet - see below.
 
 [CmdletBinding()]
@@ -9,8 +10,8 @@ param()
 
 # Resolve detected platform: prefer the persisted value, fall back to a live query.
 $platform = $null
-$settingsPath = 'C:\temp\settings.json'
-if (Test-Path $settingsPath) {
+$settingsPath = if ($env:NDT_DEPLOYDIR) { Join-Path $env:NDT_DEPLOYDIR 'settings.json' } else { $null }
+if ($settingsPath -and (Test-Path $settingsPath)) {
     try {
         $settings = Get-Content -Path $settingsPath -Raw | ConvertFrom-Json
         if ($settings.Hardware) { $platform = $settings.Hardware.Platform }

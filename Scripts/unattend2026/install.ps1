@@ -11,9 +11,9 @@
 # Must be checked BEFORE diskpart to avoid wiping the reference system
 
 # ------------------------------------------------------------------
-# Logging. C:\temp does not exist yet (the disk is not partitioned), so we start
-# logging to the WinPE RAM drive (X:) and relocate the log onto C:\temp once the
-# disk is partitioned (see "Log relocated" below). This mirrors the Write-Log used
+# Logging. The target disk does not exist yet (it is not partitioned), so we start
+# logging to the WinPE RAM drive (X:) and copy the log into the deployment folder once the
+# image is applied (see "DeploymentLogs" below). This mirrors the Write-Log used
 # by install2026.ps1 / Install-NDT.ps1 so all three phases log the same way.
 # ------------------------------------------------------------------
 $script:LogPath = 'X:\install.log'
@@ -37,6 +37,12 @@ function Write-Log {
 # Read by Copy-Install.ps1 so the FinishAction prompt can show total deployment duration.
 $env:NDT_DEPLOY_START = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 
+# The one place the deployment folder is defined: everything NDT keeps on the target (install2026.ps1,
+# settings.json, logs, step state, flags) lives here, never in C:\temp. install2026.ps1 uses its own
+# folder, Install-NDT.ps1 gets it as -DeployDir and steps see $env:NDT_DEPLOYDIR.
+$deployDirRel = 'Windows\Temp\DeploymentLogs'
+$deployDir    = Join-Path 'C:\' $deployDirRel
+
 # Get-NetIPAddress (NetTCPIP) is missing in WinPE PS5.1 and Get-WmiObject is missing in PS7 - .NET works in both.
 try {
     $sysIP = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
@@ -53,7 +59,7 @@ Write-Log "Hostname : $env:COMPUTERNAME"
 Write-Log "User     : $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name)"
 Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
 Write-Log "IP       : $sysIP"
-Write-Log "Log file : $script:LogPath (WinPE RAM drive - relocated to C:\temp after partitioning)"
+Write-Log "Log file : $script:LogPath (WinPE RAM drive - copied to C:\$deployDirRel after the image is applied)"
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 
 # ------------------------------------------------------------------
@@ -147,14 +153,9 @@ if ($captureMode) {
         Write-Log "Removing DeployCapture.flag from reference drive..." -ForegroundColor Yellow
         Remove-Item "${referenceDrive}:\DeployCapture.flag" -Force -ErrorAction SilentlyContinue
 
-        # Clean C:\temp on the reference drive so deployment logs are not appended
-        # when the WIM is applied to a new machine.
-        $tempPath = "${referenceDrive}:\temp"
-        if (Test-Path $tempPath) {
-            Write-Log "Cleaning $tempPath before capture..." -ForegroundColor Yellow
-            Remove-Item -Path "$tempPath\*" -Recurse -Force -ErrorAction SilentlyContinue
-        }
-        Remove-Item -Path "${referenceDrive}:\Windows\Temp\DeploymentLogs" -Recurse -Force -ErrorAction SilentlyContinue
+        # Remove the previous deployment's folder on the reference drive: a baked-in deploy-complete.flag
+        # would make the next machine skip its deployment.
+        Remove-Item -Path "${referenceDrive}:\$deployDirRel" -Recurse -Force -ErrorAction SilentlyContinue
 
         Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"
@@ -326,20 +327,6 @@ exit
 
 $diskpartScript | diskpart
 
-# Disk is now partitioned - C: exists. Relocate the WinPE log off the X: RAM drive
-# onto C:\temp so it survives the reboot into Windows and lands on the deployed
-# machine alongside install2026.log / install-NDT.log.
-try {
-    $null = New-Item -ItemType Directory -Path 'C:\temp' -Force
-    $newLogPath = 'C:\temp\install.log'
-    if (Test-Path $script:LogPath) {
-        Copy-Item -Path $script:LogPath -Destination $newLogPath -Force -ErrorAction SilentlyContinue
-    }
-    $script:LogPath = $newLogPath
-    Write-Log "Log relocated to $newLogPath (C: partition available)" -ForegroundColor Gray
-} catch {
-    Write-Log "Could not relocate log to C:\temp - continuing on $script:LogPath" -Level WARN
-}
 
 <# Storage-module equivalent - kept for reference only; we stay on diskpart (above).
    The cmdlets work in WinPE but are less forgiving than diskpart, so if you ever
@@ -387,9 +374,24 @@ if ($LASTEXITCODE -ne 0) {
 }
 Send-PEProgress -Description 'OS image applied' -Percent 45
 
-# A captured image can carry the DeploymentLogs of the machine it came from; its deploy-complete.flag
-# would make first boot skip the whole deployment.
-Remove-Item -Path 'C:\Windows\Temp\DeploymentLogs' -Recurse -Force -ErrorAction SilentlyContinue
+# ------------------------------------------------------------------
+# DeploymentLogs - the deployment folder on the target, created before anything else is written there.
+# A captured image can carry the folder of the machine it came from; its deploy-complete.flag would
+# make first boot skip the whole deployment, so it is deleted first. Only SYSTEM and Administrators
+# may use it (settings.json holds passwords during deployment).
+# ------------------------------------------------------------------
+Remove-Item -Path $deployDir -Recurse -Force -ErrorAction SilentlyContinue
+$null = New-Item -ItemType Directory -Path $deployDir -Force
+icacls.exe $deployDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Log "WARNING: could not restrict permissions on $deployDir (icacls exit $LASTEXITCODE)" -Level WARN }
+try {
+    $newLogPath = Join-Path $deployDir 'install.log'
+    Copy-Item -Path $script:LogPath -Destination $newLogPath -Force -ErrorAction Stop
+    $script:LogPath = $newLogPath
+    Write-Log "Log copied to $newLogPath" -ForegroundColor Gray
+} catch {
+    Write-Log "Could not copy the log to $deployDir - continuing on $script:LogPath" -Level WARN
+}
 
 # ------------------------------------------------------------------
 # STEP 4a - Inject OS drivers into the offline image (NOT the PE image).
@@ -447,15 +449,16 @@ if ($machineConfig.PostPEScript) {
 }
 
 # Copy and prepare install2026.ps1 with deployment share mapping
-& "Z:\Scripts\Unattend2026\Copy-Install.ps1"
+& "Z:\Scripts\Unattend2026\Copy-Install.ps1" -DeployDir $deployDir
 
 # Setup unattended.xml with settings from CustomSettings.json based on MAC address
-& "Z:\Scripts\Unattend2026\Get-Settings.ps1" -MACAddress $macAddress
+$unattendTemp = Join-Path ([System.IO.Path]::GetTempPath()) 'unattend.xml'
+& "Z:\Scripts\Unattend2026\Get-Settings.ps1" -MACAddress $macAddress -DeployDir $deployDir -OutputPath $unattendTemp
 
 New-Item -ItemType Directory -Path "C:\Windows\Panther" -Force
-Copy-Item "C:\temp\unattend.xml" "C:\Windows\Panther\unattend.xml"
+Copy-Item $unattendTemp "C:\Windows\Panther\unattend.xml"
 Dism.exe /Image:C:\ /Apply-Unattend:"C:\Windows\Panther\unattend.xml"
-remove-item "C:\temp\unattend.xml"
+Remove-Item $unattendTemp
 
 if ($isUEFI) {
     BCDBoot.exe C:\windows /l en-US /s S: /f UEFI

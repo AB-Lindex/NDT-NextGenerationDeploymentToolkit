@@ -1,4 +1,9 @@
 # Copy and prepare install2026.ps1 with deployment credentials in separate settings file
+param(
+    # Deployment folder on the target (defined once, in install.ps1)
+    [Parameter(Mandatory)]
+    [string]$DeployDir
+)
 
 # Get MAC address
 $macAddress = & "Z:\Scripts\unattend2026\Get-MACAddress.ps1"
@@ -24,8 +29,8 @@ $deploySectionName = $deployResolved.Name
 $deploySettings = $deployResolved.Settings
 Write-Host "Using deploy section: '$deploySectionName'" -ForegroundColor Gray
 
-# Ensure C:\temp exists
-New-Item -ItemType Directory -Path "C:\temp" -Force | Out-Null
+# Ensure the deployment folder exists
+New-Item -ItemType Directory -Path $DeployDir -Force | Out-Null
 
 if ($deploySettings) {
     Write-Host "Configuring deployment share mapping for first boot..." -ForegroundColor Cyan
@@ -86,7 +91,7 @@ if ($deploySettings) {
         Write-Host "Detected hardware: $($hardware.Platform) (IsVM=$($hardware.IsVM)) - $($hardware.Make) / $($hardware.Model)" -ForegroundColor Green
     }
 
-    $settings | ConvertTo-Json -Depth 4 | Set-Content -Path "C:\temp\settings.json" -Encoding UTF8
+    $settings | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $DeployDir 'settings.json') -Encoding UTF8
     Write-Host "Created settings.json with deployment and autologon credentials" -ForegroundColor Green
     
     # Mask password - show first 3 characters
@@ -98,5 +103,5 @@ if ($deploySettings) {
 }
 
 # Copy install2026.ps1 as-is (it will read settings.json)
-Copy-Item "Z:\Scripts\Unattend2026\install2026.ps1" "C:\temp\install2026.ps1"
-Write-Host "Copied install2026.ps1 to C:\temp" -ForegroundColor Green
+Copy-Item "Z:\Scripts\Unattend2026\install2026.ps1" (Join-Path $DeployDir 'install2026.ps1')
+Write-Host "Copied install2026.ps1 to $DeployDir" -ForegroundColor Green

@@ -1,7 +1,14 @@
 # Read the JSON configuration
 param(
     [Parameter(Mandatory=$true)]
-    [string]$MACAddress
+    [string]$MACAddress,
+
+    # Deployment folder on the target (defined once, in install.ps1); fills the !DEPLOYDIR! token
+    [Parameter(Mandatory=$true)]
+    [string]$DeployDir,
+
+    # Where the generated answer file is written (the caller applies it to the offline image)
+    [string]$OutputPath = (Join-Path ([System.IO.Path]::GetTempPath()) 'unattend.xml')
 )
 
 try { . "$PSScriptRoot\Import-NDTModule.ps1" }
@@ -9,7 +16,7 @@ catch { Write-Error $_.Exception.Message; exit 1 }
 $sectionsPath = "Z:\Control\Sections.json"
 $osPath = "Z:\Control\OS.json"
 $defaultTemplatePath = "Z:\Scripts\unattend2026\unattend.xml"
-$outputPath = "c:\temp\unattend.xml"
+$outputPath = $OutputPath
 
 # Load JSON content (machine config = CustomSettings.json merged with Control\Projects)
 try { $config = Get-NDTMachine -LocalPath 'Z:\' }
@@ -73,6 +80,9 @@ if ($effectiveSettings.ContainsKey('DNSServers')) {
         $effectiveSettings.Remove('DNSServers')
     }
 }
+
+# The deployment folder is not a machine setting: it is passed in by install.ps1.
+$unattendContent = $unattendContent.Replace('!DEPLOYDIR!', $DeployDir)
 
 # Replace placeholders from effective settings
 foreach ($entry in $effectiveSettings.GetEnumerator()) {
@@ -165,11 +175,6 @@ if ($isDHCP -or $isWorkgroup) {
     
     # Save modified XML
     $unattendContent = $xmlDoc.OuterXml
-}
-
-# Ensure c:\temp exists
-if (-not (Test-Path "c:\temp")) {
-    New-Item -Path "c:\temp" -ItemType Directory -Force | Out-Null
 }
 
 # Save the modified unattend.xml

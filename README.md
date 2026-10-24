@@ -91,11 +91,11 @@ The machine boots WinPE (via PXE/WDS, a boot ISO, or `Start-Refresh.ps1`) and lo
 6. Applies the OS image to `C:\` with DISM.
 7. Injects OS drivers from `Drivers\OS\<Platform>` whose folder name matches the detected hardware (best-effort, see [Drivers](#drivers)).
 8. Runs the optional `PostPEScript` from the machine's block (PowerShell 5, after the image is applied).
-9. Copies `install2026.ps1` and a `settings.json` (deploy share credentials, local admin password, monitor URL, finish action, start time) to `C:\temp`.
+9. Creates the deployment folder `C:\Windows\Temp\DeploymentLogs` on the target (a stale one from a captured image is deleted first; only SYSTEM and Administrators get access) and copies `install2026.ps1` and a `settings.json` (deploy share credentials, local admin password, monitor URL, finish action, start time) into it. NDT writes nothing to `C:\temp`.
 10. Generates `unattend.xml` from the template, replacing placeholders with values from the machine's block (`CustomSettings.json` or `Control/Projects`). An OS can point at its own template via `Unattend` in `OS.json`.
 11. Applies `unattend.xml` to the offline image, runs BCDBoot and reboots.
 
-Throughout Phase 1 progress is reported to the [NDT Monitor](#ndt-monitor) (best-effort, never blocks deployment), and the log is written to `X:\install.log` and relocated to `C:\temp\install.log` once the disk is partitioned.
+Throughout Phase 1 progress is reported to the [NDT Monitor](#ndt-monitor) (best-effort, never blocks deployment). The log is written to `X:\install.log` and copied into the deployment folder as `install.log` once the image is applied (a failure before that leaves no log on the disk). The folder path is defined once, in `install.ps1`.
 
 #### Starting Phase 1 from inside Windows (re-image in place)
 
@@ -116,20 +116,20 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 
 `install2026.ps1` runs under PowerShell 5 (via RunOnce/FirstLogonCommands) and:
 
-1. Exits immediately if `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag` exists (prevents double-run caused by both mechanisms firing on the same logon), unless it is started with `-AdminPassword`/`-DeployPassword` to rerun a finished deployment (see below).
-2. Handles the reboot-flag (`C:\temp\reboot.flag`) to distinguish a re-logon loop from a genuine completed reboot.
+1. Exits immediately if `deploy-complete.flag` exists in its own folder (prevents double-run caused by both mechanisms firing on the same logon), unless it is started with `-AdminPassword`/`-DeployPassword` to rerun a finished deployment (see below). `install2026.ps1` runs from, and keeps everything in, the deployment folder `C:\Windows\Temp\DeploymentLogs`.
+2. Handles the reboot-flag (`reboot.flag`) to distinguish a re-logon loop from a genuine completed reboot.
 3. Re-registers `RunOnce\Deploy2026` so deployment survives any intermediate reboots.
-4. Waits for a usable IPv4 address, then maps the deployment share from the credentials in `C:\temp\settings.json`, retrying until `Z:\Control\CustomSettings.json` is reachable (timeout `MapTimeoutSec` in the deploy section, default 120 s). This matters on physical NICs that are slow to get a link.
+4. Waits for a usable IPv4 address, then maps the deployment share from the credentials in `settings.json`, retrying until `Z:\Control\CustomSettings.json` is reachable (timeout `MapTimeoutSec` in the deploy section, default 120 s). This matters on physical NICs that are slow to get a link.
 5. Installs PowerShell 7 if not already present.
-6. Launches `Install-NDT.ps1` via `pwsh.exe` (PS7) as a child process.
+6. Launches `Install-NDT.ps1 -DeployDir <folder>` via `pwsh.exe` (PS7) as a child process.
 
 `Install-NDT.ps1` runs under PowerShell 7 and drives all post-deployment work:
 
 1. Reads the machine's deployment groups from its MAC block (`CustomSettings.json` or `Control/Projects`, matched by MAC address). A machine without `DeploymentGroups` is an OS-only deployment and is reported as done immediately.
 2. Loads the ordered steps for each group from `DeploymentGroups.json`; resolves each step's action from `DeploymentActions.json`.
-3. Tracks completed steps in `C:\temp\install-steps.json` so deployment can resume after a reboot exactly where it left off.
+3. Tracks completed steps in `install-steps.json` (in the deployment folder) so deployment can resume after a reboot exactly where it left off.
 4. Supports five step types:
-   - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe. All script output (stdout, errors, warnings) is written to `C:\temp\install-NDT.log`. A non-zero exit code (other than `3010`/`1641`) or a terminating error is logged as `ERROR` and reported to the monitor as `Failed`. By default the deployment continues with the next step (the failed step is flagged in `install-steps.json` and not re-run); set `"ContinueOnError": false` on the action to stop the deployment instead (the engine exits with the script's exit code, so `install2026.ps1` takes the failure path).
+   - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe. All script output (stdout, errors, warnings) is written to `install-NDT.log` in the deployment folder. Every step can find that folder in `$env:NDT_DEPLOYDIR` (for example to read the `Hardware` block of `settings.json`, as `Applications\VMware Tools\install.ps1` does). A non-zero exit code (other than `3010`/`1641`) or a terminating error is logged as `ERROR` and reported to the monitor as `Failed`. By default the deployment continues with the next step (the failed step is flagged in `install-steps.json` and not re-run); set `"ContinueOnError": false` on the action to stop the deployment instead (the engine exits with the script's exit code, so `install2026.ps1` takes the failure path).
    - **Reboot** — saves progress, writes AutoLogon credentials to the registry, calls `shutdown /r /t 10`, and exits with code `3010` so the parent script knows to write `reboot.flag` and skip cleanup.
    - **AutoLogon** — switches the AutoAdminLogon account mid-deployment, useful for operations that must run as an AD user (gMSA creation, cluster setup, SQL Always On, etc.). Credentials are resolved by looking up the step's `Reference` name as a key in `Sections.json` (`Username` + `Password`). Multiple named entries (e.g. `ADLogon-AD01`, `ADLogon-AD02`) allow logging on to different Active Directories without any code changes.
    - **WindowsUpdate** — runs the Windows Update script; if it exits `3010` the step is not marked complete and the engine exits `3010` (iterates until no reboot is needed); if it exits `0` the step is marked complete.
@@ -138,19 +138,18 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 When all steps are done with no pending reboot, `install2026.ps1`:
 - Unmounts the deployment share.
 - Removes `RunOnce\Deploy2026` and disables AutoAdminLogon.
-- Writes `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag`.
-- Moves the deployment files out of `C:\temp` into `C:\Windows\Temp\DeploymentLogs` (the folder MDT uses): `install.log`, `install2026.log`, `install-NDT.log`, `install-steps.json` and `settings.json`, with the Administrator and Deploy passwords blanked in the archived `settings.json`. `install2026.ps1` stays in `C:\temp`.
+- Writes `deploy-complete.flag` in the deployment folder and blanks the Administrator and Deploy passwords in its `settings.json`. Logs, `install-steps.json`, `settings.json` and `install2026.ps1` stay where they are, in `C:\Windows\Temp\DeploymentLogs` (the folder MDT uses for its logs); nothing was ever in `C:\temp`.
 - Runs the **finish action**.
 
-If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in place, the files stay in `C:\temp`, and the finish action runs with a failure status.
+If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in place, the passwords stay in `settings.json`, and the finish action runs with a failure status.
 
-**Rerunning a finished deployment.** To re-run steps or run steps added since, start the script from `C:\temp` with the two passwords that were blanked:
+**Rerunning a finished deployment.** To re-run steps or run steps added since, start the script from the deployment folder with the two passwords that were blanked:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File C:\temp\install2026.ps1 -AdminPassword '<local admin password>' -DeployPassword '<deploy account password>'
+powershell.exe -ExecutionPolicy Bypass -File C:\Windows\Temp\DeploymentLogs\install2026.ps1 -AdminPassword '<local admin password>' -DeployPassword '<deploy account password>'
 ```
 
-Supplying either parameter starts the rerun when the archived `settings.json` exists in `DeploymentLogs` (the flag does not have to be present; do not delete it by hand). `-DeployPassword` is required to map the share; without `-AdminPassword` a Reboot step cannot sign in automatically. The files return to `C:\temp`, only steps not yet in `install-steps.json` run, logs are appended, and the files move back to `DeploymentLogs` when the rerun finishes. The parameters also override the stored passwords on a normal run.
+Supplying either parameter while `deploy-complete.flag` exists starts the rerun and removes the flag; `-DeployPassword` is required to map the share, and without `-AdminPassword` a Reboot step cannot sign in automatically. Only steps not yet in `install-steps.json` run and logs are appended. The parameters also override the stored passwords on a normal run. The copy of `install2026.ps1` is the one from deployment time; copy a newer one from `Scripts\unattend2026` on the share over it if needed.
 
 ### Finish action
 
@@ -268,9 +267,8 @@ Deploy2026/
 │       ├── Invoke-NDTSql.ps1     # Parameterised SQL query over TCP with SQL authentication (WinPE PS5/PS7 and OS)
 │       ├── Get-Settings.ps1      # Generates unattend.xml from template + the machine's block
 │       ├── Import-NDTModule.ps1  # Dot-sourced by the deploy scripts: imports the NDT module from the share (install\NDT)
-│       ├── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json on C:\temp
+│       ├── Copy-Install.ps1      # Copies install2026.ps1 and creates settings.json in the deployment folder
 │       ├── Start-Refresh.ps1     # Run from inside Windows: stages WinPE, one-shot BCD entry, reboots to re-image in place
-│       ├── test.ps1              # Standalone test: runs Copy-Install + Get-Settings
 │       ├── WindowsPE/            # Files baked into the boot image (Unattend.xml, Deploy\install.ps1 launcher)
 │       └── wds/nuke-wds.ps1      # WDS reset utility
 ├── Scripts/MDT Scripts/          # Legacy MDT scripts, kept for reference only
@@ -463,7 +461,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 - **Secure Boot.** Hyper-V Gen 2 VMs boot the Microsoft-signed WDS/WinPE chain with Secure Boot on. The iPXE option in `Applications\iPXE` is unsigned and therefore only for lab, physical or Secure-Boot-off use.
 - **WDS on Hyper-V.** If PXE transfers are flaky, disable the TFTP variable window (`wdsutil /Set-Server /Transport /EnableTFTPVariableWindowExtension:No`); `Applications\WDS\install.ps1` does this.
 - **Start-Refresh.ps1** wipes disk 0 and has no user-state backup/restore (not an MDT Refresh with USMT).
-- **Credentials.** `Control\*.json` and `C:\temp\settings.json` contain plaintext credentials. Restrict the share to the deploy account; when deployment completes `settings.json` is moved to `C:\Windows\Temp\DeploymentLogs` with the Administrator and Deploy passwords blanked.
+- **Credentials.** `Control\*.json` and `settings.json` in `C:\Windows\Temp\DeploymentLogs` contain plaintext credentials. Restrict the share to the deploy account; the deployment folder is limited to SYSTEM and Administrators (so an AutoLogon step account must be a local administrator), and when deployment completes the Administrator and Deploy passwords in `settings.json` are blanked.
 - **PE build.** DISM unmount error `0xc1420117` means something (usually Defender) holds a handle in the mount folder; `New-NDTPEImage` adds Defender exclusions and retries the unmount.
 - **Windows 11.** The shared `unattend.xml` skips machine/user OOBE and pins AutoLogon to the local account; without that, Win11 clears AutoLogon on domain-joined machines.
 
@@ -472,7 +470,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 - `.ps1`/`.psm1` files must be **plain ASCII** (no em/en dashes, curly quotes or arrows, even in comments): Windows PowerShell 5.1 reads BOM-less files as Windows-1252 and fails to parse them.
 - Scripts that run in WinPE, `install2026.ps1` or both must stay **PowerShell 5.1-compatible**.
 - Paths inside the JSON files use backslashes rooted at the share root; MAC addresses are colon-separated and uppercase.
-- `C:\temp\install-steps.json` tracks step progress; never delete it during a deployment (after completion it is in `C:\Windows\Temp\DeploymentLogs`).
+- `install-steps.json` in the deployment folder tracks step progress; never delete it during a deployment (a rerun relies on it).
 
 ---
 

@@ -49,7 +49,7 @@
                 <RunSynchronousCommand wcm:action="add">
                     <Order>1</Order>
                     <Description>Bootstrap: register RunOnce to launch deployment script after logon</Description>
-                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v "Deploy2026" /t REG_SZ /d "powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1" /f</Path>
+                    <Path>reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce" /v "Deploy2026" /t REG_SZ /d "powershell.exe -executionpolicy bypass -File !DEPLOYDIR!\install2026.ps1" /f</Path>
                     <WillReboot>Never</WillReboot>
                 </RunSynchronousCommand>
                 <RunSynchronousCommand wcm:action="add">
@@ -164,7 +164,7 @@
             <TimeZone>!TIMEZONE!</TimeZone>
             <FirstLogonCommands>
                 <SynchronousCommand wcm:action="add">
-                    <CommandLine>powershell.exe -executionpolicy bypass -File c:\temp\install2026.ps1</CommandLine>
+                    <CommandLine>powershell.exe -executionpolicy bypass -File !DEPLOYDIR!\install2026.ps1</CommandLine>
                     <Description>Lite Touch new OS</Description>
                     <Order>1</Order>
                 </SynchronousCommand>

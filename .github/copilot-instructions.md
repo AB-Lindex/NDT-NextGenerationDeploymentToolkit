@@ -49,9 +49,8 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 │   ├── Invoke-NDTSql.ps1         ← parameterised SQL query over TCP/SQL auth (System.Data.SqlClient; works in PE PS5 + PS7 and OS); settings from the `NDTSql` section of Sections.json (not used by deployment lookups yet)
 │   ├── Get-Settings.ps1           ← fills unattend.xml from the machine's block (template chosen per OS via OS.json)
 │   ├── Import-NDTModule.ps1       ← dot-sourced by the deploy scripts: imports the NDT module from the share (`install\NDT`), throws if missing (run Update-NDT)
-│   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json to C:\temp
+│   ├── Copy-Install.ps1           ← drops install2026.ps1 + settings.json into the deployment folder (-DeployDir)
 │   ├── Start-Refresh.ps1          ← in-OS launcher: validates MAC/OS/WIM, stages boot2026.iso PE to C:\NDT-PE, one-shot ramdisk BCD entry, reboots into the normal WinPE install.ps1 flow (re-image in place)
-│   ├── test.ps1                   ← standalone test: runs Copy-Install + Get-Settings
 │   ├── wds/
 │   │   └── nuke-wds.ps1           ← WDS reset utility (stop, wipe RemoteInstall, reinit, add WIM)
 │   └── WindowsPE/
@@ -77,15 +76,16 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 
 ### Phase 1 — WinPE (`install.ps1`)
 
-1. Check capture flag (`DeployCapture.flag` on any drive) → if set, remove flag, clean `C:\temp`, call `Capture-ReferenceImage.ps1`, exit.
+1. Check capture flag (`DeployCapture.flag` on any drive) → if set, remove flag, delete the reference drive's `Windows\Temp\DeploymentLogs`, call `Capture-ReferenceImage.ps1`, exit.
 2. Detect BIOS/UEFI firmware type — recorded early but **disk is not touched** until all validations pass.
 3. Validate MAC address against the merged machine set (`Control/CustomSettings.json` + `Control/Projects/**/*.json`, via `Get-NDTMachine` from the module); abort with error if not found, if the MAC is duplicated, or if any file is invalid JSON (reported in the same "press Enter to retry" loop, before the disk is touched).
    - **`Install:NO` guard** — if the MAC block has `"Install": "NO"` (case-insensitive), skip deployment entirely: reboot without touching the disk. Prevents accidental re-imaging. Any other value (or absent) deploys normally.
 4. Resolve and validate WIM path + index from `Control/OS.json`; abort if WIM file not found.
 5. All pre-flight checks passed → partition disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
-6. Apply OS image to `C:\` with DISM.
-7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password + optional `MonitorUrl` + optional `FinishAction` + `DeployStart` wall-clock timestamp captured at the start of `install.ps1`) to `C:\temp`.
-8. Run `Get-Settings.ps1` → generates `unattend.xml` from template (replaces `!PLACEHOLDER!` tokens); apply to offline image with DISM.
+6. Apply OS image to `C:\` with DISM. The WinPE log stays on `X:\install.log` until now (DISM would overwrite anything written earlier).
+6b. Create the **deployment folder** `C:\Windows\Temp\DeploymentLogs` (deleting a stale one from a captured image first; `icacls`: SYSTEM + Administrators only) and copy `X:\install.log` into it. This path is defined **once**, as `$deployDir` in `install.ps1`, and passed on: `Copy-Install.ps1 -DeployDir`, `Get-Settings.ps1 -DeployDir` (fills the `!DEPLOYDIR!` token in `unattend.xml`), `install2026.ps1` uses its own folder, `Install-NDT.ps1 -DeployDir`, steps read `$env:NDT_DEPLOYDIR`. Nothing NDT writes goes to `C:\temp`.
+7. Run `Copy-Install.ps1` → copies `install2026.ps1` and writes `settings.json` (share credentials + admin password + optional `MonitorUrl` + optional `FinishAction` + `DeployStart` wall-clock timestamp captured at the start of `install.ps1`) into the deployment folder.
+8. Run `Get-Settings.ps1` → generates `unattend.xml` from template (replaces `!PLACEHOLDER!` tokens) into the WinPE temp folder (`-OutputPath`), then `install.ps1` applies it to the offline image with DISM and deletes it.
 9. Run BCDBoot (UEFI: `/f UEFI /s S:` ; BIOS: `/f BIOS /s C:`), set BCD timeout 0, then `wpeutil Reboot`.
 
 Throughout Phase 1, `install.ps1` reports progress to the NDT Monitor (best-effort) — `Phase: WinPE` updates at config-validated, partitioning, applying image, image applied, and rebooting. `MonitorUrl` is resolved from the machine's deploy section in `Sections.json`; if absent, reporting is silently disabled and never blocks deployment.
@@ -94,15 +94,15 @@ Throughout Phase 1, `install.ps1` reports progress to the NDT Monitor (best-effo
 
 Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop shortcut after a Pause step) and optional `-AdminPassword` / `-DeployPassword` (rerun of a finished deployment, see step 1).
 
-1. Skip if `C:\Windows\Temp\DeploymentLogs\deploy-complete.flag` exists (prevents double-run) - unless `-AdminPassword` and/or `-DeployPassword` is passed and the archived `DeploymentLogs\settings.json` exists (the flag itself is not required): that is a **rerun** (needs `-DeployPassword` to map the share; no `-AdminPassword` = warning, a Reboot step then cannot auto-logon). A rerun moves the archived files back to `C:\temp`, deletes the flag and continues as a normal run, so only steps not yet in `install-steps.json` run and logs append. On any run the parameters override the passwords stored in `settings.json`; `-AdminPassword` also resets AutoLogon to `.\Administrator` (an AutoLogon step may have switched it).
-2. Check `C:\temp\pause.flag` — if present and `-Resume` not passed, exit immediately (deployment is paused); if `-Resume`, delete the flag and continue.
-3. Handle `C:\temp\reboot.flag` — compare flag timestamp to last-boot time to distinguish re-logon from completed reboot. If flag is newer than boot time, exit (reboot still pending); otherwise delete flag and continue.
+1. Skip if `deploy-complete.flag` exists in the script's own folder (prevents double-run) - unless `-AdminPassword` and/or `-DeployPassword` is passed: that is a **rerun** (needs `-DeployPassword` to map the share; no `-AdminPassword` = warning, a Reboot step then cannot auto-logon). A rerun deletes the flag and continues as a normal run, so only steps not yet in `install-steps.json` run and logs append. On any run the parameters override the passwords stored in `settings.json`; `-AdminPassword` also resets AutoLogon to `.\Administrator` (an AutoLogon step may have switched it). `install2026.ps1` runs from the deployment folder (`$PSScriptRoot`); RunOnce and the unattend `FirstLogonCommands` point at it there.
+2. Check `pause.flag` (in the deployment folder) — if present and `-Resume` not passed, exit immediately (deployment is paused); if `-Resume`, delete the flag and continue.
+3. Handle `reboot.flag` — compare flag timestamp to last-boot time to distinguish re-logon from completed reboot. If flag is newer than boot time, exit (reboot still pending); otherwise delete flag and continue.
 4. Re-register `RunOnce\Deploy2026` to survive intermediate reboots.
 5. Remove "Continue Deployment" desktop shortcut from `C:\Users\Public\Desktop` if present.
-6. Map the deploy share using credentials from `C:\temp\settings.json`. **Waits for the network first**: polls for a usable IPv4 address (skips loopback/tunnel/APIPA `169.254.*`), then retries `net use Z:` on a loop, confirming success via `Test-Path Z:\Control\CustomSettings.json` (not `net use`'s exit code) rather than assuming the first attempt worked. This handles slow physical NICs (DHCP/PHY negotiation) that a VM never hits; without it a slow NIC left `Z:` unmapped and `pwsh -File 'Z:\...\Install-NDT.ps1'` aborted with **exit code 64** (missing `-File` target) before the engine could run. Timeout = `Deploy.MapTimeoutSec` from `settings.json` (**default 120 s**, forwarded by `Copy-Install.ps1` only when set; absent = 120); on timeout it logs an explicit error and exits 1. Mirrors MDT's `ZTIConnect.wsf` → `ValidateNetworkConnectivity` (`ipconfig /renew` if no lease) + `ValidateConnectionEx` (5-try backoff map loop).
+6. Map the deploy share using credentials from `settings.json` (deployment folder). **Waits for the network first**: polls for a usable IPv4 address (skips loopback/tunnel/APIPA `169.254.*`), then retries `net use Z:` on a loop, confirming success via `Test-Path Z:\Control\CustomSettings.json` (not `net use`'s exit code) rather than assuming the first attempt worked. This handles slow physical NICs (DHCP/PHY negotiation) that a VM never hits; without it a slow NIC left `Z:` unmapped and `pwsh -File 'Z:\...\Install-NDT.ps1'` aborted with **exit code 64** (missing `-File` target) before the engine could run. Timeout = `Deploy.MapTimeoutSec` from `settings.json` (**default 120 s**, forwarded by `Copy-Install.ps1` only when set; absent = 120); on timeout it logs an explicit error and exits 1. Mirrors MDT's `ZTIConnect.wsf` → `ValidateNetworkConnectivity` (`ipconfig /renew` if no lease) + `ValidateConnectionEx` (5-try backoff map loop).
 7. Install PS 7 if absent (probes `%ProgramFiles%\PowerShell\7\pwsh.exe` directly — not `Get-Command`, since PS 5 `$PATH` is frozen at launch).
-8. Launch `Install-NDT.ps1` via `pwsh.exe` (PS 7) as a **child process**; inspect `$LASTEXITCODE`:
-   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag` into `C:\Windows\Temp\DeploymentLogs` (MDT's folder), move `install.log`, `install2026.log`, `install-NDT.log`, `install-steps.json` and `settings.json` there from `C:\temp` (passwords blanked in the archived `settings.json`; `install2026.ps1` stays in `C:\temp` because the shell starts it a second time and a rerun starts from it), then run the **FinishAction** (see Key conventions). Nothing is moved on failure.
+8. Launch `Install-NDT.ps1 -DeployDir <folder>` via `pwsh.exe` (PS 7) as a **child process**; inspect `$LASTEXITCODE`:
+   - `0` → all steps done; unmap share, remove RunOnce + AutoLogon, write `deploy-complete.flag` and **blank `AutoLogon.Password` and `Deploy.Password` in `settings.json` in place** (logs, `install-steps.json`, `settings.json` and `install2026.ps1` stay in the deployment folder), then run the **FinishAction** (see Key conventions). On failure the passwords stay (RunOnce resumes).
    - `3010` → reboot step; write `reboot.flag`, unmap share, exit 0 (RunOnce remains, resumes after reboot).
    - `3011` → pause step; write `pause.flag`, **remove** RunOnce (so reboot while paused does NOT auto-resume), unmap share.
    - any other code (and early failures after `settings.json` is read: share map timeout, PS 7 install failure) → FinishAction runs with failure status; RunOnce/AutoLogon stay in place.
@@ -110,9 +110,9 @@ Accepts an optional `-Resume` switch (used by the "Continue Deployment" desktop 
 ### Phase 2 continued — Step engine (`Install-NDT.ps1`, PS 7)
 
 1. Read machine's `DeploymentGroups` from its MAC block (merged `CustomSettings.json` + `Control\Projects`, matched by MAC).
-   - Resolves `MonitorUrl` early from `C:\temp\settings.json`; if the machine has **no** `DeploymentGroups`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
+   - Resolves `MonitorUrl` early from `settings.json` (deployment folder); if the machine has **no** `DeploymentGroups`, posts a `Done` (100%) to the monitor and exits 0 (OS-only deploy).
 2. Load ordered steps from `DeploymentGroups.json` for each group; resolve each step's action from `DeploymentActions.json`.
-3. Track progress in `C:\temp\install-steps.json` — resumes after reboot at the next pending step.
+3. Track progress in `install-steps.json` (deployment folder) — resumes after reboot at the next pending step. The engine exports `$env:NDT_DEPLOYDIR` so every step (PS 5/7, cmd) can find the folder, e.g. to read `settings.json`.
 4. Execute steps by type:
    - **Script** — run `.ps1` (default: pwsh/PS 7), `.ps1` with `"PowerShell": "powershell5"` (PS 5.1), or `.cmd`/`.bat` (cmd.exe). Optional `Parameters` array names keys to pull from `CustomSettings.json`.
    - **Reboot** — mark step complete, write AutoLogon to registry, `shutdown /r /t 10`, exit 3010.
@@ -255,8 +255,9 @@ Also exported by the module (see `ndt.psd1`):
 - MAC addresses in `CustomSettings.json` and `Control\Projects` files are **colon-separated, uppercase** (lookup is case-insensitive).
 - Named sections (locale, network, AD join, deploy credentials) live in `Sections.json`. `CustomSettings.json` and `Control\Projects\*.json` contain MAC address blocks only.
 - `install2026.ps1` runs as **PS 5** (RunOnce/FirstLogonCommands constraint); anything needing PS 7 runs inside `Install-NDT.ps1`.
-- Step progress is persisted to `C:\temp\install-steps.json` — never delete this during a deployment (after completion it lives in `C:\Windows\Temp\DeploymentLogs`, and a rerun restores it).
-- `C:\temp\settings.json` contains plaintext credentials during deployment; at the end it moves to `C:\Windows\Temp\DeploymentLogs` with `AutoLogon.Password` and `Deploy.Password` blanked.
+- Step progress is persisted to `install-steps.json` in the deployment folder (`C:\Windows\Temp\DeploymentLogs`) — never delete this during a deployment (a rerun relies on it).
+- `settings.json` (same folder) contains plaintext credentials during deployment; at the end `AutoLogon.Password` and `Deploy.Password` are blanked in place. The folder is limited to SYSTEM + Administrators, so an AutoLogon step account must be a local administrator.
+- Do not hardcode `C:\temp` for anything NDT keeps on the target: use the deployment folder (`$deployDir` in `install.ps1`, `$PSScriptRoot` in `install2026.ps1`, `-DeployDir`, `$env:NDT_DEPLOYDIR`). Application scripts may still use `C:\temp` for their own work.
 - `DeploymentLogs` must never be baked into a captured image: its `deploy-complete.flag` would make first boot skip the deployment. `install.ps1` removes it from the applied image and from the reference drive before capture.
 - Exit code `3010` from `Install-NDT.ps1` means "reboot pending" — `install2026.ps1` writes `reboot.flag` and exits cleanly (RunOnce remains).
 - Exit code `3011` from `Install-NDT.ps1` means "deployment paused" — `install2026.ps1` writes `pause.flag` and **removes** RunOnce so a reboot while paused does not auto-resume.
