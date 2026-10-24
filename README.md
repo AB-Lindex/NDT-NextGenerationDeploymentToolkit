@@ -129,7 +129,7 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 2. Loads the ordered steps for each group from `DeploymentGroups.json`; resolves each step's action from `DeploymentActions.json`.
 3. Tracks completed steps in `C:\temp\install-steps.json` so deployment can resume after a reboot exactly where it left off.
 4. Supports five step types:
-   - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe.
+   - **Script** — runs a `.ps1`, `.cmd`, or `.bat` file from the Applications folder, with optional parameters from `CustomSettings.json`. Can target PowerShell 5, PowerShell 7, or cmd.exe. All script output (stdout, errors, warnings) is written to `C:\temp\install-NDT.log`. A non-zero exit code (other than `3010`/`1641`) or a terminating error is logged as `ERROR` and reported to the monitor as `Failed`. By default the deployment continues with the next step (the failed step is flagged in `install-steps.json` and not re-run); set `"ContinueOnError": false` on the action to stop the deployment instead (the engine exits with the script's exit code, so `install2026.ps1` takes the failure path).
    - **Reboot** — saves progress, writes AutoLogon credentials to the registry, calls `shutdown /r /t 10`, and exits with code `3010` so the parent script knows to write `reboot.flag` and skip cleanup.
    - **AutoLogon** — switches the AutoAdminLogon account mid-deployment, useful for operations that must run as an AD user (gMSA creation, cluster setup, SQL Always On, etc.). Credentials are resolved by looking up the step's `Reference` name as a key in `Sections.json` (`Username` + `Password`). Multiple named entries (e.g. `ADLogon-AD01`, `ADLogon-AD02`) allow logging on to different Active Directories without any code changes.
    - **WindowsUpdate** — runs the Windows Update script; if it exits `3010` the step is not marked complete and the engine exits `3010` (iterates until no reboot is needed); if it exits `0` the step is marked complete.
@@ -359,6 +359,10 @@ Action definitions — what to run:
 "Install App2026": {
   "Script": "\\Applications\\App2026\\install01.ps1",
   "Parameters": ["SQLServer", "AlwaysOn"]
+},
+"Install Critical App": {
+  "Script": "\\Applications\\Critical\\install.ps1",
+  "ContinueOnError": false   // optional; false = stop deployment if the script fails (default: continue)
 },
 "Reboot":           { "Type": "Reboot" },
 "ADLogon-AD01":     { "Type": "AutoLogon" },  // Reference name must match a key in Sections.json

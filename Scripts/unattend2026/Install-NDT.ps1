@@ -23,6 +23,17 @@ function Write-Log {
     }
 }
 
+# Pipeline sink: writes every output/error/warning record from a step script to the log.
+function Write-ScriptOutput {
+    process {
+        $level = 'INFO'
+        if ($_ -is [System.Management.Automation.ErrorRecord]) { $level = 'ERROR' }
+        elseif ($_ -is [System.Management.Automation.WarningRecord]) { $level = 'WARN' }
+        $text = if ($level -eq 'ERROR') { $_.Exception.Message } else { ($_ | Out-String).TrimEnd() }
+        if ($text) { Write-Log "  | $text" -Level $level }
+    }
+}
+
 # Send a progress update to the NDT Monitor HTTP service.
 # Silently ignored if the monitor is unavailable — never blocks deployment.
 function Send-NDTProgress {
@@ -222,6 +233,7 @@ foreach ($g in $deploymentGroupRefs) {
     $grp = $deploymentGroups.$g
     if ($grp) { $totalStepCount += ($grp.PSObject.Properties | Measure-Object).Count }
 }
+$failedSteps = @()
 Write-Log "Total deployment steps: $totalStepCount  |  Already completed: $($completedSteps.Count)" -ForegroundColor Gray
 Send-NDTProgress -Status 'Starting' -Completed $completedSteps.Count -Total $totalStepCount
 
@@ -506,44 +518,77 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     $fullScriptPath = "Z:$scriptPath"
     
     if (Test-Path $fullScriptPath) {
+        $stepFailed = $false
+        $failReason = ''
         try {
             Write-Log 'Executing...' -ForegroundColor Yellow
-            
+
+            # All output streams are merged and written to the log; a non-zero exit code is a failure.
+            $global:LASTEXITCODE = 0
             if ($scriptExtension -eq ".cmd" -or $scriptExtension -eq ".bat") {
                 # Run with cmd.exe (no parameter support for batch files)
-                cmd.exe /c $fullScriptPath
+                cmd.exe /c $fullScriptPath *>&1 | Write-ScriptOutput
             } elseif ($psVersion -eq "powershell5") {
                 # Run with Windows PowerShell 5.1
                 if ($scriptParams.Count -gt 0) {
-                    powershell.exe -ExecutionPolicy Bypass -File $fullScriptPath @scriptParams
+                    powershell.exe -ExecutionPolicy Bypass -File $fullScriptPath @scriptParams *>&1 | Write-ScriptOutput
                 } else {
-                    powershell.exe -ExecutionPolicy Bypass -File $fullScriptPath
+                    powershell.exe -ExecutionPolicy Bypass -File $fullScriptPath *>&1 | Write-ScriptOutput
                 }
             } else {
                 # Run with PowerShell 7 (default)
                 if ($scriptParams.Count -gt 0) {
-                    & $fullScriptPath @scriptParams
+                    & $fullScriptPath @scriptParams *>&1 | Write-ScriptOutput
                 } else {
-                    & $fullScriptPath
+                    & $fullScriptPath *>&1 | Write-ScriptOutput
                 }
             }
-            
+            $stepExitCode = $global:LASTEXITCODE
+
+            # 3010 / 1641 = success, reboot required (not acted on here; use a Reboot step)
+            if ($stepExitCode -notin 0, 3010, 1641) {
+                $stepFailed = $true
+                $failReason = "Script exited with code $stepExitCode"
+            }
+        } catch {
+            $stepFailed = $true
+            $stepExitCode = 1
+            $failReason = "Script threw: $_"
+        }
+
+        if ($stepFailed) {
+            Write-Log "Step failed: $failReason ($scriptPath)" -Level ERROR
+            Send-NDTProgress -Status 'Failed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
+
+            # ContinueOnError defaults to true; only an explicit false stops the deployment.
+            if ($stepSection.ContinueOnError -eq $false) {
+                # 3010/3011 are reserved engine exit codes, never pass them through as a failure code
+                $stopCode = if ($stepExitCode -in 0, 3010, 3011) { 1 } else { $stepExitCode }
+                Write-Log "ContinueOnError is false for '$stepReference' - stopping deployment (exit $stopCode)" -Level ERROR
+                exit $stopCode
+            }
+
+            Write-Log "Continuing with next step (ContinueOnError is not false for '$stepReference')" -Level WARN
+            $failedSteps += $uniqueStepId
+            # Recorded as processed (flagged Failed) so it is not re-run after a later reboot
+            $completedSteps += $uniqueStepId
+            $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference; Failed = $true }
+        } else {
             Write-Log 'Completed successfully' -ForegroundColor Green
-            
+
             # Add to completed steps (with group name for uniqueness)
             $completedSteps += $uniqueStepId
             $completedStepDetails += @{ StepId = $uniqueStepId; Application = $stepReference }
-            $progressData = @{
-                CompletedSteps = $completedSteps
-                StepDetails    = $completedStepDetails
-                LastUpdated    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-            }
-            $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+        }
+
+        $progressData = @{
+            CompletedSteps = $completedSteps
+            StepDetails    = $completedStepDetails
+            LastUpdated    = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+        }
+        $progressData | ConvertTo-Json | Set-Content -Path $progressPath -Encoding UTF8
+        if (-not $stepFailed) {
             Send-NDTProgress -Status 'Completed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
-            
-        } catch {
-            Write-Log "Failed to execute: $_" -Level ERROR
-            Send-NDTProgress -Status 'Failed' -Description $description -Group $deploymentGroupName -StepId $uniqueStepId -Completed $completedSteps.Count -Total $totalStepCount
         }
     } else {
         Write-Log "Script not found: $fullScriptPath" -Level WARN
@@ -552,7 +597,11 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
 }
 
 Write-Log "`n=============================" -ForegroundColor Green
-Write-Log 'All deployment steps completed' -ForegroundColor Green
+if ($failedSteps.Count -gt 0) {
+    Write-Log "All deployment steps processed, $($failedSteps.Count) failed: $($failedSteps -join ', ')" -Level WARN
+} else {
+    Write-Log 'All deployment steps completed' -ForegroundColor Green
+}
 Send-NDTProgress -Status 'Done' -Completed $totalStepCount -Total $totalStepCount
 
 # Clean up AutoLogon and RunOnce registry entries

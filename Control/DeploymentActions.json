@@ -108,7 +108,8 @@
   },
   "InstallNPP": {
     "Script": "\\Applications\\NPP\\install.ps1",
-    "Description": "Install Notepad++"
+    "Description": "Install Notepad++",
+    "ContinueOnError": false
   },
   "Root CA Roles and Features": {
     "Script": "\\Applications\\PKI\\RootCA\\InstallRolesFeatures.ps1",
