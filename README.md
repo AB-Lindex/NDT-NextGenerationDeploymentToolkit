@@ -150,7 +150,7 @@ If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in pl
 powershell.exe -ExecutionPolicy Bypass -File C:\temp\install2026.ps1 -AdminPassword '<local admin password>' -DeployPassword '<deploy account password>'
 ```
 
-Supplying either parameter while `deploy-complete.flag` exists starts the rerun (`-DeployPassword` is required to map the share; without `-AdminPassword` a Reboot step cannot sign in automatically). The files return to `C:\temp`, only steps not yet in `install-steps.json` run, logs are appended, and the files move back to `DeploymentLogs` when the rerun finishes. The parameters also override the stored passwords on a normal run.
+Supplying either parameter starts the rerun when the archived `settings.json` exists in `DeploymentLogs` (the flag does not have to be present; do not delete it by hand). `-DeployPassword` is required to map the share; without `-AdminPassword` a Reboot step cannot sign in automatically. The files return to `C:\temp`, only steps not yet in `install-steps.json` run, logs are appended, and the files move back to `DeploymentLogs` when the rerun finishes. The parameters also override the stored passwords on a normal run.
 
 ### Finish action
 

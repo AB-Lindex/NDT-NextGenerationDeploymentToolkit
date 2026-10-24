@@ -73,9 +73,14 @@ function Restore-DeploymentFiles {
     New-Item -ItemType Directory -Path 'C:\temp' -Force | Out-Null
     foreach ($name in $archiveFiles) {
         $src = Join-Path $deploymentLogsDir $name
-        if (Test-Path $src) { Move-Item -Path $src -Destination (Join-Path 'C:\temp' $name) -Force }
+        if (-not (Test-Path $src)) { continue }
+        $dst = Join-Path 'C:\temp' $name
+        # Lines this run already logged to C:\temp go after the archived history.
+        $current = if ($name -like '*.log' -and (Test-Path $dst)) { @(Get-Content $dst) } else { @() }
+        Move-Item -Path $src -Destination $dst -Force
+        if ($current.Count -gt 0) { Add-Content -Path $dst -Value $current }
     }
-    Remove-Item $deployCompleteFlagPath -Force
+    Remove-Item $deployCompleteFlagPath -Force -ErrorAction SilentlyContinue
 }
 
 # ---------------------------------------------------------------------------
@@ -231,25 +236,25 @@ Write-Log "-----------------------------------" -ForegroundColor Cyan
 # deletes the RunOnce key when it finishes, the shell fires it again ~4 seconds later.
 # Writing a sentinel file on successful completion and exiting immediately when it is
 # present prevents that spurious second run.
-if (Test-Path $deployCompleteFlagPath) {
-    $rerunRequested = $PSBoundParameters.ContainsKey('AdminPassword') -or $PSBoundParameters.ContainsKey('DeployPassword')
-    if (-not $rerunRequested) {
-        Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting' -ForegroundColor Yellow
-        exit 0
-    }
-
+$rerunRequested   = $PSBoundParameters.ContainsKey('AdminPassword') -or $PSBoundParameters.ContainsKey('DeployPassword')
+$archivedSettings = Join-Path $deploymentLogsDir 'settings.json'
+if ($rerunRequested -and (Test-Path $archivedSettings) -and -not (Test-Path 'C:\temp\settings.json')) {
     # Rerun: the archived settings.json has blank passwords, and the share cannot be mapped without one.
+    # The archive, not the flag, decides: the flag may have been deleted by hand.
     if (-not $DeployPassword) {
         Write-Log 'ERROR: -DeployPassword is required to rerun a finished deployment (the share cannot be mapped without it)' -Level ERROR
-        exit 1
-    }
-    if (-not (Test-Path (Join-Path $deploymentLogsDir 'settings.json'))) {
-        Write-Log "ERROR: $(Join-Path $deploymentLogsDir 'settings.json') not found - cannot rerun" -Level ERROR
         exit 1
     }
     Write-Log 'Rerunning a finished deployment - restoring deployment files from DeploymentLogs' -ForegroundColor Cyan
     Restore-DeploymentFiles
     $LogPath = 'C:\temp\install2026.log'
+} elseif (Test-Path $deployCompleteFlagPath) {
+    if (-not $rerunRequested) {
+        Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting. To rerun, pass -AdminPassword and -DeployPassword.' -ForegroundColor Yellow
+        exit 0
+    }
+    Write-Log "ERROR: $archivedSettings not found - cannot rerun" -Level ERROR
+    exit 1
 }
 
 # Guard against the spurious re-invocation that occurs after a Pause step.
@@ -308,6 +313,8 @@ if (Test-Path $pauseShortcut) {
 $settingsPath = 'C:\temp\settings.json'
 if (-not (Test-Path $settingsPath)) {
     Write-Log 'ERROR: settings.json not found' -Level ERROR
+    Remove-ItemProperty -Path $runOnceKey -Name $runOnceValue -ErrorAction SilentlyContinue
+    Clear-DeploymentWallpaper
     exit 1
 }
 $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
