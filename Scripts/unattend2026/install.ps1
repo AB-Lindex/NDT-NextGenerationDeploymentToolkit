@@ -41,7 +41,7 @@ $env:NDT_DEPLOY_START = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 # settings.json, logs, step state, flags) lives here, never in C:\temp. install2026.ps1 uses its own
 # folder, Install-NDT.ps1 gets it as -DeployDir and steps see $env:NDT_DEPLOYDIR.
 $deployDirRel = 'Windows\Temp\DeploymentLogs'
-# Plain string, not Join-Path: PS 5.1 Join-Path throws when C: does not exist yet (blank disk on new hardware).
+# Plain string, not Join-Path: Join-Path throws when C: does not exist yet (blank disk on new hardware).
 $deployDir    = "C:\$deployDirRel"
 
 # Get-NetIPAddress (NetTCPIP) is missing in WinPE PS5.1 and Get-WmiObject is missing in PS7 - .NET works in both.
@@ -61,6 +61,10 @@ Write-Log "User     : $([System.Security.Principal.WindowsIdentity]::GetCurrent(
 Write-Log "PS Ver   : $($PSVersionTable.PSVersion)"
 Write-Log "IP       : $sysIP"
 Write-Log "Log file : $script:LogPath (WinPE RAM drive - copied to C:\$deployDirRel after the image is applied)"
+Write-Log "DeployStart  : $env:NDT_DEPLOY_START" -ForegroundColor Gray
+Write-Log "DeployDirRel : $deployDirRel" -ForegroundColor Gray
+Write-Log "DeployDir    : $deployDir" -ForegroundColor Gray
+Write-Log "ScriptRoot   : $PSScriptRoot" -ForegroundColor Gray
 Write-Log '-----------------------------------' -ForegroundColor Cyan
 
 # ------------------------------------------------------------------
@@ -127,8 +131,10 @@ $captureConfig = $null
 $referenceDrive = $null
 
 $volumes = Get-Volume | Where-Object {$_.DriveLetter -and $_.FileSystemLabel -ne "System Reserved"}
+Write-Log "Volumes to scan : $(if ($volumes) { ($volumes | ForEach-Object { "$($_.DriveLetter):" }) -join ' ' } else { '(none - blank disk)' })" -ForegroundColor Gray
 foreach ($vol in $volumes) {
     $flagFile = "$($vol.DriveLetter):\DeployCapture.flag"
+    Write-Log "  Checking $flagFile" -ForegroundColor Gray
     if (Test-Path $flagFile) {
         Write-Log "Capture mode detected on drive $($vol.DriveLetter):" -ForegroundColor Yellow
         $captureConfig = Get-Content $flagFile -Raw | ConvertFrom-Json
@@ -146,6 +152,7 @@ if ($captureMode) {
     Write-Log ""
 
     $captureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
+    Write-Log "Capture script: $captureScriptPath" -ForegroundColor Gray
 
     if (Test-Path $captureScriptPath) {
         # Remove the capture flag before capturing so it is not baked into the WIM.
@@ -156,6 +163,7 @@ if ($captureMode) {
 
         # Remove the previous deployment's folder on the reference drive: a baked-in deploy-complete.flag
         # would make the next machine skip its deployment.
+        Write-Log "Removing ${referenceDrive}:\$deployDirRel from reference drive..." -ForegroundColor Yellow
         Remove-Item -Path "${referenceDrive}:\$deployDirRel" -Recurse -Force -ErrorAction SilentlyContinue
 
         Write-Log "Executing capture script..." -ForegroundColor Green
@@ -174,7 +182,7 @@ Write-Log "Running normal deployment..." -ForegroundColor Cyan
 # Done early so we can report it, but disk is NOT touched until all validations pass.
 $firmwareType = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control" -Name "PEFirmwareType" -ErrorAction SilentlyContinue).PEFirmwareType
 $isUEFI = ($firmwareType -eq 2)
-Write-Log "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })" -ForegroundColor Cyan
+Write-Log "Firmware type: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' }) (PEFirmwareType=$firmwareType)" -ForegroundColor Cyan
 
 # Detect hardware (physical/virtual, vendor, model) and show it alongside the other
 # pre-flight info. Best-effort - never blocks deployment.
@@ -192,6 +200,7 @@ if ($hardware) {
 # STEP 1 - Validate MAC address
 # ------------------------------------------------------------------
 $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
+Write-Log "MAC address : $macAddress" -ForegroundColor Cyan
 
 # Machine config = CustomSettings.json merged with Control\Projects\**\*.json.
 # A duplicate MAC or an invalid JSON file is reported here, before the disk is touched,
@@ -247,15 +256,21 @@ if (Test-NDTInstallDisabled -Machine $machineConfig) {
 # ------------------------------------------------------------------
 $script:PEMac          = $macAddress
 $script:PEComputername = $machineConfig.Computername
+Write-Log "Computername   : $script:PEComputername" -ForegroundColor Gray
 try {
     $peSections = Get-Content 'Z:\Control\Sections.json' -Raw | ConvertFrom-Json
-    $peDeploySettings = (Resolve-NDTDeploySection -Machine $machineConfig -SectionCatalog $peSections).Settings
+    $peDeployResolved = Resolve-NDTDeploySection -Machine $machineConfig -SectionCatalog $peSections
+    $peDeploySettings = $peDeployResolved.Settings
+    Write-Log "Deploy section : $($peDeployResolved.Name)$(if (-not $peDeploySettings) { ' (not found in Sections.json)' })" -ForegroundColor Gray
     if ($peDeploySettings -and $peDeploySettings.MonitorUrl) {
         $script:MonitorUrl = $peDeploySettings.MonitorUrl.TrimEnd('/')
-        Write-Log "NDT Monitor: $script:MonitorUrl" -ForegroundColor Gray
+        Write-Log "NDT Monitor    : $script:MonitorUrl" -ForegroundColor Gray
+    } else {
+        Write-Log 'NDT Monitor    : (no MonitorUrl - progress reporting disabled)' -ForegroundColor Gray
     }
 } catch {
-    # Sections.json missing MonitorUrl or unreadable - PE reporting stays disabled.
+    # Sections.json unreadable - PE reporting stays disabled.
+    Write-Log "NDT Monitor    : disabled - could not read Sections.json: $($_.Exception.Message)" -Level WARN
 }
 
 # ------------------------------------------------------------------
@@ -326,7 +341,10 @@ exit
 "@
 }
 
+Write-Log "Diskpart script ($(if ($isUEFI) { 'GPT/UEFI' } else { 'MBR/BIOS' })):" -ForegroundColor Gray
+foreach ($line in ($diskpartScript -split "`r?`n")) { Write-Log "  $line" -ForegroundColor Gray }
 $diskpartScript | diskpart
+Write-Log "Diskpart exit code: $LASTEXITCODE" -ForegroundColor Gray
 
 
 <# Storage-module equivalent - kept for reference only; we stay on diskpart (above).
@@ -381,6 +399,7 @@ Send-PEProgress -Description 'OS image applied' -Percent 45
 # make first boot skip the whole deployment, so it is deleted first. Only SYSTEM and Administrators
 # may use it (settings.json holds passwords during deployment).
 # ------------------------------------------------------------------
+Write-Log "Creating deployment folder: $deployDir$(if (Test-Path $deployDir) { ' (stale copy from the image removed first)' })" -ForegroundColor Gray
 Remove-Item -Path $deployDir -Recurse -Force -ErrorAction SilentlyContinue
 $null = New-Item -ItemType Directory -Path $deployDir -Force
 icacls.exe $deployDir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
@@ -403,8 +422,10 @@ try {
 # root, empty folder, or no match is skipped and never blocks deployment.
 # ------------------------------------------------------------------
 $osDriverRoot = "Z:\Drivers\OS"
+Write-Log "OS driver root : $osDriverRoot" -ForegroundColor Gray
 if ((Test-Path $osDriverRoot) -and $hardware) {
     $hwString = "$($hardware.Platform) $($hardware.Make) $($hardware.Model) $($hardware.BaseBoardProduct)".ToUpper()
+    Write-Log "Hardware match string: $hwString" -ForegroundColor Gray
     $driverFolders = @(Get-ChildItem -Path $osDriverRoot -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -and $hwString -like "*$($_.Name.ToUpper())*" })
 
@@ -454,6 +475,7 @@ if ($machineConfig.PostPEScript) {
 
 # Setup unattended.xml with settings from CustomSettings.json based on MAC address
 $unattendTemp = Join-Path ([System.IO.Path]::GetTempPath()) 'unattend.xml'
+Write-Log "Unattend temp  : $unattendTemp" -ForegroundColor Gray
 & "Z:\Scripts\Unattend2026\Get-Settings.ps1" -MACAddress $macAddress -DeployDir $deployDir -OutputPath $unattendTemp
 
 New-Item -ItemType Directory -Path "C:\Windows\Panther" -Force
@@ -461,6 +483,7 @@ Copy-Item $unattendTemp "C:\Windows\Panther\unattend.xml"
 Dism.exe /Image:C:\ /Apply-Unattend:"C:\Windows\Panther\unattend.xml"
 Remove-Item $unattendTemp
 
+Write-Log "BCDBoot target : $(if ($isUEFI) { 'S: (UEFI)' } else { 'C: (BIOS)' })" -ForegroundColor Gray
 if ($isUEFI) {
     BCDBoot.exe C:\windows /l en-US /s S: /f UEFI
 } else {
