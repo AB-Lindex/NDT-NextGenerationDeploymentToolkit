@@ -41,7 +41,8 @@ $env:NDT_DEPLOY_START = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
 # settings.json, logs, step state, flags) lives here, never in C:\temp. install2026.ps1 uses its own
 # folder, Install-NDT.ps1 gets it as -DeployDir and steps see $env:NDT_DEPLOYDIR.
 $deployDirRel = 'Windows\Temp\DeploymentLogs'
-$deployDir    = Join-Path 'C:\' $deployDirRel
+# Plain string, not Join-Path: PS 5.1 Join-Path throws when C: does not exist yet (blank disk on new hardware).
+$deployDir    = "C:\$deployDirRel"
 
 # Get-NetIPAddress (NetTCPIP) is missing in WinPE PS5.1 and Get-WmiObject is missing in PS7 - .NET works in both.
 try {
