@@ -202,10 +202,98 @@ if ($hardware) {
 $macAddress = & "Z:\Scripts\Unattend2026\Get-MACAddress.ps1"
 Write-Log "MAC address : $macAddress" -ForegroundColor Cyan
 
-# Machine config = CustomSettings.json merged with Control\Projects\**\*.json.
-# A duplicate MAC or an invalid JSON file is reported here, before the disk is touched,
-# and retried after the operator fixes the file. The lookup code lives in the NDT module on
-# the share (install\NDT), not in the PE image.
+# Machine config = CustomSettings.json merged with Control\Projects\**\*.json on the share Z:
+# currently points at. A duplicate MAC, an invalid JSON file or an unknown MAC is reported here,
+# before the disk is touched, and retried after the operator fixes the file. The lookup code
+# lives in the NDT module on the share (install\NDT), not in the PE image.
+function Get-PEMachineConfig {
+    while ($true) {
+        $source = @{}
+        try {
+            $all = Get-NDTMachine -LocalPath 'Z:\' -SourceMap $source
+        } catch {
+            Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
+            Read-Host "Fix the configuration on the share, then press Enter to retry"
+            continue
+        }
+
+        if ($all.$macAddress) {
+            Write-Log "Machine config source: Control\$($source[$macAddress.ToUpper()])" -ForegroundColor Gray
+            return $all.$macAddress
+        }
+
+        Write-Log "ERROR: MAC address '$macAddress' not found in CustomSettings.json or Control\Projects" -Level ERROR
+        Write-Log "Available MAC addresses in configuration:" -ForegroundColor Yellow
+        $all.PSObject.Properties | ForEach-Object {
+            Write-Log "  $($_.Name)  ($($source[$_.Name]))" -ForegroundColor Gray
+        }
+        Read-Host "Press Enter to retry"
+    }
+}
+
+# SAFETY CHECK - Install:NO prevents accidental disk wipe
+function Stop-IfInstallDisabled {
+    param($Machine)
+    if (Test-NDTInstallDisabled -Machine $Machine) {
+        Write-Log "Install is set to NO for MAC: $macAddress ($($Machine.Computername))" -ForegroundColor Yellow
+        Write-Log "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 10
+        wpeutil Reboot
+        exit 0
+    }
+}
+
+# The machine's deploy section (its "Deploy" key, else 'Deploy') from Sections.json on Z:.
+# It decides the share for the rest of the deployment, so it must exist and have a Share.
+function Get-PEDeploySection {
+    param($Machine)
+    while ($true) {
+        try {
+            $sections = Get-Content 'Z:\Control\Sections.json' -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $resolved = Resolve-NDTDeploySection -Machine $Machine -SectionCatalog $sections
+            if ($resolved.Settings -and $resolved.Settings.Share) { return $resolved }
+            $why = if ($resolved.Settings) { 'has no Share' } else { 'was not found' }
+            Write-Log "ERROR: deploy section '$($resolved.Name)' $why in Z:\Control\Sections.json" -Level ERROR
+        } catch {
+            Write-Log "ERROR: could not read Z:\Control\Sections.json: $($_.Exception.Message)" -Level ERROR
+        }
+        Read-Host "Fix Sections.json on the share, then press Enter to retry"
+    }
+}
+
+# UNC path Z: is mapped to (the PE launcher maps it from X:\Deploy\settings.json).
+function Get-PEShareRoot {
+    try {
+        $unc = (Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='Z:'" -ErrorAction Stop).ProviderName
+        if ($unc) { return $unc.TrimEnd('\') }
+    } catch { }
+    try { return ([string](Get-Content 'X:\Deploy\settings.json' -Raw | ConvertFrom-Json).Share).TrimEnd('\') } catch { return $null }
+}
+
+# Remap Z: to another share. The new share is proven reachable first (connection without a
+# drive letter), so a failure leaves Z: on the current share; retried until it works.
+function Switch-PEShare {
+    param([string]$Share, [string]$Username, [string]$Password)
+    while ($true) {
+        net use "$Share" /user:"$Username" "$Password" 2>&1 | Out-Null
+        $netExit = $LASTEXITCODE
+        if (Test-Path "$Share\Control\CustomSettings.json") {
+            net use Z: /delete /yes 2>&1 | Out-Null
+            net use Z: "$Share" /user:"$Username" "$Password" /persistent:no 2>&1 | Out-Null
+            $netExit = $LASTEXITCODE
+            if (Test-Path 'Z:\Control\CustomSettings.json') {
+                Write-Log "Z: remapped to $Share" -ForegroundColor Green
+                return
+            }
+            Write-Log "ERROR: could not map Z: to $Share (net use exit $netExit)" -Level ERROR
+        } else {
+            Write-Log "ERROR: deploy share $Share is not reachable as $Username (net use exit $netExit)" -Level ERROR
+        }
+        Write-Log 'The disk has not been touched.' -ForegroundColor Yellow
+        Read-Host "Fix the network or the share, then press Enter to retry"
+    }
+}
+
 try { . "$PSScriptRoot\Import-NDTModule.ps1" }
 catch {
     Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
@@ -213,64 +301,62 @@ catch {
     exit 1
 }
 
-$customSettings = $null
-$machineSource  = @{}
-while ($true) {
-    $machineSource = @{}
-    try {
-        $customSettings = Get-NDTMachine -LocalPath 'Z:\' -SourceMap $machineSource
-    } catch {
-        $customSettings = $null
-        Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
-        Read-Host "Fix the configuration on the share, then press Enter to retry"
-        continue
-    }
+$machineConfig = Get-PEMachineConfig
+Stop-IfInstallDisabled -Machine $machineConfig
+$deployResolved = Get-PEDeploySection -Machine $machineConfig
 
-    if ($customSettings.$macAddress) { break }
+# ------------------------------------------------------------------
+# Deploy share switch (poor man's load balancing). WinPE boots from the share in its boot image;
+# when the machine's deploy section names another share, Z: is remapped to it here - before the
+# disk is touched - so the WIM, drivers, PostPEScript, unattend and the first-boot files all come
+# from that share. Its own copy of the configuration is then validated again. One hop only.
+# ------------------------------------------------------------------
+$bootShare   = Get-PEShareRoot
+$deployShare = ([string]$deployResolved.Settings.Share).TrimEnd('\')
+Write-Log "Boot share     : $(if ($bootShare) { $bootShare } else { '(unknown)' })" -ForegroundColor Gray
+Write-Log "Deploy section : $($deployResolved.Name)" -ForegroundColor Gray
+Write-Log "Deploy share   : $deployShare" -ForegroundColor Gray
 
-    Write-Log "ERROR: MAC address '$macAddress' not found in CustomSettings.json or Control\Projects" -Level ERROR
-    Write-Log "Available MAC addresses in configuration:" -ForegroundColor Yellow
-    $customSettings.PSObject.Properties | ForEach-Object {
-        Write-Log "  $($_.Name)  ($($machineSource[$_.Name]))" -ForegroundColor Gray
+if ($deployShare -ne $bootShare) {
+    Write-Log "Deploy share differs from the boot share - switching Z: to $deployShare" -ForegroundColor Cyan
+    Switch-PEShare -Share $deployShare -Username $deployResolved.Settings.Username -Password $deployResolved.Settings.Password
+
+    # Use the module and configuration of the new share from here on.
+    while ($true) {
+        try {
+            Remove-Module -Name ndt -Force -ErrorAction SilentlyContinue
+            . "$PSScriptRoot\Import-NDTModule.ps1"
+            break
+        } catch {
+            Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
+            Read-Host "Fix the share, then press Enter to retry"
+        }
     }
-    Read-Host "Press Enter to retry"
+    Write-Log "Re-validating the configuration on $deployShare..." -ForegroundColor Cyan
+    $machineConfig = Get-PEMachineConfig
+    Stop-IfInstallDisabled -Machine $machineConfig
+    $deployResolved = Get-PEDeploySection -Machine $machineConfig
+    $nextShare = ([string]$deployResolved.Settings.Share).TrimEnd('\')
+    Write-Log "Deploy section : $($deployResolved.Name) (on $deployShare)" -ForegroundColor Gray
+    if ($nextShare -ne $deployShare) {
+        # No second switch in WinPE; first boot maps whatever this section says.
+        Write-Log "On $deployShare the machine's deploy section '$($deployResolved.Name)' points to $nextShare - first boot will use that share" -Level WARN
+    }
+} else {
+    Write-Log 'Deploy share is the boot share - no switch' -ForegroundColor Gray
 }
 
-$machineConfig = $customSettings.$macAddress
-Write-Log "Machine config source: Control\$($machineSource[$macAddress.ToUpper()])" -ForegroundColor Gray
-
 # ------------------------------------------------------------------
-# SAFETY CHECK - Install:NO prevents accidental disk wipe
-# ------------------------------------------------------------------
-if (Test-NDTInstallDisabled -Machine $machineConfig) {
-    Write-Log "Install is set to NO for MAC: $macAddress ($($machineConfig.Computername))" -ForegroundColor Yellow
-    Write-Log "Deployment is disabled for this machine. Rebooting in 10 seconds..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 10
-    wpeutil Reboot
-    exit 0
-}
-
-# ------------------------------------------------------------------
-# Resolve NDT Monitor URL for WinPE-phase progress reporting (best-effort).
-# Uses the machine's deploy section (or default 'Deploy') from Sections.json.
+# NDT Monitor URL for WinPE-phase progress reporting (best-effort), from the final deploy section.
 # ------------------------------------------------------------------
 $script:PEMac          = $macAddress
 $script:PEComputername = $machineConfig.Computername
 Write-Log "Computername   : $script:PEComputername" -ForegroundColor Gray
-try {
-    $peSections = Get-Content 'Z:\Control\Sections.json' -Raw | ConvertFrom-Json
-    $peDeployResolved = Resolve-NDTDeploySection -Machine $machineConfig -SectionCatalog $peSections
-    $peDeploySettings = $peDeployResolved.Settings
-    Write-Log "Deploy section : $($peDeployResolved.Name)$(if (-not $peDeploySettings) { ' (not found in Sections.json)' })" -ForegroundColor Gray
-    if ($peDeploySettings -and $peDeploySettings.MonitorUrl) {
-        $script:MonitorUrl = $peDeploySettings.MonitorUrl.TrimEnd('/')
-        Write-Log "NDT Monitor    : $script:MonitorUrl" -ForegroundColor Gray
-    } else {
-        Write-Log 'NDT Monitor    : (no MonitorUrl - progress reporting disabled)' -ForegroundColor Gray
-    }
-} catch {
-    # Sections.json unreadable - PE reporting stays disabled.
-    Write-Log "NDT Monitor    : disabled - could not read Sections.json: $($_.Exception.Message)" -Level WARN
+if ($deployResolved.Settings.MonitorUrl) {
+    $script:MonitorUrl = ([string]$deployResolved.Settings.MonitorUrl).TrimEnd('/')
+    Write-Log "NDT Monitor    : $script:MonitorUrl" -ForegroundColor Gray
+} else {
+    Write-Log 'NDT Monitor    : (no MonitorUrl - progress reporting disabled)' -ForegroundColor Gray
 }
 
 # ------------------------------------------------------------------

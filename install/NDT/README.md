@@ -99,6 +99,16 @@ Get-NDTComputer | Select-Object MAC, Computername, SourceFile
   anything in `Control\Projects`. `Sections.json`, `DeploymentGroups.json` and
   `DeploymentActions.json` remain single files. `New-NDTComputerTui` still writes to `CustomSettings.json`.
 
+## Spreading load across shares
+
+A MAC block's `Deploy` key names a deploy section in `Sections.json`. When that section's `Share`
+is another NDT server, WinPE remaps `Z:` to it right after the MAC lookup (before the disk is
+touched). The WIM, drivers, unattend, first-boot files and applications then come from that share,
+and its own copy of the configuration is validated again. The boot image itself is still loaded
+from the original server. Keep the `Control` files of all servers in sync; only the `Deploy`
+section differs per server. An unreachable share, or a MAC missing there, stops with a retry
+prompt. See the repository README.
+
 ## Boot media
 
 `New-NDTPEImage` writes two ISOs to `Boot\` (skip both with `-SkipISO`):

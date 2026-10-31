@@ -86,6 +86,7 @@ The machine boots WinPE (via PXE/WDS, a boot ISO, or `Start-Refresh.ps1`) and lo
 1. Checks for a capture-mode flag — if present it runs reference image capture instead of a normal deployment.
 2. Detects firmware type (BIOS/Gen1 or UEFI/Gen2) and hardware (`Get-Hardware.ps1`: physical or virtual, hypervisor, vendor, model, serial) — disk is not touched until all validations pass.
 3. Looks up the machine by MAC address in `Control/CustomSettings.json` and `Control/Projects/**/*.json` (merged, see [Projects](#projects-per-project-machine-files)); aborts (with a retry prompt, before the disk is touched) if not found, if the MAC is defined more than once, or if a JSON file is invalid. If the block has `"Install": "NO"` the machine reboots without touching the disk.
+   - Resolves the machine's deploy section (its `Deploy` key, else `Deploy`). If that section's `Share` differs from the share WinPE booted from, `Z:` is remapped to it and the lookup above runs again on that share's own configuration. The WIM, drivers, `PostPEScript`, unattend template and first-boot files then all come from that share. See [Spreading load across shares](#spreading-load-across-shares). A share that can't be reached, a MAC missing there or a missing deploy section stops with a retry prompt before the disk is touched.
 4. Resolves and validates the OS image path and index from `Control/OS.json`; aborts if the WIM file is not found.
 5. All pre-flight checks passed — partitions disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
 6. Applies the OS image to `C:\` with DISM.
@@ -308,7 +309,7 @@ The central configuration file. Contains one entry per machine, keyed by MAC add
 | `Sections` | Label to section-name map into `Sections.json`. Only the value is used; the label is cosmetic. |
 | `DeploymentGroups` | Ordered list of groups from `DeploymentGroups.json`. Omit for an OS-only deployment. |
 | `Install` | `"NO"` disables deployment for this machine (reboot, no disk wipe). Any other value deploys. |
-| `Deploy` | Name of the deploy section to use (default `Deploy`). |
+| `Deploy` | Name of the deploy section to use (default `Deploy`). If its `Share` is another server, the whole deployment after the MAC lookup runs from that share (see [Spreading load across shares](#spreading-load-across-shares)). |
 | `FinishAction` | `DESKTOP` (default), `PROMPT`, `REBOOT`, `SHUTDOWN`, `LOGOFF`; overrides the deploy section. |
 | `PostPEScript` | Share-relative PowerShell 5 script run in WinPE right after the image is applied. |
 | any other key | Passed as a script parameter when a `DeploymentActions.json` entry lists it under `Parameters`. |
@@ -347,6 +348,20 @@ Shared named sections referenced from MAC blocks. Merged into a machine's effect
 ```
 
 The `Deploy` section (stamped by `Install-NDT`) holds the share, the deploy credentials and the optional `MonitorUrl`, `MapTimeoutSec` and `FinishAction`. Deploy sections are selected by the machine-level `Deploy` key, not through `Sections`. AutoLogon credential sections (e.g. `ADLogon-AD01`, with `Username` + `Password`) are reached by name from a step's `Reference` in `DeploymentGroups.json`, which points at a `DeploymentActions.json` entry of `"Type": "AutoLogon"`; the key names must match.
+
+#### Spreading load across shares
+
+Several NDT servers can share the deployment load. Add a deploy section per server to `Sections.json` and point machines at one with the `Deploy` key in their MAC block:
+
+```json
+"Deploy Server2": { "Share": "\\\\server2\\Deploy2026", "Username": "...", "Password": "...", "MonitorUrl": "https://server2:443" }
+```
+
+WinPE still boots from the share in its boot image (PXE/ISO load is not balanced). Right after the MAC lookup, before the disk is touched, `install.ps1` remaps `Z:` to the machine's deploy share when it differs from the boot share. From then on everything comes from that share: WIM, OS drivers, `PostPEScript`, unattend template, first-boot files, applications and progress reporting.
+
+- **The other share must hold a complete copy of the configuration.** After the switch, that share's own `CustomSettings.json`/`Projects`, `Sections.json`, `OS.json`, WIM, groups, actions and applications are used, so the machine's block there decides the rest of the deployment. Keep the `Control` files of all servers in sync. Only the `Deploy` section differs per server.
+- On the other share, the machine's block normally has no `Deploy` key (its own `Deploy` section points at itself). If it points to a third share, WinPE does not switch again and logs a warning; first boot then maps that third share.
+- The switch is checked before `Z:` is given up. A share that can't be reached leaves `Z:` on the boot share and shows a retry prompt. A MAC missing on the new share, `Install:NO` there, or a missing deploy section are handled as on the boot share.
 
 ### DeploymentGroups.json
 
