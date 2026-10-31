@@ -430,9 +430,18 @@ Connection settings live in a section of `Sections.json` (default name `NDTSql`;
 
 ## Applications
 
-`Applications\` holds generic installers (PowerShell scripts) that deployment groups reference through `DeploymentActions.json`, for example ADK, PowerShell 7, PSGallery/NuGet, VMware Tools, NPP, WDS, IIS, Windows Update, SQL Server 2025 (including Always On), PKI (root CA, enterprise CA, PSPKI), ADDS, iPXE and the `Pause` step. Site-specific installers go in `Applications2026\`, which is not checked in.
+`Applications\` holds generic installers (PowerShell scripts) that deployment groups reference through `DeploymentActions.json`, for example ADK, PowerShell 7, PSGallery/NuGet, VMware Tools, WDS, IIS, Windows Update, SQL Server 2025 (including Always On), PKI (root CA, enterprise CA, PSPKI), ADDS, iPXE and the `Pause` step. Site-specific installers go in `Applications2026\`, which is not checked in.
 
 A `Script` action runs `.ps1` with PowerShell 7 by default, `"PowerShell": "powershell5"` for PowerShell 5.1, or `.cmd`/`.bat` with cmd.exe. `Parameters` names keys to pull from the machine's effective settings.
+
+### Repo installers and your own installers
+
+The installers in `Applications\` are the repository's preferred versions. `Update-NDT` overwrites them with the repo version, so a change made directly to a repo installer on a share (for example `Applications\VS Code\install.ps1`) is lost at the next update.
+
+- **Improvement useful to everyone**: make it in the repo (pull request, merge). Every share then receives it through `Update-NDT`.
+- **Company-specific installer**: do not edit the repo file. Copy it to a name that is not in the repo, for example `Applications\VS Code - Company\install.ps1` or `Applications2026\VS Code\install.ps1`, add an action for it in `DeploymentActions.json` and reference that action from your group. `Update-NDT` never touches `Applications2026\`, files that are not in the repo, or `Control\`. The copy no longer receives repo fixes, so merge upstream changes into it yourself.
+- **Keep every existing file in `Applications\` as it is**: run `Update-NDT -Preserve 'Applications'`. Only new files are added; repo fixes to existing installers are no longer applied.
+- **Retired installers**: `Update-NDT` copies files over the share but never deletes files that were removed from the repo. Delete those folders (and their entries in `DeploymentActions.json` / `DeploymentGroups.json`) by hand.
 
 ---
 
@@ -464,7 +473,7 @@ See [install/NDT/README.md](install/NDT/README.md) for the module's own page.
 
 ## Updating NDT
 
-- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` and `Control\Projects\` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Before anything is copied, the new module is import-tested under Windows PowerShell 5.1 and PowerShell 7; if it fails, nothing on the share is changed. `install\NDT` is replaced through a temporary folder. After `Install-NDT`/`Update-NDT` the repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) and `install\Publish-NDT.ps1` are removed from the live share; `install\NDT` stays because the deploy scripts import it.
+- **Share content**: `Update-NDT` downloads the repository and copies the code over the share. It **preserves** `Control\*.json` and `Control\Projects\` (new control files are added, existing ones untouched), the stamped credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. Other folders, including `Applications\`, are overwritten with the repo version (see [Repo installers and your own installers](#repo-installers-and-your-own-installers)); files removed from the repo are not deleted from the share. It does not re-create the SMB share or change permissions. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Before anything is copied, the new module is import-tested under Windows PowerShell 5.1 and PowerShell 7; if it fails, nothing on the share is changed. `install\NDT` is replaced through a temporary folder. After `Install-NDT`/`Update-NDT` the repo-only files (`.github`, `.vscode`, `.gitignore`, `README.md`) and `install\Publish-NDT.ps1` are removed from the live share; `install\NDT` stays because the deploy scripts import it.
 - **The module itself**: update an AllUsers install with `Install-Module NDT -Force -Scope AllUsers`, and do this **before** running `Update-NDT` (an older module's `Update-NDT` still removes `install\NDT` from the share, which stops the deploy scripts). Do **not** use `Update-Module` on PowerShellGet 2.x; it installs to CurrentUser and the newer copy then shadows the AllUsers one.
 - **Boot image**: rebuild with `New-NDTPEImage` after changing `install.ps1`, drivers or the WinPE launcher, since those are baked into the WIM.
 

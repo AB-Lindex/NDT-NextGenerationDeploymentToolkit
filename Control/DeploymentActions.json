@@ -106,11 +106,6 @@
     "Script": "\\Applications\\Cleanup Image\\CleanupBeforeSysprep.ps1",
     "Description": "Cleanup reference image"
   },
-  "InstallNPP": {
-    "Script": "\\Applications\\NPP\\install.ps1",
-    "Description": "Install Notepad++",
-    "ContinueOnError": false
-  },
   "Root CA Roles and Features": {
     "Script": "\\Applications\\PKI\\RootCA\\InstallRolesFeatures.ps1",
     "Description": "Install Root CA roles and features"

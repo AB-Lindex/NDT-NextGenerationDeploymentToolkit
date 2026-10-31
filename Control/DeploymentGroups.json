@@ -143,12 +143,6 @@
       "Reference": "Install iPXE"
     }
   },
-  "NPP": {
-    "Step10": {
-      "Description": "Install Notepad++",
-      "Reference": "InstallNPP"
-    }
-  },
   "PSGallery": {
     "Step10": {
       "Description": "Install PowerShell Gallery Certificate",
