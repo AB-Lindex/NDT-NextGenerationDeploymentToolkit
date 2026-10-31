@@ -318,7 +318,7 @@ Write-Log "Deploy section : $($deployResolved.Name)" -ForegroundColor Gray
 Write-Log "Deploy share   : $deployShare" -ForegroundColor Gray
 
 if ($deployShare -ne $bootShare) {
-    Write-Log "Deploy share differs from the boot share - switching Z: to $deployShare" -ForegroundColor Cyan
+    Write-Log "Deploy share will be $deployShare - switching Z:" -ForegroundColor Cyan
     Switch-PEShare -Share $deployShare -Username $deployResolved.Settings.Username -Password $deployResolved.Settings.Password
 
     # Use the module and configuration of the new share from here on.
