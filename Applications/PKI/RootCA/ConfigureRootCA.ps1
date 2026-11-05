@@ -1,13 +1,20 @@
-Install-AdcsCertificationAuthority -CAType StandaloneRootCA -KeyLength 4096 -ValidityPeriod Years -ValidityPeriodUnits 15 -HashAlgorithmName sha256 -CADistinguishedNameSuffix "dc=fcdinfra,dc=com" -force
+copy-item (join-path -Path $PSScriptRoot -childpath "CAPolicy.inf") -Destination "C:\Windows\" -Force
+
+Install-AdcsCertificationAuthority -CAType StandaloneRootCA -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" -KeyLength 8192 -ValidityPeriod Years -ValidityPeriodUnits 25 -HashAlgorithmName sha384 -CADistinguishedNameSuffix "dc=corp,dc=local" -force
 
 Get-CACrlDistributionPoint | Where-Object {$_.uri -notmatch "windows"} | Remove-CACrlDistributionPoint -force
 Get-CAAuthorityInformationAccess | Where-Object {$_.uri -NotMatch "windows"} | Remove-CAAuthorityInformationAccess -force
 
 Add-CAAuthorityInformationAccess -AddToCertificateAia -Uri "http://crl.pkilab.corp/CertEnroll/<ServerDNSName>_<CaName><CertificateName>.crt" -force
-Add-CACrlDistributionPoint -Uri "http://crl.pkilab.corp/CertEnroll/<CAName><CRLNameSuffix><DeltaCRLAllowed>.crl" -AddToCertificateCdp -AddToFreshestCrl -force
+Add-CACrlDistributionPoint -Uri "http://crl.pkilab.corp/CertEnroll/<CAName><CRLNameSuffix><DeltaCRLAllowed>.crl" -AddToCertificateCdp -force # remove-AddToFreshestCrl to not have Delta CRLs
+
+certutil.exe -setreg CA\RenewalKeyLength 8192
 
 certutil.exe -setreg CA\CRLPeriodUnits 400
 certutil.exe -setreg CA\CRLPeriod "Days"
+
+certutil.exe -setreg CA\CRLOverlapUnits 30
+certutil.exe -setreg CA\CRLOverlapPeriod Days
 
 certutil.exe -setreg CA\ValidityPeriodUnits 8
 certutil.exe -setreg CA\ValidityPeriod "Years"

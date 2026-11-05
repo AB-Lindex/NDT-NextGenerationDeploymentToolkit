@@ -1,0 +1,10 @@
+[Version]
+Signature="$Windows NT$"
+
+[BasicConstraintsExtension]
+PathLength=1
+Critical=Yes
+
+[Certsrv_Server]
+LoadDefaultTemplates=0
+AlternateSignatureAlgorithm=1
