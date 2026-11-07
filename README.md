@@ -89,7 +89,7 @@ The machine boots WinPE (via PXE/WDS, a boot ISO, or `Start-Refresh.ps1`) and lo
    - Resolves the machine's deploy section (its `Deploy` key, else `Deploy`). If that section's `Share` differs from the share WinPE booted from, `Z:` is remapped to it and the lookup above runs again on that share's own configuration. The WIM, drivers, `PostPEScript`, unattend template and first-boot files then all come from that share. See [Spreading load across shares](#spreading-load-across-shares). A share that can't be reached, a MAC missing there or a missing deploy section stops with a retry prompt before the disk is touched.
 4. Resolves and validates the OS image path and index from `Control/OS.json`; an unresolvable OS shows a retry prompt (the MAC block is reloaded, before the disk is touched), aborts if the WIM file is not found.
 5. All pre-flight checks passed — partitions disk 0 with diskpart (GPT/EFI for UEFI; MBR/active for BIOS).
-6. Applies the OS image to `C:\` with DISM.
+6. Applies the OS image to `C:\` with DISM, then creates an empty `C:\temp` if the image has none (application scripts expect it; NDT itself writes nothing there).
 7. Injects OS drivers from `Drivers\OS\<Platform>` whose folder name matches the detected hardware (best-effort, see [Drivers](#drivers)).
 8. Runs the optional `PostPEScript` from the machine's block (PowerShell 5, after the image is applied).
 9. Creates the deployment folder `C:\Windows\Temp\DeploymentLogs` on the target (a stale one from a captured image is deleted first; only SYSTEM and Administrators get access) and copies `install2026.ps1` and a `settings.json` (deploy share credentials, local admin password, monitor URL, finish action, start time) into it. NDT writes nothing to `C:\temp`.

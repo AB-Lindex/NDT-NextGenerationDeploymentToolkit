@@ -9,10 +9,11 @@ if ($msiAsset) {
     Write-Host "Latest PowerShell MSI URL: $downloadUrl"
     
     # Optionally, download the MSI file:
-    $destination = "C:\Temp\$($msiAsset.name)"
+    $destination = Join-Path $env:TEMP $msiAsset.name
+    if (-not (Test-Path $env:TEMP)) { New-Item -Path $env:TEMP -ItemType Directory -Force | Out-Null }
     Invoke-WebRequest -Uri $downloadUrl -OutFile $destination
     Write-Host "Downloaded to $destination"
-    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i $destination /passive" -Wait
+    Start-Process -FilePath "msiexec.exe" -ArgumentList "/i `"$destination`" /passive" -Wait
     Remove-Item -Path $destination -force
 } else {
     Write-Error "MSI asset not found in the latest release."

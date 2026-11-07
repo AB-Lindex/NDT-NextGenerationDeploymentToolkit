@@ -485,6 +485,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 Send-PEProgress -Description 'OS image applied' -Percent 45
 
+# C:\temp - a Microsoft WIM does not contain it, but application scripts expect it (a reference
+# image may already have it). Inherits the ACL of C:\ from the applied image.
+if (-not (Test-Path 'C:\temp')) {
+    $null = New-Item -ItemType Directory -Path 'C:\temp' -Force
+    Write-Log 'Created C:\temp on the target (not present in the image)' -ForegroundColor Gray
+}
+
 # ------------------------------------------------------------------
 # DeploymentLogs - the deployment folder on the target, created before anything else is written there.
 # A captured image can carry the folder of the machine it came from; its deploy-complete.flag would
