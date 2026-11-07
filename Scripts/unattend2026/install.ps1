@@ -362,13 +362,19 @@ if ($deployResolved.Settings.MonitorUrl) {
 # ------------------------------------------------------------------
 # STEP 2 - Resolve and validate OS / WIM
 # ------------------------------------------------------------------
-$osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
+while ($true) {
+    $osInfo = & "Z:\Scripts\Unattend2026\Get-OS.ps1" -MACAddress $macAddress
+    if ($osInfo -and $osInfo.Path -and $osInfo.Index) { break }
 
-if (-not $osInfo -or -not $osInfo.Path -or -not $osInfo.Index) {
     Write-Log "ERROR: Could not resolve OS for MAC address: $macAddress" -Level ERROR
     Write-Log "Ensure an OS key is set in the MAC block or a referenced section, and exists in OS.json" -ForegroundColor Yellow
-    Read-Host "Press Enter to exit"
-    exit 1
+    Write-Log 'The disk has not been touched.' -ForegroundColor Yellow
+    Read-Host "Fix the configuration on the share, then press Enter to retry"
+
+    # The MAC block may have been edited (OS, Computername, Install:NO), so reload it.
+    $machineConfig = Get-PEMachineConfig
+    Stop-IfInstallDisabled -Machine $machineConfig
+    $script:PEComputername = $machineConfig.Computername
 }
 
 $wimPath  = $osInfo.Path
