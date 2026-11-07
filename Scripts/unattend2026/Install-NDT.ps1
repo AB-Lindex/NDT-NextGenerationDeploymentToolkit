@@ -26,7 +26,8 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Add-Content -Path $LogPath -Value "$ts [$Level] $Message"
+    # Silent on failure: a step (e.g. CreateReference) may wipe the deployment folder before sysprep.
+    Add-Content -Path $LogPath -Value "$ts [$Level] $Message" -ErrorAction SilentlyContinue
     switch ($Level) {
         'WARN'  { Write-Warning $Message }
         'ERROR' { Write-Host $Message -ForegroundColor Red }
