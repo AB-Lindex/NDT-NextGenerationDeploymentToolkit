@@ -273,13 +273,13 @@ function Get-PEShareRoot {
 # Remap Z: to another share. The new share is proven reachable first (connection without a
 # drive letter), so a failure leaves Z: on the current share; retried until it works.
 function Switch-PEShare {
-    param([string]$Share, [string]$Username, [string]$Password)
+    param([string]$Share, [string]$Username, [string]$ClearPWD)
     while ($true) {
-        net use "$Share" /user:"$Username" "$Password" 2>&1 | Out-Null
+        net use "$Share" /user:"$Username" "$ClearPWD" 2>&1 | Out-Null
         $netExit = $LASTEXITCODE
         if (Test-Path "$Share\Control\CustomSettings.json") {
             net use Z: /delete /yes 2>&1 | Out-Null
-            net use Z: "$Share" /user:"$Username" "$Password" /persistent:no 2>&1 | Out-Null
+            net use Z: "$Share" /user:"$Username" "$ClearPWD" /persistent:no 2>&1 | Out-Null
             $netExit = $LASTEXITCODE
             if (Test-Path 'Z:\Control\CustomSettings.json') {
                 Write-Log "Z: remapped to $Share" -ForegroundColor Green
@@ -319,7 +319,7 @@ Write-Log "Deploy share   : $deployShare" -ForegroundColor Gray
 
 if ($deployShare -ne $bootShare) {
     Write-Log "Deploy share will be $deployShare - switching Z:" -ForegroundColor Cyan
-    Switch-PEShare -Share $deployShare -Username $deployResolved.Settings.Username -Password $deployResolved.Settings.Password
+    Switch-PEShare -Share $deployShare -Username $deployResolved.Settings.Username -ClearPWD $deployResolved.Settings.Password
 
     # Use the module and configuration of the new share from here on.
     while ($true) {
