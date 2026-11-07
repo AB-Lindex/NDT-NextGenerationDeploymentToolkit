@@ -106,6 +106,10 @@
     "Script": "\\Applications\\Cleanup Image\\CleanupBeforeSysprep.ps1",
     "Description": "Cleanup reference image"
   },
+  "Move Reference Image": {
+    "Script": "\\Applications\\Move Reference Image\\install.ps1",
+    "Description": "Move reference image"
+  },
   "Root CA Roles and Features": {
     "Script": "\\Applications\\PKI\\RootCA\\InstallRolesFeatures.ps1",
     "Description": "Install Root CA roles and features"

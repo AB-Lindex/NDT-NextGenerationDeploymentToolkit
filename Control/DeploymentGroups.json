@@ -91,6 +91,10 @@
     "Step40": {
       "Description": "Reference deployment",
       "Reference": "ReferenceImage"
+    },
+    "Step50": {
+      "Description": "Move reference image",
+      "Reference": "Move Reference Image"
     }
   },
   "Deployment": {
