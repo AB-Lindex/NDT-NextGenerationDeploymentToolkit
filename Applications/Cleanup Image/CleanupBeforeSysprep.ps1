@@ -7,11 +7,8 @@
     Runs DISM image cleanup and CleanMgr to reduce image size before Sysprep.
     Removes the SoftwareDistribution cache and resets the component store baseline.
 .NOTES
-    Version : 3.0 - Feb 20 2026
-    Authors : Mikael Nystrom & Johan Arwidmark (original VBScript)
-              Converted to PowerShell for Windows 11 / Server 2025
-    This script is provided "AS IS" with no warranties, confers no rights and
-    is not supported by the authors.
+    Heavily inspired by Mikael Nystrom & Johan Arwidmark (original VBScript), Action-CleanupBeforeSysprep.wsf
+    Converted to PowerShell for Windows 11 / Server 2025
 #>
 
 Set-StrictMode -Version Latest
