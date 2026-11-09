@@ -166,8 +166,11 @@ if ($captureMode) {
         Write-Log "Removing ${referenceDrive}:\$deployDirRel from reference drive..." -ForegroundColor Yellow
         Remove-Item -Path "${referenceDrive}:\$deployDirRel" -Recurse -Force -ErrorAction SilentlyContinue
 
-        # Remove the reference-prep transcript (written by CreateReference\Install.ps1) so it is not baked into the WIM.
-        Remove-Item -Path "${referenceDrive}:\Windows\Logs\NDT-CreateReference.log" -Force -ErrorAction SilentlyContinue
+        # Remove the WinPE staging files written by CreateReference\Install.ps1 (BCD GUID note, ramdisk boot.wim/boot.sdi)
+        # so they are not baked into the WIM. The disk is wiped after capture, so this cannot wait until afterwards.
+        foreach ($stagedFile in 'WinPE-BCD-GUID.txt', 'sources\boot.wim', 'Boot\boot.sdi') {
+            Remove-Item -Path "${referenceDrive}:\$stagedFile" -Force -ErrorAction SilentlyContinue
+        }
 
         Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"

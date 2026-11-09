@@ -14,11 +14,6 @@ param(
     [string]$CaptureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 )
 
-# Local transcript outside Temp (Temp is wiped below) so a failed run - e.g. after sysprep removed the
-# NIC/disk bindings - still shows the last step reached. install.ps1 removes it from the image at capture.
-$transcriptFile = "$env:SystemRoot\Logs\NDT-CreateReference.log"
-try { Start-Transcript -Path $transcriptFile -Force | Out-Null } catch { Write-Warning "Could not start transcript: $_" }
-
 Write-Output "========================================"
 Write-Output "Reference Image Creation Script"
 Write-Output "========================================"
@@ -257,5 +252,4 @@ try {
 }
 Write-Output "  Rebooting in 10 seconds. WinPE capture will run automatically."
 Start-Sleep -Seconds 10
-try { Stop-Transcript | Out-Null } catch { }
 Restart-Computer -Force
