@@ -232,6 +232,8 @@ function Install-NDT {
     try {
         Write-Verbose "Downloading NDT repository ZIP from '$RepoZipUrl'..."
         if ($PSCmdlet.ShouldProcess($RepoZipUrl, 'Download repository ZIP')) {
+            # Per-session TEMP folders (e.g. ...\Temp\4) can be missing; Invoke-WebRequest will not create them.
+            if (-not (Test-Path -LiteralPath $env:TEMP)) { $null = New-Item -Path $env:TEMP -ItemType Directory -Force }
             Invoke-WebRequest -Uri $RepoZipUrl -OutFile $tempZip -UseBasicParsing
             Write-Verbose "  Downloaded: $tempZip"
         }
@@ -578,6 +580,8 @@ function Update-NDT {
     try {
         Write-Verbose "Downloading NDT repository ZIP from '$RepoZipUrl'..."
         if ($PSCmdlet.ShouldProcess($RepoZipUrl, 'Download repository ZIP')) {
+            # Per-session TEMP folders (e.g. ...\Temp\4) can be missing; Invoke-WebRequest will not create them.
+            if (-not (Test-Path -LiteralPath $env:TEMP)) { $null = New-Item -Path $env:TEMP -ItemType Directory -Force }
             Invoke-WebRequest -Uri $RepoZipUrl -OutFile $tempZip -UseBasicParsing
             Write-Verbose "  Downloaded: $tempZip"
         }
@@ -1508,6 +1512,7 @@ To skip WDS and build the WIM only:
             $ps7TempZip = Join-Path $env:TEMP 'ndt-ps7-winpe.zip'
             Write-Host "Downloading PowerShell 7 zip from: $PS7ZipUrl" -ForegroundColor Gray
             if ($PSCmdlet.ShouldProcess($PS7ZipUrl, 'Download PowerShell 7 zip')) {
+                if (-not (Test-Path -LiteralPath $env:TEMP)) { $null = New-Item -Path $env:TEMP -ItemType Directory -Force }
                 Invoke-WebRequest -Uri $PS7ZipUrl -OutFile $ps7TempZip -UseBasicParsing
                 $PS7ZipPath = $ps7TempZip
             }
