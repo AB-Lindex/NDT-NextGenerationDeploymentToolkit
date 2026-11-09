@@ -166,6 +166,9 @@ if ($captureMode) {
         Write-Log "Removing ${referenceDrive}:\$deployDirRel from reference drive..." -ForegroundColor Yellow
         Remove-Item -Path "${referenceDrive}:\$deployDirRel" -Recurse -Force -ErrorAction SilentlyContinue
 
+        # Remove the reference-prep transcript (written by CreateReference\Install.ps1) so it is not baked into the WIM.
+        Remove-Item -Path "${referenceDrive}:\Windows\Logs\NDT-CreateReference.log" -Force -ErrorAction SilentlyContinue
+
         Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"
         Write-Log "Capture complete!" -ForegroundColor Green

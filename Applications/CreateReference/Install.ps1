@@ -14,6 +14,11 @@ param(
     [string]$CaptureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 )
 
+# Local transcript outside Temp (Temp is wiped below) so a failed run - e.g. after sysprep removed the
+# NIC/disk bindings - still shows the last step reached. install.ps1 removes it from the image at capture.
+$transcriptFile = "$env:SystemRoot\Logs\NDT-CreateReference.log"
+try { Start-Transcript -Path $transcriptFile -Force | Out-Null } catch { Write-Warning "Could not start transcript: $_" }
+
 Write-Output "========================================"
 Write-Output "Reference Image Creation Script"
 Write-Output "========================================"
@@ -62,12 +67,14 @@ try {
     Write-Warning "  Could not clear all event logs: $_"
 }
 
-# Step 2: Create automation flag for PE capture
+# Step 2: Prepare the automation flag for PE capture
 Write-Output ""
-Write-Output "Step 2: Creating automation flag..."
+Write-Output "Step 2: Preparing automation flag..."
 Write-Output "--------------------------------------"
 
-# Create a flag file to signal PE environment to run capture instead of deployment
+# The flag file signals WinPE to run capture instead of deployment. It is only written right
+# before the reboot (Step 7) so a failure in any earlier step cannot leave a stale flag behind
+# that would hijack the next WinPE boot of this machine.
 $captureFlagFile = "C:\DeployCapture.flag"
 $captureFlagContent = @{
     Action = "Capture"
@@ -77,13 +84,9 @@ $captureFlagContent = @{
     OutputPath = "Z:\Reference\$($env:COMPUTERNAME.ToLower()).wim"
 }
 
-try {
-    $captureFlagContent | ConvertTo-Json | Set-Content -Path $captureFlagFile -Force
-    Write-Output "  [OK] Capture flag created: $captureFlagFile"
-    Write-Output "  PE environment will detect this file and run capture automatically"
-} catch {
-    Write-Warning "  Could not create flag file: $_"
-}
+# Remove a stale flag from a previously failed run
+Remove-Item -Path $captureFlagFile -Force -ErrorAction SilentlyContinue
+Write-Output "  [OK] Capture flag prepared (written just before reboot)"
 
 # Step 3: Extract WinPE files from ISO (done BEFORE sysprep so we can validate early)
 # BCD is configured AFTER sysprep completes - sysprep's generalize pass resets custom
@@ -136,13 +139,6 @@ try {
 Write-Output ""
 Write-Output "Step 4: Pre-flight checks..."
 Write-Output "--------------------------------------"
-
-# Verify capture flag exists
-if (Test-Path $captureFlagFile) {
-    Write-Output "  [OK] Capture flag file: $captureFlagFile"
-} else {
-    Write-Warning "  [WARN] Capture flag file not found!"
-}
 
 # Verify capture script exists
 if (Test-Path $CaptureScriptPath) {
@@ -197,9 +193,10 @@ Start-Sleep -Seconds 3
 
 try {
     Write-Output "Starting sysprep..."
-    Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -Wait -NoNewWindow
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Sysprep exited with code $LASTEXITCODE"
+    # Start-Process does not set $LASTEXITCODE (it would hold a stale wevtutil/bcdedit value), so read the process exit code
+    $sysprepProc = Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -Wait -NoNewWindow -PassThru
+    if ($sysprepProc.ExitCode -ne 0) {
+        Write-Error "Sysprep exited with code $($sysprepProc.ExitCode)"
         Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
         exit 1
     }
@@ -246,10 +243,19 @@ Set-Content -Path $guidFile -Value $winpeGuid -Force
 Write-Output "  [OK] BCD entry $winpeGuid set as default"
 Write-Output "  [OK] GUID saved to $guidFile"
 
-# Step 7: Reboot - BCD is now set, nothing left to wipe it
+# Step 7: Write the capture flag, then reboot - BCD is now set, nothing left to wipe it
 Write-Output ""
-Write-Output "Step 7: Rebooting into WinPE..."
+Write-Output "Step 7: Writing capture flag and rebooting into WinPE..."
 Write-Output "--------------------------------------"
+
+try {
+    $captureFlagContent | ConvertTo-Json | Set-Content -Path $captureFlagFile -Force -ErrorAction Stop
+    Write-Output "  [OK] Capture flag created: $captureFlagFile"
+} catch {
+    Write-Error "Could not create capture flag file: $_"
+    exit 1
+}
 Write-Output "  Rebooting in 10 seconds. WinPE capture will run automatically."
 Start-Sleep -Seconds 10
+try { Stop-Transcript | Out-Null } catch { }
 Restart-Computer -Force
