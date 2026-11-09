@@ -21,7 +21,6 @@
         'New-NDTPEImage',
         'Get-NDTComputer', 'Add-NDTComputer', 'Set-NDTComputer', 'Remove-NDTComputer', 'Remove-NDTProgress',
         'Get-NDTOs',     'Add-NDTOs',     'Set-NDTOs',     'Remove-NDTOs',
-        'Move-NDTReferenceImage',
         'Test-NDTDeployment',
         'Get-NDTCatalog', 'Test-NDTComputerEntry',
         'Get-NDTMachine', 'Get-NDTEffectiveSetting', 'Resolve-NDTMachineOS', 'Resolve-NDTDeploySection', 'Test-NDTInstallDisabled',

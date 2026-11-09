@@ -179,6 +179,21 @@ try {
             Write-Output "  [OK] Removed temporary $wimOnBoot"
         }
 
+        # Move this WIM (only this one) from Reference\ to Operating Systems\. Done before the disk
+        # wipe/shutdown below because wpeutil shutdown does not stop this script immediately.
+        $moveScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'Move Reference Image\install.ps1'
+        if (Test-Path $moveScript) {
+            Write-Output ""
+            Write-Output "Moving captured image to Operating Systems..."
+            $global:LASTEXITCODE = 0
+            & $moveScript -OutputPath $OutputPath
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "  Move failed (exit $LASTEXITCODE) - the image stays in $OutputPath"
+            }
+        } else {
+            Write-Warning "  Move script not found: $moveScript - the image stays in $OutputPath"
+        }
+
         # ---------------------------------------------------------------
         # Weekly build: wipe disk 0 and shutdown
         # We are running in WinPE from the RAM disk (X:) so disk 0 is

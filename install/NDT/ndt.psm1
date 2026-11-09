@@ -426,8 +426,7 @@ function Install-NDT {
     Write-Host "       Add-NDTOs -Key WIN2025DCG -Path 'Operating Systems\<folder>\install.wim' -Index 1" -ForegroundColor Gray
     Write-Host "     Place WIM files under $LocalPath\Operating Systems\" -ForegroundColor Gray
     Write-Host "     Use Get-NDTOs to list registered entries and Set-NDTOs to update them." -ForegroundColor Gray
-    Write-Host "     If you captured a reference image, use Move-NDTReferenceImage to move it" -ForegroundColor Gray
-    Write-Host "     from the Reference\ folder into Operating Systems\ automatically." -ForegroundColor Gray
+    Write-Host "     A captured reference image is moved into Operating Systems\ automatically." -ForegroundColor Gray
     Write-Host ""
     Write-Host "  NOTE: Certain files are not included in the repository and must be added" -ForegroundColor Yellow
     Write-Host "        manually to the deployment share after installation. Examples:" -ForegroundColor Yellow
@@ -2830,94 +2829,6 @@ function Remove-NDTOs {
         $catalog.PSObject.Properties.Remove($Key)
         $catalog | ConvertTo-NDTJson -Depth 10 | Set-Content -Path $osPath -Encoding UTF8
         Write-Verbose "Removed OS '$Key'."
-    }
-}
-
-#endregion
-
-#region -- Reference image management ----------------------------------------
-
-function Move-NDTReferenceImage {
-    <#
-    .SYNOPSIS
-        Moves captured reference WIM files from \Reference into \Operating Systems\.
-
-    .DESCRIPTION
-        For every *.wim found directly inside the Reference folder the function:
-          1. Derives the destination folder name from the WIM stem
-             (e.g. 'ref-w2025dcg.wim' -> folder 'ref-w2025dcg').
-          2. Strips the 'ref-' prefix from the stem to form the destination file name
-             (e.g. 'ref-w2025dcg' -> 'w2025dcg.wim').
-          3. Creates 'Operating Systems\<stem>\' if it does not exist.
-          4. Moves the WIM to 'Operating Systems\<stem>\<name-without-prefix>.wim',
-             removing it from the Reference folder.
-
-        Example:
-          Reference\ref-w2025dcg.wim
-          -> Operating Systems\ref-w2025dcg\w2025dcg.wim
-
-    .PARAMETER LocalPath
-        Root of the NDT deployment share. Default: C:\Deploy2026
-
-    .PARAMETER Force
-        Overwrite the destination WIM if it already exists.
-
-    .EXAMPLE
-        Move-NDTReferenceImage
-
-    .EXAMPLE
-        Move-NDTReferenceImage -WhatIf
-
-    .EXAMPLE
-        Move-NDTReferenceImage -LocalPath D:\Deploy2026
-    #>
-    [CmdletBinding(SupportsShouldProcess)]
-    param (
-        [Parameter()]
-        [string]$LocalPath = 'C:\Deploy2026'
-    )
-
-    $refDir = Join-Path $LocalPath 'Reference'
-    $osDir  = Join-Path $LocalPath 'Operating Systems'
-
-    if (-not (Test-Path $refDir)) {
-        throw "Reference folder not found: $refDir"
-    }
-
-    $wims = Get-ChildItem -Path $refDir -Filter '*.wim' -File
-    if (-not $wims) {
-        Write-Warning "No WIM files found in: $refDir"
-        return
-    } else  {
-        Write-Host "Found $($wims.Count) WIM(s) in Reference folder:" -ForegroundColor Cyan
-        foreach ($wim in $wims) {
-            Write-Host "  $($wim.Name)" -ForegroundColor Gray
-        }
-    }
-
-    foreach ($wim in $wims) {
-        $stem      = $wim.BaseName                          # e.g. ref-w2025dcg
-        $destName  = $stem -replace '^ref-', ''             # e.g. w2025dcg
-        $destDir   = Join-Path $osDir $stem                 # e.g. Operating Systems\ref-w2025dcg
-        $destFile  = Join-Path $destDir "$destName.wim"     # e.g. ...\w2025dcg.wim
-
-        $relDest = $destFile.Replace($LocalPath + '\', '')
-        Write-Host "  Source : $($wim.FullName)" -ForegroundColor Gray
-        Write-Host "  Dest   : $relDest" -ForegroundColor Gray
-        if (Test-Path $destFile) {
-            Write-Host "  Status : destination exists  -  overwriting" -ForegroundColor Yellow
-        } else {
-            Write-Host "  Status : new file" -ForegroundColor Gray
-        }
-
-        if ($PSCmdlet.ShouldProcess($destFile, "Move reference WIM '$($wim.Name)'")) {
-            if (-not (Test-Path $destDir)) {
-                New-Item -ItemType Directory -Path $destDir -Force | Out-Null
-                Write-Host "  Created folder: $destDir" -ForegroundColor Gray
-            }
-            Move-Item -Path $wim.FullName -Destination $destFile -Force
-            Write-Host "  [OK] $($wim.Name) -> $relDest (moved)" -ForegroundColor Green
-        }
     }
 }
 
