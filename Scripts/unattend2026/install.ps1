@@ -592,6 +592,7 @@ if ($isUEFI) {
     # Gen 1 / BIOS: boot store goes on the Windows partition
     BCDBoot.exe C:\windows /l en-US /s C: /f BIOS
 }
+
 BCDEdit.exe /timeout 0
 
 Write-Log "Rebooting..." -ForegroundColor Green
