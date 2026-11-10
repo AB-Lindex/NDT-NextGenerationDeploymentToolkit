@@ -171,6 +171,11 @@ if ($captureMode) {
         foreach ($stagedFile in 'WinPE-BCD-GUID.txt', 'sources\boot.wim', 'Boot\boot.sdi') {
             Remove-Item -Path "${referenceDrive}:\$stagedFile" -Force -ErrorAction SilentlyContinue
         }
+        # Install.ps1 created C:\sources just for boot.wim. C:\Boot is the BIOS system partition's own boot folder (bcdboot), so it stays.
+        $sourcesDir = "${referenceDrive}:\sources"
+        if ((Test-Path -LiteralPath $sourcesDir) -and -not (Get-ChildItem -LiteralPath $sourcesDir -Force | Select-Object -First 1)) {
+            Remove-Item -LiteralPath $sourcesDir -Force -ErrorAction SilentlyContinue
+        }
 
         Write-Log "Executing capture script..." -ForegroundColor Green
         & $captureScriptPath -ImageName $captureConfig.ImageName -OutputPath $captureConfig.OutputPath -TargetDrive "${referenceDrive}:"

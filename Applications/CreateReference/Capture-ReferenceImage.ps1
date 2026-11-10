@@ -107,6 +107,22 @@ if (Test-Path $dismLog) {
     Remove-Item $dismLog -Force
 }
 
+# Capture exclusions (wimscript.ini format). C:\Boot is the BIOS system partition's boot folder; it is
+# rebuilt by bcdboot on every deployment, so it must not be baked into the image. The first five lines
+# repeat DISM's built-in defaults, which a custom ConfigFile would otherwise not be guaranteed to keep.
+$dismConfig = Join-Path $env:TEMP 'ndt-capture-wimscript.ini'
+@(
+    '[ExclusionList]'
+    '\$ntfs.log'
+    '\hiberfil.sys'
+    '\pagefile.sys'
+    '\swapfile.sys'
+    '\System Volume Information'
+    '\RECYCLER'
+    '\Windows\CSC'
+    '\Boot'
+) | Set-Content -Path $dismConfig -Encoding Unicode
+
 # Build DISM command
 # IMPORTANT: /ScratchDir must point outside the WinPE RAM disk (X:) otherwise
 # DISM hits ERROR_DISK_FULL (0x80070070) after only a few percent.
@@ -120,6 +136,7 @@ $dismArgs = @(
     "/Description:$ImageDescription"
     "/Compress:$Compress"
     "/Verify"
+    "/ConfigFile:$dismConfig"
     "/ScratchDir:$ScratchDir"
     "/LogPath:$dismLog"
 )
