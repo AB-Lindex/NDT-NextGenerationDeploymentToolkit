@@ -224,7 +224,7 @@ function Get-PEMachineConfig {
             $all = Get-NDTMachine -LocalPath 'Z:\' -SourceMap $source
         } catch {
             Write-Log "ERROR: $($_.Exception.Message)" -Level ERROR
-            Read-Host "Fix the configuration on the share, then press Enter to retry"
+            $null = Read-Host "Fix the configuration on the share, then press Enter to retry"
             continue
         }
 
@@ -238,7 +238,9 @@ function Get-PEMachineConfig {
         $all.PSObject.Properties | ForEach-Object {
             Write-Log "  $($_.Name)  ($($source[$_.Name]))" -ForegroundColor Gray
         }
-        Read-Host "Press Enter to retry"
+        # Read-Host returns the typed text; inside a function that would leak into the return value
+        # and turn the machine object into an array (which silently defeats the Install:NO check).
+        $null = Read-Host "Press Enter to retry"
     }
 }
 
@@ -268,7 +270,7 @@ function Get-PEDeploySection {
         } catch {
             Write-Log "ERROR: could not read Z:\Control\Sections.json: $($_.Exception.Message)" -Level ERROR
         }
-        Read-Host "Fix Sections.json on the share, then press Enter to retry"
+        $null = Read-Host "Fix Sections.json on the share, then press Enter to retry"
     }
 }
 
@@ -301,7 +303,7 @@ function Switch-PEShare {
             Write-Log "ERROR: deploy share $Share is not reachable as $Username (net use exit $netExit)" -Level ERROR
         }
         Write-Log 'The disk has not been touched.' -ForegroundColor Yellow
-        Read-Host "Fix the network or the share, then press Enter to retry"
+        $null = Read-Host "Fix the network or the share, then press Enter to retry"
     }
 }
 
