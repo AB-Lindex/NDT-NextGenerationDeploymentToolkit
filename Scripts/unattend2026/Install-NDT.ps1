@@ -28,11 +28,15 @@ function Write-Log {
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     # Silent on failure: a step (e.g. CreateReference) may wipe the deployment folder before sysprep.
     Add-Content -Path $LogPath -Value "$ts [$Level] $Message" -ErrorAction SilentlyContinue
-    switch ($Level) {
-        'WARN'  { Write-Warning $Message }
-        'ERROR' { Write-Host $Message -ForegroundColor Red }
-        default { Write-Host $Message -ForegroundColor $ForegroundColor }
-    }
+    # The console can vanish mid-step (sysprep removes the Windows Terminal package that hosts it); a failed
+    # Write-Host then throws and would stop the running step. The line is already in the log file above.
+    try {
+        switch ($Level) {
+            'WARN'  { Write-Warning $Message }
+            'ERROR' { Write-Host $Message -ForegroundColor Red }
+            default { Write-Host $Message -ForegroundColor $ForegroundColor }
+        }
+    } catch { }
 }
 
 # Pipeline sink: writes every output/error/warning record from a step script to the log.

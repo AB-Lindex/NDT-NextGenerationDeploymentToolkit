@@ -27,6 +27,15 @@ function Save-SysprepLog {
     }
 }
 
+# File log that does not depend on the console: sysprep removes the Windows Terminal package, which can take
+# the console (and with it the transcript and every Write-Output) down mid-run.
+$stepLog = Join-Path $logDir 'CreateReference-Steps.log'
+function Write-RefLog {
+    param([string]$Message)
+    Add-Content -Path $stepLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message" -ErrorAction SilentlyContinue
+    Write-Output $Message
+}
+
 Write-Output "========================================"
 Write-Output "Reference Image Creation Script"
 Write-Output "========================================"
@@ -200,9 +209,9 @@ Write-Output ""
 Start-Sleep -Seconds 3
 
 try {
-    Write-Output "Starting sysprep..."
+    Write-RefLog "Starting sysprep..."
     # Start-Process does not set $LASTEXITCODE (it would hold a stale wevtutil/bcdedit value), so read the process exit code.
-    # Not -Wait: while sysprep runs, its latest setupact.log line is echoed every 15 s, so a stall shows where it stopped.
+    # Not -Wait: while sysprep runs, its latest setupact.log line is logged every 15 s, so a stall shows where it stopped.
     $sysprepProc = Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -NoNewWindow -PassThru
     $null = $sysprepProc.Handle   # keeps ExitCode readable after exit
     $sysprepLog  = "$env:SystemRoot\System32\Sysprep\Panther\setupact.log"
@@ -211,20 +220,21 @@ try {
         Start-Sleep -Seconds 15
         $tail = if (Test-Path $sysprepLog) { Get-Content -Path $sysprepLog -Tail 1 -ErrorAction SilentlyContinue }
         if ($tail -and $tail -ne $lastLogLine) {
-            Write-Output "  [sysprep] $tail"
+            Write-RefLog "  [sysprep] $tail"
             $lastLogLine = $tail
         }
     }
     Save-SysprepLog
+    Write-RefLog "  Sysprep exited with code $($sysprepProc.ExitCode)"
     if ($sysprepProc.ExitCode -ne 0) {
         Write-Error "Sysprep exited with code $($sysprepProc.ExitCode)"
         Write-Error "Check: $logDir\sysprep-setuperr.log (copy of $env:SystemRoot\System32\Sysprep\Panther\setuperr.log)"
         exit 1
     }
-    Write-Output "  [OK] Sysprep generalise complete (system NOT yet rebooted)"
+    Write-RefLog "  [OK] Sysprep generalise complete (system NOT yet rebooted)"
 } catch {
     Save-SysprepLog
-    Write-Error "Sysprep failed: $_"
+    Write-RefLog "Sysprep failed: $_"
     Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
     exit 1
 }
@@ -245,6 +255,7 @@ $createOut = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
 Write-Output "  create OSLOADER      : $createOut"
 $winpeGuid = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
 if (-not $winpeGuid) {
+    Write-RefLog "bcdedit /create failed: $createOut"
     Write-Error "bcdedit /create failed: $createOut"
     exit 1
 }
@@ -262,22 +273,23 @@ $out = & bcdedit /default      $winpeGuid 2>&1           ; Write-Output "  set d
 $out = & bcdedit /timeout      5 2>&1                    ; Write-Output "  set timeout   : $out"
 
 Set-Content -Path $guidFile -Value $winpeGuid -Force
-Write-Output "  [OK] BCD entry $winpeGuid set as default"
-Write-Output "  [OK] GUID saved to $guidFile"
+Write-RefLog "  [OK] BCD entry $winpeGuid set as default"
+Write-RefLog "  [OK] GUID saved to $guidFile"
+& bcdedit /enum all 2>&1 | Set-Content -Path (Join-Path $logDir 'bcdedit-enum-all.txt') -ErrorAction SilentlyContinue
 
 # Step 7: Write the capture flag, then reboot - BCD is now set, nothing left to wipe it
-Write-Output ""
-Write-Output "Step 7: Writing capture flag and rebooting into WinPE..."
-Write-Output "--------------------------------------"
+Write-RefLog ""
+Write-RefLog "Step 7: Writing capture flag and rebooting into WinPE..."
 
 try {
     $captureFlagContent | ConvertTo-Json | Set-Content -Path $captureFlagFile -Force -ErrorAction Stop
-    Write-Output "  [OK] Capture flag created: $captureFlagFile"
+    Write-RefLog "  [OK] Capture flag created: $captureFlagFile"
 } catch {
+    Write-RefLog "Could not create capture flag file: $_"
     Write-Error "Could not create capture flag file: $_"
     exit 1
 }
-Write-Output "  Rebooting in 10 seconds. WinPE capture will run automatically."
+Write-RefLog "  Rebooting in 10 seconds. WinPE capture will run automatically."
 Start-Sleep -Seconds 10
 try { Stop-Transcript | Out-Null } catch { }
 Restart-Computer -Force

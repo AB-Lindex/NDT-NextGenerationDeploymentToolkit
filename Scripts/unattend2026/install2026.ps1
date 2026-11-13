@@ -34,11 +34,14 @@ function Write-Log {
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Add-Content -Path $LogPath -Value "$ts [$Level] $Message"
-    switch ($Level) {
-        'WARN'  { Write-Warning $Message }
-        'ERROR' { Write-Host $Message -ForegroundColor Red }
-        default { Write-Host $Message -ForegroundColor $ForegroundColor }
-    }
+    # Console may be gone (e.g. sysprep removed the Windows Terminal host); the line is already logged above.
+    try {
+        switch ($Level) {
+            'WARN'  { Write-Warning $Message }
+            'ERROR' { Write-Host $Message -ForegroundColor Red }
+            default { Write-Host $Message -ForegroundColor $ForegroundColor }
+        }
+    } catch { }
 }
 
 # Finished deployment: blank the passwords in settings.json (a rerun supplies them again as parameters).
