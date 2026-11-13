@@ -21,19 +21,21 @@ $null = New-Item -Path $logDir -ItemType Directory -Force -ErrorAction SilentlyC
 try { Start-Transcript -Path (Join-Path $logDir 'CreateReference-Install.log') -Append -Force | Out-Null } catch { Write-Warning "Could not start transcript: $_" }
 
 function Save-SysprepLog {
+    # .NET copy inside try/catch: once sysprep has removed the console host, Copy-Item throws a host error
+    # that -ErrorAction SilentlyContinue does not suppress.
     $panther = "$env:SystemRoot\System32\Sysprep\Panther"
     foreach ($name in 'setupact.log', 'setuperr.log') {
-        Copy-Item -Path (Join-Path $panther $name) -Destination (Join-Path $logDir "sysprep-$name") -Force -ErrorAction SilentlyContinue
+        try { [System.IO.File]::Copy((Join-Path $panther $name), (Join-Path $logDir "sysprep-$name"), $true) } catch { }
     }
 }
 
 # File log that does not depend on the console: sysprep removes the Windows Terminal package, which can take
-# the console (and with it the transcript and every Write-Output) down mid-run.
+# the console (and with it the transcript and every Write-Output) down mid-run. Never throws.
 $stepLog = Join-Path $logDir 'CreateReference-Steps.log'
 function Write-RefLog {
     param([string]$Message)
-    Add-Content -Path $stepLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message" -ErrorAction SilentlyContinue
-    Write-Output $Message
+    try { Add-Content -Path $stepLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $Message" -ErrorAction SilentlyContinue } catch { }
+    try { Write-Output $Message } catch { }
 }
 
 Write-Output "========================================"
@@ -227,50 +229,47 @@ try {
     Save-SysprepLog
     Write-RefLog "  Sysprep exited with code $($sysprepProc.ExitCode)"
     if ($sysprepProc.ExitCode -ne 0) {
-        Write-Error "Sysprep exited with code $($sysprepProc.ExitCode)"
-        Write-Error "Check: $logDir\sysprep-setuperr.log (copy of $env:SystemRoot\System32\Sysprep\Panther\setuperr.log)"
+        Write-RefLog "Sysprep failed - see $logDir\sysprep-setuperr.log (copy of $env:SystemRoot\System32\Sysprep\Panther\setuperr.log)"
         exit 1
     }
     Write-RefLog "  [OK] Sysprep generalise complete (system NOT yet rebooted)"
 } catch {
     Save-SysprepLog
-    Write-RefLog "Sysprep failed: $_"
-    Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
+    Write-RefLog "Sysprep failed: $_ - see $logDir\sysprep-setuperr.log"
     exit 1
 }
 
 # Step 6: Configure BCD now - AFTER sysprep has finished generalising
 # Writing BCD here means sysprep can no longer touch it before the reboot.
-Write-Output ""
-Write-Output "Step 6: Configuring BCD for WinPE boot..."
-Write-Output "--------------------------------------"
+# From here on only Write-RefLog is used (the console may be gone after sysprep).
+Write-RefLog ""
+Write-RefLog "Step 6: Configuring BCD for WinPE boot..."
 
 # Always delete and recreate {ramdiskoptions} to avoid stale data from previous runs
 & bcdedit /delete "{ramdiskoptions}" 2>&1 | Out-Null
-$out = & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" 2>&1 ; Write-Output "  create ramdiskoptions: $out"
-$out = & bcdedit /set "{ramdiskoptions}" ramdisksdidevice "partition=$bootDrive" 2>&1 ; Write-Output "  set ramdisksdidevice : $out"
-$out = & bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi 2>&1          ; Write-Output "  set ramdisksdipath   : $out"
+$out = & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" 2>&1 ; Write-RefLog "  create ramdiskoptions: $out"
+$out = & bcdedit /set "{ramdiskoptions}" ramdisksdidevice "partition=$bootDrive" 2>&1 ; Write-RefLog "  set ramdisksdidevice : $out"
+$out = & bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi 2>&1          ; Write-RefLog "  set ramdisksdipath   : $out"
 
 $createOut = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
-Write-Output "  create OSLOADER      : $createOut"
+Write-RefLog "  create OSLOADER      : $createOut"
 $winpeGuid = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
 if (-not $winpeGuid) {
     Write-RefLog "bcdedit /create failed: $createOut"
-    Write-Error "bcdedit /create failed: $createOut"
     exit 1
 }
 
-$out = & bcdedit /set $winpeGuid device     "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-Output "  set device    : $out"
-$out = & bcdedit /set $winpeGuid path       \Windows\System32\winload.exe 2>&1                           ; Write-Output "  set path      : $out"
-$out = & bcdedit /set $winpeGuid osdevice   "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-Output "  set osdevice  : $out"
-$out = & bcdedit /set $winpeGuid systemroot \Windows 2>&1                                               ; Write-Output "  set systemroot: $out"
-$out = & bcdedit /set $winpeGuid detecthal  Yes 2>&1                                                    ; Write-Output "  set detecthal : $out"
-$out = & bcdedit /set $winpeGuid winpe      Yes 2>&1                                                    ; Write-Output "  set winpe     : $out"
-$out = & bcdedit /set $winpeGuid nx         OptIn 2>&1                                                  ; Write-Output "  set nx        : $out"
+$out = & bcdedit /set $winpeGuid device     "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-RefLog "  set device    : $out"
+$out = & bcdedit /set $winpeGuid path       \Windows\System32\winload.exe 2>&1                           ; Write-RefLog "  set path      : $out"
+$out = & bcdedit /set $winpeGuid osdevice   "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-RefLog "  set osdevice  : $out"
+$out = & bcdedit /set $winpeGuid systemroot \Windows 2>&1                                               ; Write-RefLog "  set systemroot: $out"
+$out = & bcdedit /set $winpeGuid detecthal  Yes 2>&1                                                    ; Write-RefLog "  set detecthal : $out"
+$out = & bcdedit /set $winpeGuid winpe      Yes 2>&1                                                    ; Write-RefLog "  set winpe     : $out"
+$out = & bcdedit /set $winpeGuid nx         OptIn 2>&1                                                  ; Write-RefLog "  set nx        : $out"
 
-$out = & bcdedit /displayorder $winpeGuid /addfirst 2>&1 ; Write-Output "  displayorder  : $out"
-$out = & bcdedit /default      $winpeGuid 2>&1           ; Write-Output "  set default   : $out"
-$out = & bcdedit /timeout      5 2>&1                    ; Write-Output "  set timeout   : $out"
+$out = & bcdedit /displayorder $winpeGuid /addfirst 2>&1 ; Write-RefLog "  displayorder  : $out"
+$out = & bcdedit /default      $winpeGuid 2>&1           ; Write-RefLog "  set default   : $out"
+$out = & bcdedit /timeout      5 2>&1                    ; Write-RefLog "  set timeout   : $out"
 
 Set-Content -Path $guidFile -Value $winpeGuid -Force
 Write-RefLog "  [OK] BCD entry $winpeGuid set as default"
@@ -286,7 +285,6 @@ try {
     Write-RefLog "  [OK] Capture flag created: $captureFlagFile"
 } catch {
     Write-RefLog "Could not create capture flag file: $_"
-    Write-Error "Could not create capture flag file: $_"
     exit 1
 }
 Write-RefLog "  Rebooting in 10 seconds. WinPE capture will run automatically."
