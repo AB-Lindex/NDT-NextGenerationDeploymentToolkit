@@ -434,6 +434,14 @@ Connection settings live in a section of `Sections.json` (default name `NDTSql`;
 
 A `Script` action runs `.ps1` with PowerShell 7 by default, `"PowerShell": "powershell5"` for PowerShell 5.1, or `.cmd`/`.bat` with cmd.exe. `Parameters` names keys to pull from the machine's effective settings.
 
+**PowerShell 7 remoting and WinRM HTTPS** (`Applications\WinRMPS7\install.ps1`, action `Enable WinRM PS7`): enables PS remoting for Windows PowerShell 5.1 and PowerShell 7 and registers the `PowerShell.7` endpoint, keeps HTTP (TCP/5985) and adds an HTTPS listener on TCP/5986 with a self-signed certificate (CN = FQDN) and a firewall rule. The default endpoint stays PowerShell 5.1; reach PS7 explicitly with `-ConfigurationName PowerShell.7`, add `-UseSSL` for 5986:
+
+```powershell
+Enter-PSSession -ComputerName srv02.corp.dev -ConfigurationName PowerShell.7
+Invoke-Command  -ComputerName srv02.corp.dev -ConfigurationName PowerShell.7 -UseSSL -SessionOption (New-PSSessionOption -SkipCACheck -SkipCNCheck) -ScriptBlock { $PSVersionTable.PSVersion }
+```
+
+Run it after the PowerShell 7 install step and after the domain join/rename so the certificate carries the final FQDN. The certificate is self-signed, so clients must trust it or skip the CA/CN check. The certificate is valid for 5 years. The one optional parameter is the switch `SkipHttps` (MAC block or section key, JSON boolean: `"SkipHttps": true` = no 5986 listener, PS7 endpoint and 5985 only); a string value such as `"NO"` is rejected. The script is idempotent.
 ### Repo installers and your own installers
 
 The installers in `Applications\` are the repository's preferred versions. `Update-NDT` overwrites them with the repo version, so a change made directly to a repo installer on a share (for example `Applications\VS Code\install.ps1`) is lost at the next update.

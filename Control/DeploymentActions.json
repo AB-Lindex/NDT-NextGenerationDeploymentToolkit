@@ -219,6 +219,11 @@
       "ApiKey"
     ]
   },
+  "Enable WinRM PS7": {
+    "Script": "\\Applications\\WinRMPS7\\install.ps1",
+    "Description": "Enable PS7 remoting endpoint (PowerShell.7) and WinRM HTTPS on TCP/5986",
+    "Parameters": ["SkipHttps"]
+  },
   "Install VS Code": {
     "Script": "\\Applications\\VS Code\\install.ps1",
     "Description": "Install Visual Studio Code"
