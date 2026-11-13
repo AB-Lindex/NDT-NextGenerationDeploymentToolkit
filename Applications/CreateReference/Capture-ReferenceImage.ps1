@@ -108,7 +108,8 @@ if (Test-Path $dismLog) {
 }
 
 # Capture exclusions (wimscript.ini format). C:\Boot is the BIOS system partition's boot folder; it is
-# rebuilt by bcdboot on every deployment, so it must not be baked into the image. The first five lines
+# rebuilt by bcdboot on every deployment, so it must not be baked into the image. \NDT-ReferenceLogs holds
+# the reference-prep logs (CreateReference\Install.ps1, CleanupBeforeSysprep.ps1). The first five lines
 # repeat DISM's built-in defaults, which a custom ConfigFile would otherwise not be guaranteed to keep.
 $dismConfig = Join-Path $env:TEMP 'ndt-capture-wimscript.ini'
 @(
@@ -121,6 +122,7 @@ $dismConfig = Join-Path $env:TEMP 'ndt-capture-wimscript.ini'
     '\RECYCLER'
     '\Windows\CSC'
     '\Boot'
+    '\NDT-ReferenceLogs'
 ) | Set-Content -Path $dismConfig -Encoding Unicode
 
 # Build DISM command

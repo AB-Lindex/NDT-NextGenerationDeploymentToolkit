@@ -14,6 +14,19 @@ param(
     [string]$CaptureScriptPath = "Z:\Applications\CreateReference\Capture-ReferenceImage.ps1"
 )
 
+# Transcript + copies of the sysprep logs go to a folder in the C: root: Step 1 below wipes Windows\Temp
+# (DeploymentLogs included), so nothing under Temp survives. The capture excludes this folder from the WIM.
+$logDir = 'C:\NDT-ReferenceLogs'
+$null = New-Item -Path $logDir -ItemType Directory -Force -ErrorAction SilentlyContinue
+try { Start-Transcript -Path (Join-Path $logDir 'CreateReference-Install.log') -Append -Force | Out-Null } catch { Write-Warning "Could not start transcript: $_" }
+
+function Save-SysprepLog {
+    $panther = "$env:SystemRoot\System32\Sysprep\Panther"
+    foreach ($name in 'setupact.log', 'setuperr.log') {
+        Copy-Item -Path (Join-Path $panther $name) -Destination (Join-Path $logDir "sysprep-$name") -Force -ErrorAction SilentlyContinue
+    }
+}
+
 Write-Output "========================================"
 Write-Output "Reference Image Creation Script"
 Write-Output "========================================"
@@ -188,15 +201,29 @@ Start-Sleep -Seconds 3
 
 try {
     Write-Output "Starting sysprep..."
-    # Start-Process does not set $LASTEXITCODE (it would hold a stale wevtutil/bcdedit value), so read the process exit code
-    $sysprepProc = Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -Wait -NoNewWindow -PassThru
+    # Start-Process does not set $LASTEXITCODE (it would hold a stale wevtutil/bcdedit value), so read the process exit code.
+    # Not -Wait: while sysprep runs, its latest setupact.log line is echoed every 15 s, so a stall shows where it stopped.
+    $sysprepProc = Start-Process -FilePath $sysprepPath -ArgumentList $sysprepArgs -NoNewWindow -PassThru
+    $null = $sysprepProc.Handle   # keeps ExitCode readable after exit
+    $sysprepLog  = "$env:SystemRoot\System32\Sysprep\Panther\setupact.log"
+    $lastLogLine = ''
+    while (-not $sysprepProc.HasExited) {
+        Start-Sleep -Seconds 15
+        $tail = if (Test-Path $sysprepLog) { Get-Content -Path $sysprepLog -Tail 1 -ErrorAction SilentlyContinue }
+        if ($tail -and $tail -ne $lastLogLine) {
+            Write-Output "  [sysprep] $tail"
+            $lastLogLine = $tail
+        }
+    }
+    Save-SysprepLog
     if ($sysprepProc.ExitCode -ne 0) {
         Write-Error "Sysprep exited with code $($sysprepProc.ExitCode)"
-        Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
+        Write-Error "Check: $logDir\sysprep-setuperr.log (copy of $env:SystemRoot\System32\Sysprep\Panther\setuperr.log)"
         exit 1
     }
     Write-Output "  [OK] Sysprep generalise complete (system NOT yet rebooted)"
 } catch {
+    Save-SysprepLog
     Write-Error "Sysprep failed: $_"
     Write-Error "Check: $env:SystemRoot\System32\Sysprep\Panther\setuperr.log"
     exit 1
@@ -252,4 +279,5 @@ try {
 }
 Write-Output "  Rebooting in 10 seconds. WinPE capture will run automatically."
 Start-Sleep -Seconds 10
+try { Stop-Transcript | Out-Null } catch { }
 Restart-Computer -Force

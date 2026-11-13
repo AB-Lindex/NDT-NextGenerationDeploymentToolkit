@@ -16,6 +16,12 @@ $ErrorActionPreference = 'Stop'
 
 #region --- Logging -------------------------------------------------------
 
+# Log folder in the C: root, outside Windows\Temp (the reference prep wipes Temp, DeploymentLogs included).
+# Shared with CreateReference\Install.ps1; the capture excludes it from the WIM.
+$script:LogDir  = 'C:\NDT-ReferenceLogs'
+$script:LogFile = Join-Path $script:LogDir 'CleanupBeforeSysprep.log'
+$null = New-Item -Path $script:LogDir -ItemType Directory -Force -ErrorAction SilentlyContinue
+
 function Write-Log {
     param(
         [Parameter(Mandatory)][string]$Message,
@@ -24,6 +30,7 @@ function Write-Log {
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     Write-Host "[$ts][$Level] $Message"
+    Add-Content -Path $script:LogFile -Value "[$ts][$Level] $Message" -ErrorAction SilentlyContinue
 }
 
 #endregion
@@ -46,7 +53,7 @@ function Invoke-Executable {
 function Test-ExitCode {
     param([int]$ExitCode, [string]$TaskName)
     if ($ExitCode -notin 0, 3010) {
-        Write-Log "$TaskName failed (exit code $ExitCode)." 'WARNING'
+        Write-Log "$TaskName failed (exit code $ExitCode). DISM details: C:\Windows\Logs\DISM\dism.log" 'WARNING'
     }
 }
 
