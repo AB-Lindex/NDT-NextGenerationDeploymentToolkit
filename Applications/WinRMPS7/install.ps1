@@ -78,17 +78,22 @@ try {
         Write-Host "Created self-signed certificate $($cert.Thumbprint) ($subject, expires $($cert.NotAfter))."
     }
 
-    $listener = Get-WSManInstance -ResourceURI winrm/config/Listener -Enumerate | Where-Object { $_.Transport -eq 'HTTPS' }
-    if ($listener -and $listener.CertificateThumbprint -eq $cert.Thumbprint -and $listener.Hostname -eq $fqdn) {
+    # The WSMan: provider is used because Get-WSManInstance -Enumerate rejects winrm/config/Listener
+    $listener = Get-ChildItem -Path WSMan:\localhost\Listener | Where-Object { $_.Keys -contains 'Transport=HTTPS' } | Select-Object -First 1
+    $listenerSettings = @{}
+    if ($listener) {
+        Get-ChildItem -Path "WSMan:\localhost\Listener\$($listener.Name)" | ForEach-Object { $listenerSettings[$_.Name] = $_.Value }
+    }
+
+    if ($listener -and $listenerSettings['CertificateThumbprint'] -eq $cert.Thumbprint -and $listenerSettings['Hostname'] -eq $fqdn) {
         Write-Host 'HTTPS listener already configured with this certificate.'
     }
     else {
         if ($listener) {
             Write-Host 'Replacing existing HTTPS listener.'
-            Remove-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{ Address = '*'; Transport = 'HTTPS' }
+            Remove-Item -Path "WSMan:\localhost\Listener\$($listener.Name)" -Recurse -Force
         }
-        New-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{ Address = '*'; Transport = 'HTTPS' } `
-            -ValueSet @{ Hostname = $fqdn; CertificateThumbprint = $cert.Thumbprint } | Out-Null
+        New-Item -Path WSMan:\localhost\Listener -Transport HTTPS -Address * -HostName $fqdn -CertificateThumbprint $cert.Thumbprint -Force | Out-Null
         Write-Host "Created HTTPS listener on TCP/5986 for $fqdn."
     }
 
