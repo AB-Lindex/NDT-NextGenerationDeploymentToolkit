@@ -5,13 +5,15 @@
 
 .DESCRIPTION
     - Enables WinRM / PS remoting for Windows PowerShell 5.1 (endpoint Microsoft.PowerShell, stays the default).
-    - Enables PS remoting from PowerShell 7, which registers the PowerShell.7 endpoint. Use it explicitly:
-        Enter-PSSession -ComputerName <name> -ConfigurationName PowerShell.7
-        Invoke-Command  -ComputerName <name> -ConfigurationName PowerShell.7 -ScriptBlock { $PSVersionTable.PSVersion }
+    - Enables PS remoting from PowerShell 7, which registers the PowerShell.7 endpoint, and adds a short
+      alias endpoint PS7. Use either explicitly:
+        Enter-PSSession -ComputerName <name> -ConfigurationName PS7
+        Invoke-Command  -ComputerName <name> -ConfigurationName PS7 -ScriptBlock { $PSVersionTable.PSVersion }
     - Keeps the HTTP listener (TCP/5985) and adds an HTTPS listener (TCP/5986) with a self-signed
       certificate (CN = FQDN), plus a firewall rule. Add -UseSSL on the client. The certificate is
-      self-signed, so the client must trust it or use
-        New-PSSessionOption -SkipCACheck -SkipCNCheck
+      self-signed, so the client must trust it or skip the checks by passing a session option:
+        $so = New-PSSessionOption -SkipCACheck -SkipCNCheck
+        Enter-PSSession -ComputerName <fqdn> -ConfigurationName PS7 -UseSSL -SessionOption $so
     - Safe to re-run: a valid certificate/listener/rule is reused.
 
     Place this step after the domain join (and any rename) so the certificate carries the final FQDN.
@@ -47,11 +49,17 @@ try {
     Write-Host 'Enabling PS remoting for PowerShell 7...'
     Invoke-Native $pwsh @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $psRemoting)
 
+    # Short alias endpoint, registered by pwsh 7 so it runs PowerShell 7 (PowerShell.7 stays as well)
+    $registerPs7 = "`$ErrorActionPreference = 'Stop'; if (-not (Get-PSSessionConfiguration -Name PS7 -ErrorAction SilentlyContinue)) { Register-PSSessionConfiguration -Name PS7 -Force | Out-Null }"
+    Invoke-Native $pwsh @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $registerPs7)
+
     Set-Service -Name WinRM -StartupType Automatic
     if ((Get-Service -Name WinRM).Status -ne 'Running') { Start-Service -Name WinRM }
 
     $endpoints = & $pwsh -NoProfile -Command 'Get-PSSessionConfiguration | Select-Object -ExpandProperty Name'
-    if ($endpoints -notcontains 'PowerShell.7') { throw "Endpoint 'PowerShell.7' was not registered. Registered: $($endpoints -join ', ')" }
+    foreach ($required in 'PowerShell.7', 'PS7') {
+        if ($endpoints -notcontains $required) { throw "Endpoint '$required' was not registered. Registered: $($endpoints -join ', ')" }
+    }
     Write-Host "Registered endpoints: $($endpoints -join ', ')"
 
     if ($SkipHttps) {
