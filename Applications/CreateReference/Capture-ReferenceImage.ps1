@@ -94,22 +94,24 @@ Get-ChildItem -Path $outputDir -ErrorAction SilentlyContinue | ForEach-Object {
 }
 Write-Output ""
 
-# Free-space check (after the old output is gone, so its space counts). Fail now with a clear message
-# instead of after a long capture: a full share makes DISM die mid-capture (0x80070070) and leaves no WIM.
-# Estimate: 'fast' compression typically gives ~50-60% of the used size; 60% + 1 GB for scratch is used here.
-try {
-    $srcDrive  = New-Object System.IO.DriveInfo (($TargetDrive.TrimEnd('\')) + '\')
-    $dstDrive  = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($OutputPath))
-    $usedBytes = $srcDrive.TotalSize - $srcDrive.AvailableFreeSpace
-    $needBytes = [long]($usedBytes * 0.6) + 1GB
-    $freeBytes = $dstDrive.AvailableFreeSpace
-    Write-Output ("Space check: source used {0:N1} GB, estimated need {1:N1} GB, free on {2} {3:N1} GB" -f ($usedBytes/1GB), ($needBytes/1GB), $dstDrive.Name, ($freeBytes/1GB))
-    if ($freeBytes -lt $needBytes) {
-        Write-Error ("Not enough free space on {0} for the capture: {1:N1} GB free, about {2:N1} GB needed. Free up space on the deployment share and run the reference build again." -f $dstDrive.Name, ($freeBytes/1GB), ($needBytes/1GB))
-        exit 1
+# Free-space check (after the old output is gone, so its space counts). Stops here, before the long capture:
+# a full share makes DISM die mid-capture (0x80070070) and leaves no WIM. The operator frees space and presses
+# Enter to re-check. Estimate: 'fast' compression typically gives ~50-60% of the used size; 60% + 1 GB scratch.
+while ($true) {
+    try {
+        $srcDrive  = New-Object System.IO.DriveInfo (($TargetDrive.TrimEnd('\')) + '\')
+        $dstDrive  = New-Object System.IO.DriveInfo ([System.IO.Path]::GetPathRoot($OutputPath))
+        $usedBytes = $srcDrive.TotalSize - $srcDrive.AvailableFreeSpace
+        $needBytes = [long]($usedBytes * 0.6) + 1GB
+        $freeBytes = $dstDrive.AvailableFreeSpace
+    } catch {
+        Write-Warning "Could not check free space (continuing): $_"
+        break
     }
-} catch {
-    Write-Warning "Could not check free space (continuing): $_"
+    Write-Output ("Space check: source used {0:N1} GB, estimated need {1:N1} GB, free on {2} {3:N1} GB" -f ($usedBytes/1GB), ($needBytes/1GB), $dstDrive.Name, ($freeBytes/1GB))
+    if ($freeBytes -ge $needBytes) { break }
+    Write-Warning ("Not enough free space on {0} for the capture: {1:N1} GB free, about {2:N1} GB needed." -f $dstDrive.Name, ($freeBytes/1GB), ($needBytes/1GB))
+    $null = Read-Host "Free up space on the deployment share, then press Enter to retry"
 }
 Write-Output ""
 Write-Output "Starting image capture..."
