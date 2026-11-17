@@ -31,7 +31,7 @@ Deploy2026/                        ← root of the SMB share (\\dc01.corp.dev\De
 ├── Boot/boot2026.wim              ← WinPE image served by WDS
 ├── Control/
 │   ├── CustomSettings.json        ← per-machine config keyed by MAC address only
-│   ├── Projects/                  ← optional extra MAC files (Projects\**\*.json), merged with CustomSettings.json; empty (.gitkeep) in the public repo
+│   ├── Projects/                  ← optional extra MAC files (Projects\**\*.json), merged with CustomSettings.json; the public repo ships `sql.json` and `pki.json` as examples of splitting machines across several files (other `*.json` stay git-ignored)
 │   ├── Sections.json              ← shared named sections (locale, network, AD, deploy credentials)
 │   ├── DeploymentGroups.json      ← named groups: ordered steps referencing DeploymentActions.json keys
 │   ├── DeploymentActions.json     ← action definitions: scripts, Reboot, AutoLogon
@@ -155,7 +155,7 @@ MAC address blocks only — one per machine:
 
 - Only MAC-shaped keys count (case-insensitive, normalised to upper case); other keys (e.g. `_Project`) are ignored. Empty files are skipped; a missing `Projects` folder adds nothing.
 - **Duplicate MAC = hard error** (same or different files) and **invalid JSON in any file = hard error**: deployment aborts in WinPE before the disk is touched; `Test-NDTDeployment` flags both. No precedence rules, no `_` parking prefix - park a machine with `Install:NO`.
-- Public repo: `Control\Projects\.gitkeep` only (`.gitignore`: `Control/Projects/*` + `!Control/Projects/.gitkeep`). `Update-NDT` never removes or overwrites anything in it (Control is preserved, add-only).
+- Public repo: `Control\Projects` tracks `.gitkeep` plus the example files `sql.json` and `pki.json` (`.gitignore`: `Control/Projects/*` + `!Control/Projects/.gitkeep` + `!Control/Projects/*.json`). Their MACs are live like any other Projects file, so a duplicate with your own entry is a hard error. `Update-NDT` never removes or overwrites anything in it (Control is preserved, add-only).
 - Scope is MAC blocks only (not Sections / DeploymentGroups / DeploymentActions). The TUI still writes to `CustomSettings.json`.
 - Module: `Get-NDTComputer` adds `SourceFile` (relative to `Control`; skipped when cloning via pipeline); `Add-NDTComputer -File` (relative to `Projects`, `.json` appended, folders created, rooted/`..` rejected; default `CustomSettings.json`); `Set-`/`Remove-NDTComputer` write back to the owning file and refuse a duplicated MAC; `Remove-` leaves `{}` rather than deleting the file.
 - Gotcha: `[bool][pscustomobject]@{}` can be `$false` - use `$null -eq` when testing an empty file.

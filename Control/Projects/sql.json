@@ -1,0 +1,65 @@
+{
+    "00:15:5D:02:40:1F": {
+    "Computername": "SQL41",
+    "IPAddress": "10.0.3.61/24",
+    "AdminPassword": "Qantas-777",
+    "SQLAOClusterIP": "10.0.3.64",
+    "SQLAOClusterShare": "\\\\dc01.corp.dev\\SQL-Witness",
+    "SQLAOListenerIP": "10.0.3.65",
+    "AGName": "SQL-AG",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp",
+      "SQLAO": "SQLAO"
+    },
+    "DeploymentGroups": [
+      "SQL2025"
+    ]
+  },
+  "00:15:5D:02:40:23": {
+    "Computername": "SQL42",
+    "IPAddress": "10.0.3.62/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp",
+      "SQLAO": "SQLAO"
+    },
+    "DeploymentGroups": [
+      "SQL2025"
+    ]
+  },
+  "00:15:5D:02:40:19": {
+    "Computername": "SQL43",
+    "IPAddress": "10.0.3.63/24",
+    "AdminPassword": "Qantas-777",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp",
+      "SQLAO": "SQLAO"
+    },
+    "DeploymentGroups": [
+      "SQL2025"
+    ]
+  },
+  "00:15:5D:03:9C:12": {
+    "OS": "WIN2025DCC",
+    "Computername": "SQL01",
+    "IPAddress": "10.0.3.17/24",
+    "AdminPassword": "Qantas-777",
+    "SAPWD": "Qantas-777",
+    "sqlpfxfile": "sql01.corp.dev.pfx",
+    "PFXPwd": "1q2w",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentGroups": [
+      "SQL2025"
+    ]
+  }
+}

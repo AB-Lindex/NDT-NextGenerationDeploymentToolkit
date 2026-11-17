@@ -243,7 +243,7 @@ Deploy2026/
 │   └── boot2026-uefi.iso         # UEFI-only, no-prompt boot ISO (Gen 2)
 ├── Control/
 │   ├── CustomSettings.json       # Per-machine config (keyed by MAC address only)
-│   ├── Projects/                 # Optional extra MAC files, any depth (empty in the public repo, never overwritten by Update-NDT)
+│   ├── Projects/                 # Optional extra MAC files, any depth (sql.json and pki.json show that several files work; never overwritten by Update-NDT)
 │   ├── Sections.json             # Shared named sections (locale, network, AD, deploy creds)
 │   ├── DeploymentGroups.json     # Named groups of ordered steps referencing DeploymentActions.json keys
 │   ├── DeploymentActions.json    # Action definitions: scripts, Reboot, AutoLogon, etc.
@@ -333,7 +333,7 @@ Control/
 - The effective machine set is `CustomSettings.json` plus every `Projects/**/*.json`. Only MAC-shaped keys count (case-insensitive, normalised to upper case); other keys (e.g. `"_Project": "..."`) are ignored. Empty files are skipped; a missing `Projects` folder adds nothing.
 - **A MAC defined more than once (in the same or different files) aborts deployment**, as does an invalid JSON file. Both are reported in WinPE before the disk is touched, and `Test-NDTDeployment` flags them. Because uniqueness is checked across the whole set, one bad file blocks every deployment on the share until fixed.
 - To park a machine, set `"Install": "NO"` in its block.
-- `Control/Projects` is empty in the public repo (only a `.gitkeep`), and `Update-NDT` never removes or overwrites anything in it.
+- `Control/Projects` ships two example files, `sql.json` and `pki.json`, to show that machines can be split across several JSON files (the `.gitignore` tracks `Projects/*.json`). They are merged like any other project file, so a MAC duplicated in your own entries is a hard error; delete or replace them for your site. `Update-NDT` never removes or overwrites anything in the folder.
 - `Get-NDTComputer` returns a `SourceFile` property (relative to `Control`); `Add-NDTComputer -File <name>` writes to `Control\Projects\<name>.json`; `Set-`/`Remove-NDTComputer` write back to whichever file holds the MAC (removing the last MAC leaves `{}`, the file is never deleted).
 - `AdminPassword` lives in each MAC block, so it ends up in every project file - same share ACL, but more places to clean up.
 - Only MAC blocks are split this way; `Sections.json`, `DeploymentGroups.json` and `DeploymentActions.json` stay single files.

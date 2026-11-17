@@ -19,6 +19,7 @@ Scripts/MDT Scripts/
 Operating Systems/*/*
 !Operating Systems/*/.gitkeep
 !Control/Projects/.gitkeep
+!Control/Projects/*.json
 !Scratch/.gitkeep
 
 # User-specific files
