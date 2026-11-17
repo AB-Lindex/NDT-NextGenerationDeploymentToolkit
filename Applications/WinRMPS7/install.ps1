@@ -27,8 +27,11 @@
     Name of an enterprise CA certificate template (e.g. WinRM, see
     Applications\PKI\Enterprise CA\Create-WinRMTemplate.ps1). The server requests its own certificate
     from the CA for the HTTPS listener, so clients that trust the CA connect without skipping the CA/CN
-    check. Needs a domain-joined server that may enroll on the template. If enrollment fails the step
-    fails (no fallback to self-signed). Without it a self-signed certificate is used.
+    check. Needs a domain-joined server, a domain logon (not the local Administrator: add an AutoLogon
+    step such as ADLogon-AD01 and a Reboot step before this one) and enroll rights on the template.
+    If the server is not domain joined or runs as a local account, a warning is logged and a self-signed
+    certificate is used so the machine stays reachable; re-run with a domain logon to switch. If the
+    enrollment itself fails the step fails. Without -CertTemplate a self-signed certificate is used.
 #>
 param (
     [switch]$SkipHttps,
@@ -81,17 +84,31 @@ try {
     $fqdn = if ($cs.PartOfDomain -and $cs.Domain) { "$($cs.DNSHostName).$($cs.Domain)".ToLower() } else { $cs.DNSHostName.ToLower() }
     $subject = "CN=$fqdn"
 
+    # A CA certificate needs a domain-joined computer and a domain logon (a local account cannot enroll).
+    # If that is not met, fall back to self-signed so the machine stays reachable over 5986.
+    $caSkipReason = $null
+    $logon = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    if ($CertTemplate) {
+        if (-not $cs.PartOfDomain) {
+            $caSkipReason = "-CertTemplate '$CertTemplate' needs a domain-joined computer."
+        }
+        elseif (($logon -split '\\')[0] -ieq $env:COMPUTERNAME) {
+            $caSkipReason = "-CertTemplate '$CertTemplate' needs a domain logon, but this script runs as the local account '$logon' (add an AutoLogon step such as ADLogon-AD01 followed by a Reboot step before this step)."
+        }
+    }
+    $useCaCert = [bool]$CertTemplate -and -not $caSkipReason
+    if ($caSkipReason) { Write-Warning "$caSkipReason Using a self-signed certificate instead; re-run the script with a domain logon to switch to the CA certificate." }
+
     # Reuse a valid certificate from an earlier run, otherwise create one.
-    # With a CA template a self-signed certificate (Issuer = Subject) must not be reused.
+    # When a CA certificate is wanted a self-signed certificate (Issuer = Subject) must not be reused.
     $cert = Get-ChildItem -Path Cert:\LocalMachine\My |
-        Where-Object { $_.Subject -eq $subject -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' -and (-not $CertTemplate -or $_.Issuer -ne $_.Subject) } |
+        Where-Object { $_.Subject -eq $subject -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' -and (-not $useCaCert -or $_.Issuer -ne $_.Subject) } |
         Sort-Object NotAfter -Descending | Select-Object -First 1
     if ($cert) {
         Write-Host "Reusing certificate $($cert.Thumbprint) ($subject, expires $($cert.NotAfter))."
     }
-    elseif ($CertTemplate) {
-        if (-not $cs.PartOfDomain) { throw "-CertTemplate needs a domain-joined computer (enrollment from the enterprise CA)." }
-        Write-Host "Requesting certificate from template '$CertTemplate'..."
+    elseif ($useCaCert) {
+        Write-Host "Requesting certificate from template '$CertTemplate' as $logon..."
         $request = Get-Certificate -Template $CertTemplate -CertStoreLocation Cert:\LocalMachine\My
         if ($request.Status -ne 'Issued') { throw "Certificate request from template '$CertTemplate' ended with status '$($request.Status)'." }
         $cert = $request.Certificate
