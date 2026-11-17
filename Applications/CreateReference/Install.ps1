@@ -38,6 +38,27 @@ function Write-RefLog {
     try { Write-Output $Message } catch { }
 }
 
+# Runs bcdedit without PowerShell's native-command launch: after sysprep the console is gone and `& bcdedit`
+# fails with 0xE9 (getting the console mode). A .NET Process with redirected handles does not need a console.
+function Invoke-Bcdedit {
+    param([string[]]$Arguments)
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName               = "$env:SystemRoot\System32\bcdedit.exe"
+    $psi.Arguments              = ($Arguments | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
+    $psi.UseShellExecute        = $false
+    $psi.CreateNoWindow         = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError  = $true
+    try {
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $text = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        return $text.Trim()
+    } catch {
+        return "bcdedit failed to run: $_"
+    }
+}
+
 Write-Output "========================================"
 Write-Output "Reference Image Creation Script"
 Write-Output "========================================"
@@ -246,12 +267,12 @@ Write-RefLog ""
 Write-RefLog "Step 6: Configuring BCD for WinPE boot..."
 
 # Always delete and recreate {ramdiskoptions} to avoid stale data from previous runs
-& bcdedit /delete "{ramdiskoptions}" 2>&1 | Out-Null
-$out = & bcdedit /create "{ramdiskoptions}" /d "Ramdisk Options" 2>&1 ; Write-RefLog "  create ramdiskoptions: $out"
-$out = & bcdedit /set "{ramdiskoptions}" ramdisksdidevice "partition=$bootDrive" 2>&1 ; Write-RefLog "  set ramdisksdidevice : $out"
-$out = & bcdedit /set "{ramdiskoptions}" ramdisksdipath  \Boot\boot.sdi 2>&1          ; Write-RefLog "  set ramdisksdipath   : $out"
+$null = Invoke-Bcdedit '/delete', '{ramdiskoptions}'
+$out = Invoke-Bcdedit '/create', '{ramdiskoptions}', '/d', 'Ramdisk Options'                    ; Write-RefLog "  create ramdiskoptions: $out"
+$out = Invoke-Bcdedit '/set', '{ramdiskoptions}', 'ramdisksdidevice', "partition=$bootDrive"  ; Write-RefLog "  set ramdisksdidevice : $out"
+$out = Invoke-Bcdedit '/set', '{ramdiskoptions}', 'ramdisksdipath', '\Boot\boot.sdi'          ; Write-RefLog "  set ramdisksdipath   : $out"
 
-$createOut = & bcdedit /create /d "WinPE Capture" /application OSLOADER 2>&1
+$createOut = Invoke-Bcdedit '/create', '/d', 'WinPE Capture', '/application', 'OSLOADER'
 Write-RefLog "  create OSLOADER      : $createOut"
 $winpeGuid = [regex]::Match($createOut, '\{[0-9a-fA-F-]{36}\}').Value
 if (-not $winpeGuid) {
@@ -259,22 +280,23 @@ if (-not $winpeGuid) {
     exit 1
 }
 
-$out = & bcdedit /set $winpeGuid device     "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-RefLog "  set device    : $out"
-$out = & bcdedit /set $winpeGuid path       \Windows\System32\winload.exe 2>&1                           ; Write-RefLog "  set path      : $out"
-$out = & bcdedit /set $winpeGuid osdevice   "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}" 2>&1 ; Write-RefLog "  set osdevice  : $out"
-$out = & bcdedit /set $winpeGuid systemroot \Windows 2>&1                                               ; Write-RefLog "  set systemroot: $out"
-$out = & bcdedit /set $winpeGuid detecthal  Yes 2>&1                                                    ; Write-RefLog "  set detecthal : $out"
-$out = & bcdedit /set $winpeGuid winpe      Yes 2>&1                                                    ; Write-RefLog "  set winpe     : $out"
-$out = & bcdedit /set $winpeGuid nx         OptIn 2>&1                                                  ; Write-RefLog "  set nx        : $out"
+$ramdisk = "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'device',     $ramdisk                    ; Write-RefLog "  set device    : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'path',       '\Windows\System32\winload.exe' ; Write-RefLog "  set path      : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'osdevice',   $ramdisk                    ; Write-RefLog "  set osdevice  : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'systemroot', '\Windows'                  ; Write-RefLog "  set systemroot: $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'detecthal',  'Yes'                       ; Write-RefLog "  set detecthal : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'winpe',      'Yes'                       ; Write-RefLog "  set winpe     : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'nx',         'OptIn'                     ; Write-RefLog "  set nx        : $out"
 
-$out = & bcdedit /displayorder $winpeGuid /addfirst 2>&1 ; Write-RefLog "  displayorder  : $out"
-$out = & bcdedit /default      $winpeGuid 2>&1           ; Write-RefLog "  set default   : $out"
-$out = & bcdedit /timeout      5 2>&1                    ; Write-RefLog "  set timeout   : $out"
+$out = Invoke-Bcdedit '/displayorder', $winpeGuid, '/addfirst' ; Write-RefLog "  displayorder  : $out"
+$out = Invoke-Bcdedit '/default', $winpeGuid                   ; Write-RefLog "  set default   : $out"
+$out = Invoke-Bcdedit '/timeout', '5'                          ; Write-RefLog "  set timeout   : $out"
 
 Set-Content -Path $guidFile -Value $winpeGuid -Force
 Write-RefLog "  [OK] BCD entry $winpeGuid set as default"
 Write-RefLog "  [OK] GUID saved to $guidFile"
-& bcdedit /enum all 2>&1 | Set-Content -Path (Join-Path $logDir 'bcdedit-enum-all.txt') -ErrorAction SilentlyContinue
+Invoke-Bcdedit '/enum', 'all' | Set-Content -Path (Join-Path $logDir 'bcdedit-enum-all.txt') -ErrorAction SilentlyContinue
 
 # Step 7: Write the capture flag, then reboot - BCD is now set, nothing left to wipe it
 Write-RefLog ""
