@@ -1,0 +1,40 @@
+{
+    "00:15:5D:02:40:4E": {
+    "OS": "WIN2025DCG",
+    "Computername": "srv02",
+    "IPAddress": "10.0.3.22/24",
+    "AdminPassword": "Qantas-777",
+    "CertTemplate": "WinRM",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentGroups": [
+      "General Settings",
+      "SMC",
+      "VS Code",
+      "AD Logon corp.dev",
+      "Enable WinRM PS7"
+    ]
+  },
+  "00:15:5D:02:40:1A": {
+    "OS": "WIN2025DCC",
+    "Computername": "srv03",
+    "IPAddress": "10.0.3.23/24",
+    "AdminPassword": "Qantas-777",
+    "CertTemplate": "WinRM",
+    "Install": "yes",
+    "Sections": {
+      "Locale": "Sweden",
+      "NetworkSettings": "NicAuto",
+      "ADSettings": "ADJoinCorp"
+    },
+    "DeploymentGroups": [
+      "SMC",
+      "VMware Tools",
+      "AD Logon corp.dev",
+      "Enable WinRM PS7"
+    ]
+  }
+}
