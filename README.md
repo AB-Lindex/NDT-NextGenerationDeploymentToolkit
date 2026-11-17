@@ -117,7 +117,7 @@ An already-installed machine can enter Phase 1 without PXE. Run, elevated, from 
 
 `install2026.ps1` runs under PowerShell 5 (via RunOnce/FirstLogonCommands) and:
 
-1. Exits immediately if `deploy-complete.flag` exists in its own folder (prevents double-run caused by both mechanisms firing on the same logon), unless it is started with `-AdminPassword`/`-DeployPassword` to rerun a finished deployment (see below). `install2026.ps1` runs from, and keeps everything in, the deployment folder `C:\Windows\Temp\DeploymentLogs`.
+1. Exits immediately if `deploy-complete.flag` exists in its own folder (prevents double-run caused by both mechanisms firing on the same logon), unless it is started with `-AdminPwd`/`-DeployPwd` to rerun a finished deployment (see below). `install2026.ps1` runs from, and keeps everything in, the deployment folder `C:\Windows\Temp\DeploymentLogs`.
 2. Handles the reboot-flag (`reboot.flag`) to distinguish a re-logon loop from a genuine completed reboot.
 3. Re-registers `RunOnce\Deploy2026` so deployment survives any intermediate reboots.
 4. Waits for a usable IPv4 address, then maps the deployment share from the credentials in `settings.json`, retrying until `Z:\Control\CustomSettings.json` is reachable (timeout `MapTimeoutSec` in the deploy section, default 120 s). This matters on physical NICs that are slow to get a link.
@@ -147,10 +147,10 @@ If `Install-NDT.ps1` exits with any other code, RunOnce and AutoLogon stay in pl
 **Rerunning a finished deployment.** To re-run steps or run steps added since, start the script from the deployment folder with the two passwords that were blanked:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File C:\Windows\Temp\DeploymentLogs\install2026.ps1 -AdminPassword '<local admin password>' -DeployPassword '<deploy account password>'
+powershell.exe -ExecutionPolicy Bypass -File C:\Windows\Temp\DeploymentLogs\install2026.ps1 -AdminPwd '<local admin password>' -DeployPwd '<deploy account password>'
 ```
 
-Supplying either parameter while `deploy-complete.flag` exists starts the rerun and removes the flag; `-DeployPassword` is required to map the share, and without `-AdminPassword` a Reboot step cannot sign in automatically. Only steps not yet in `install-steps.json` run and logs are appended. The parameters also override the stored passwords on a normal run. The copy of `install2026.ps1` is the one from deployment time; copy a newer one from `Scripts\unattend2026` on the share over it if needed.
+Supplying either parameter while `deploy-complete.flag` exists starts the rerun and removes the flag; `-DeployPwd` is required to map the share, and without `-AdminPwd` a Reboot step cannot sign in automatically. Only steps not yet in `install-steps.json` run and logs are appended. The parameters also override the stored passwords on a normal run. The copy of `install2026.ps1` is the one from deployment time; copy a newer one from `Scripts\unattend2026` on the share over it if needed.
 
 ### Finish action
 

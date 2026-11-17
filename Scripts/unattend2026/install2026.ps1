@@ -8,8 +8,8 @@ Param(
     # Rerun a finished deployment (re-run steps or run newly added ones): the passwords are blanked
     # in settings.json when deployment finishes, so supply them again here.
     # Passing either parameter while deploy-complete.flag exists starts the rerun.
-    [string]$AdminPassword,
-    [string]$DeployPassword
+    [string]$AdminPwd,
+    [string]$DeployPwd
 )
 
 # This script lives in the deployment folder (created by install.ps1) and keeps everything NDT
@@ -209,16 +209,16 @@ Write-Log "-----------------------------------" -ForegroundColor Cyan
 # deletes the RunOnce key when it finishes, the shell fires it again ~4 seconds later.
 # Writing a sentinel file on successful completion and exiting immediately when it is
 # present prevents that spurious second run.
-$rerunRequested = $PSBoundParameters.ContainsKey('AdminPassword') -or $PSBoundParameters.ContainsKey('DeployPassword')
+$rerunRequested = $PSBoundParameters.ContainsKey('AdminPwd') -or $PSBoundParameters.ContainsKey('DeployPwd')
 if (Test-Path $deployCompleteFlagPath) {
     if (-not $rerunRequested) {
-        Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting. To rerun, pass -AdminPassword and -DeployPassword.' -ForegroundColor Yellow
+        Write-Log 'Deployment already completed (deploy-complete.flag present) - exiting. To rerun, pass -AdminPwd and -DeployPwd.' -ForegroundColor Yellow
         exit 0
     }
 
     # Rerun: settings.json has blank passwords, and the share cannot be mapped without one.
-    if (-not $DeployPassword) {
-        Write-Log 'ERROR: -DeployPassword is required to rerun a finished deployment (the share cannot be mapped without it)' -Level ERROR
+    if (-not $DeployPwd) {
+        Write-Log 'ERROR: -DeployPwd is required to rerun a finished deployment (the share cannot be mapped without it)' -Level ERROR
         exit 1
     }
     Write-Log 'Rerunning a finished deployment - only steps not yet completed will run' -ForegroundColor Cyan
@@ -286,21 +286,21 @@ if (-not (Test-Path $settingsPath)) {
 $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
 
 # Passwords supplied as parameters override the stored ones (they are blank after a finished deployment).
-if ($PSBoundParameters.ContainsKey('DeployPassword') -or $PSBoundParameters.ContainsKey('AdminPassword')) {
-    if ($PSBoundParameters.ContainsKey('DeployPassword')) { $settings.Deploy.Password = $DeployPassword }
-    if ($PSBoundParameters.ContainsKey('AdminPassword')) {
-        # AutoLogon may have been switched to another account by an AutoLogon step; -AdminPassword is the local Administrator's.
+if ($PSBoundParameters.ContainsKey('DeployPwd') -or $PSBoundParameters.ContainsKey('AdminPwd')) {
+    if ($PSBoundParameters.ContainsKey('DeployPwd')) { $settings.Deploy.Password = $DeployPwd }
+    if ($PSBoundParameters.ContainsKey('AdminPwd')) {
+        # AutoLogon may have been switched to another account by an AutoLogon step; -AdminPwd is the local Administrator's.
         $settings.AutoLogon.Domain   = '.'
         $settings.AutoLogon.Username = 'Administrator'
-        $settings.AutoLogon.Password = $AdminPassword
+        $settings.AutoLogon.Password = $AdminPwd
     } elseif ($rerunRequested) {
-        Write-Log '-AdminPassword not supplied - a Reboot step will not be able to sign in automatically' -Level WARN
+        Write-Log '-AdminPwd not supplied - a Reboot step will not be able to sign in automatically' -Level WARN
     }
     $settings | ConvertTo-Json -Depth 4 | Set-Content -Path $settingsPath -Encoding UTF8
     Write-Log "Passwords supplied as parameters stored in $settingsPath for this run"
 }
 if (-not $settings.Deploy.Password) {
-    Write-Log 'ERROR: the Deploy password in settings.json is blank - run again with -DeployPassword' -Level ERROR
+    Write-Log 'ERROR: the Deploy password in settings.json is blank - run again with -DeployPwd' -Level ERROR
     exit 1
 }
 
@@ -442,7 +442,7 @@ if ($ndtExitCode -eq 3010) {
         '  settings.json    - Deployment settings; the Administrator and Deploy passwords are blanked.',
         '',
         'To rerun the deployment (re-run failed steps or run newly added ones), run:',
-        "  powershell.exe -ExecutionPolicy Bypass -File $PSCommandPath -AdminPassword <pw> -DeployPassword <pw>"
+        "  powershell.exe -ExecutionPolicy Bypass -File $PSCommandPath -AdminPwd <pw> -DeployPwd <pw>"
     )
     Set-Content -Path $deployCompleteFlagPath -Value $flagLines -Encoding ASCII -Force
 

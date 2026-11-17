@@ -278,5 +278,15 @@
        "Description": "Enable WinRM PS7 and SSL",
        "Reference": "Enable WinRM PS7 and SSL"
      }
+   },
+   "AD Logon corp.dev": {
+    "Step10": {
+      "Description": "ADLogon",
+      "Reference": "ADLogon"
+    },
+    "Step20": {
+      "Description": "Reboot server",
+      "Reference": "Reboot"
+    }
    }
 }

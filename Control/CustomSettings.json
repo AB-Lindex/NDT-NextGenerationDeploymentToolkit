@@ -10,69 +10,6 @@
     "DeploymentGroups": [
     ]
   },
-  "00:15:5D:02:40:1F": {
-    "Computername": "SQL41",
-    "IPAddress": "10.0.3.61/24",
-    "AdminPassword": "Qantas-777",
-    "SQLAOClusterIP": "10.0.3.64",
-    "SQLAOClusterShare": "\\\\dc01.corp.dev\\SQL-Witness",
-    "SQLAOListenerIP": "10.0.3.65",
-    "AGName": "SQL-AG",
-    "Sections": {
-      "Locale": "Sweden",
-      "NetworkSettings": "NicAuto",
-      "ADSettings": "ADJoinCorp",
-      "SQLAO": "SQLAO"
-    },
-    "DeploymentGroups": [
-      "SQL2025"
-    ]
-  },
-  "00:15:5D:02:40:23": {
-    "Computername": "SQL42",
-    "IPAddress": "10.0.3.62/24",
-    "AdminPassword": "Qantas-777",
-    "Sections": {
-      "Locale": "Sweden",
-      "NetworkSettings": "NicAuto",
-      "ADSettings": "ADJoinCorp",
-      "SQLAO": "SQLAO"
-    },
-    "DeploymentGroups": [
-      "SQL2025"
-    ]
-  },
-  "00:15:5D:02:40:19": {
-    "Computername": "SQL43",
-    "IPAddress": "10.0.3.63/24",
-    "AdminPassword": "Qantas-777",
-    "Sections": {
-      "Locale": "Sweden",
-      "NetworkSettings": "NicAuto",
-      "ADSettings": "ADJoinCorp",
-      "SQLAO": "SQLAO"
-    },
-    "DeploymentGroups": [
-      "SQL2025"
-    ]
-  },
-  "00:15:5D:03:9C:12": {
-    "OS": "WIN2025DCC",
-    "Computername": "SQL01",
-    "IPAddress": "10.0.3.17/24",
-    "AdminPassword": "Qantas-777",
-    "SAPWD": "Qantas-777",
-    "sqlpfxfile": "sql01.corp.dev.pfx",
-    "PFXPwd": "1q2w",
-    "Sections": {
-      "Locale": "Sweden",
-      "NetworkSettings": "NicAuto",
-      "ADSettings": "ADJoinCorp"
-    },
-    "DeploymentGroups": [
-      "SQL2025"
-    ]
-  },
   "00:15:5D:02:40:22": {
     "OS": "WIN2025DCG",
     "Computername": "IPXE01",
@@ -135,6 +72,7 @@
       "General Settings",
       "SMC",
       "VS Code",
+      "AD Logon corp.dev",
       "Enable WinRM PS7"
     ]
   },
@@ -143,6 +81,7 @@
     "Computername": "srv03",
     "IPAddress": "10.0.3.23/24",
     "AdminPassword": "Qantas-777",
+    "CertTemplate": "WinRM",
     "Install": "yes",
     "Sections": {
       "Locale": "Sweden",
@@ -151,7 +90,9 @@
     },
     "DeploymentGroups": [
       "SMC",
-      "VMware Tools"
+      "VMware Tools",
+      "AD Logon corp.dev",
+      "Enable WinRM PS7"
     ]
   },
   "00:15:5D:02:40:42": {
@@ -186,88 +127,5 @@
     "DeploymentGroups": [
       "CreateReferenceImage"
     ]
-  },
-  "00:15:5D:02:40:17": {
-    "OS": "WIN2025DCG",
-    "Computername": "RootCA01",
-    "IPAddress": "10.0.1.101/24",
-    "AdminPassword": "Qantas-707",
-    "DefaultGateway": "10.0.1.1",
-    "DNSServers": "10.0.1.100",
-    "JoinDomain": "WORKGROUP",
-    "Sections": {
-      "Locale": "Sweden"
-    },
-    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentGroups": [
-      "General Settings",
-      "RootCA"
-    ],
-    "NDTName": "ndt01.corp.dev",
-    "NDTIP": "10.0.3.16",
-    "DCPWD": "Qantas-717"
-  },
-  "00:15:5D:02:40:1D": {
-    "OS": "WIN2025DCG",
-    "Computername": "DC1",
-    "IPAddress": "10.0.1.100/24",
-    "AdminPassword": "Qantas-717",
-    "DefaultGateway": "10.0.1.1",
-    "DNSServers": "127.0.0.1",
-    "JoinDomain": "WORKGROUP",
-    "Sections": {
-      "Locale": "Sweden"
-    },
-    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentGroups": [
-      "General Settings",
-      "ADDS",
-      "DHCPServer",
-      "ADDSFinished",
-      "DNSSettings",
-      "ADCS Management Tools",
-      "Install Root Cert"
-    ],
-    "DomainDNSName": "ad01.corp",
-    "DomainNetBiosName": "AD01",
-    "sitename": "site1",
-    "DomainLevel": 10,
-    "ForestLevel": 10,
-    "SafeNodeAdminPwd": "@AdminPassword",
-    "DHCPScopes0Name": "sc01",
-    "DHCPScopes0StartIP": "10.0.1.40",
-    "DHCPScopes0EndIP": "10.0.1.60",
-    "DHCPScopes0SubnetMask": "255.255.255.0",
-    "DHCPScopes0IP": "10.0.1.0",
-    "DHCPScopes0OptionDNSDomainName": "ad01.corp",
-    "DHCPScopes0OptionDNSServer": "10.0.1.100",
-    "DHCPScopes0OptionLease": 86400,
-    "DHCPScopes0OptionRouter": "10.0.1.1",
-    "DHCPServerIP": "10.0.1.100",
-    "BootServerIp": "10.0.3.16",
-    "NDTName": "ndt01.corp.dev",
-    "NDTIP": "10.0.3.16"
-  },
-  "00:15:5D:02:40:16": {
-    "OS": "WIN2025DCG",
-    "Computername": "ECA01",
-    "IPAddress": "10.0.1.102/24",
-    "AdminPassword": "Qantas-717",
-    "DCAdminPwd": "@AdminPassword",
-    "RootCAAdminPwd": "Qantas-707",
-    "DefaultGateway": "10.0.1.1",
-    "DNSServers": "10.0.1.100",
-    "JoinDomain": "WORKGROUP",
-    "Sections": {
-      "Locale": "Sweden"
-    },
-    "PostPEScript": "\\Applications\\PKI\\Fix-Hosts.ps1",
-    "DeploymentGroups": [
-      "General Settings",
-      "ADCS Enterprise Roles and Features",
-      "AD Join",
-      "ECA Setup"
-    ],
-    "CRLPath": "\\\\eca01.ad01.corp\\CertEnroll$"
   }
 }
