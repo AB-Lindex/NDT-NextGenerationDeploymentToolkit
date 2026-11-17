@@ -22,9 +22,17 @@
 .PARAMETER SkipHttps
     Switch. Skips the HTTPS listener on TCP/5986 (PS7 endpoint and TCP/5985 only). From a MAC block or
     section set "SkipHttps": true (a JSON boolean, not a string).
+
+.PARAMETER CertTemplate
+    Name of an enterprise CA certificate template (e.g. NDT-WinRM, see
+    Applications\PKI\Enterprise CA\Create-NDTWinRMTemplate.ps1). The server requests its own certificate
+    from the CA for the HTTPS listener, so clients that trust the CA connect without skipping the CA/CN
+    check. Needs a domain-joined server that may enroll on the template. If enrollment fails the step
+    fails (no fallback to self-signed). Without it a self-signed certificate is used.
 #>
 param (
-    [switch]$SkipHttps
+    [switch]$SkipHttps,
+    [string]$CertTemplate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -71,12 +79,22 @@ try {
     $fqdn = if ($cs.PartOfDomain -and $cs.Domain) { "$($cs.DNSHostName).$($cs.Domain)".ToLower() } else { $cs.DNSHostName.ToLower() }
     $subject = "CN=$fqdn"
 
-    # Reuse a valid certificate from an earlier run, otherwise create one
+    # Reuse a valid certificate from an earlier run, otherwise create one.
+    # With a CA template a self-signed certificate (Issuer = Subject) must not be reused.
     $cert = Get-ChildItem -Path Cert:\LocalMachine\My |
-        Where-Object { $_.Subject -eq $subject -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' } |
+        Where-Object { $_.Subject -eq $subject -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(30) -and $_.EnhancedKeyUsageList.ObjectId -contains '1.3.6.1.5.5.7.3.1' -and (-not $CertTemplate -or $_.Issuer -ne $_.Subject) } |
         Sort-Object NotAfter -Descending | Select-Object -First 1
     if ($cert) {
         Write-Host "Reusing certificate $($cert.Thumbprint) ($subject, expires $($cert.NotAfter))."
+    }
+    elseif ($CertTemplate) {
+        if (-not $cs.PartOfDomain) { throw "-CertTemplate needs a domain-joined computer (enrollment from the enterprise CA)." }
+        Write-Host "Requesting certificate from template '$CertTemplate'..."
+        $request = Get-Certificate -Template $CertTemplate -CertStoreLocation Cert:\LocalMachine\My
+        if ($request.Status -ne 'Issued') { throw "Certificate request from template '$CertTemplate' ended with status '$($request.Status)'." }
+        $cert = $request.Certificate
+        if ($cert.DnsNameList.Unicode -notcontains $fqdn) { throw "Issued certificate $($cert.Thumbprint) does not cover $fqdn (names: $($cert.DnsNameList.Unicode -join ', '))." }
+        Write-Host "Issued certificate $($cert.Thumbprint) ($($cert.Subject), issuer $($cert.Issuer), expires $($cert.NotAfter))."
     }
     else {
         $dnsNames = @($fqdn, $cs.DNSHostName.ToLower()) | Select-Object -Unique
