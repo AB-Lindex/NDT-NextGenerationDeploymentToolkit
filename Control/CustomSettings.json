@@ -125,7 +125,7 @@
     "Computername": "srv02",
     "IPAddress": "10.0.3.22/24",
     "AdminPassword": "Qantas-777",
-    "CertTemplate": "NDT-WinRM",
+    "CertTemplate": "WinRM",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",

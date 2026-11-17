@@ -219,9 +219,9 @@
       "ApiKey"
     ]
   },
-  "Create NDT-WinRM Template": {
-    "Script": "\\Applications\\PKI\\Enterprise CA\\Create-NDTWinRMTemplate.ps1",
-    "Description": "Create and publish the NDT-WinRM certificate template (run on the enterprise CA)"
+  "Create WinRM Template": {
+    "Script": "\\Applications\\PKI\\Enterprise CA\\Create-WinRMTemplate.ps1",
+    "Description": "Create and publish the WinRM certificate template (run on the enterprise CA)"
   },
   "Install VS Code": {
     "Script": "\\Applications\\VS Code\\install.ps1",

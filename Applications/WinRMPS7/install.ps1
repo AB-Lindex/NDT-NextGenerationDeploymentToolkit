@@ -24,8 +24,8 @@
     section set "SkipHttps": true (a JSON boolean, not a string). Cannot be combined with -CertTemplate.
 
 .PARAMETER CertTemplate
-    Name of an enterprise CA certificate template (e.g. NDT-WinRM, see
-    Applications\PKI\Enterprise CA\Create-NDTWinRMTemplate.ps1). The server requests its own certificate
+    Name of an enterprise CA certificate template (e.g. WinRM, see
+    Applications\PKI\Enterprise CA\Create-WinRMTemplate.ps1). The server requests its own certificate
     from the CA for the HTTPS listener, so clients that trust the CA connect without skipping the CA/CN
     check. Needs a domain-joined server that may enroll on the template. If enrollment fails the step
     fails (no fallback to self-signed). Without it a self-signed certificate is used.

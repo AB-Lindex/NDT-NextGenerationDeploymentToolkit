@@ -1,7 +1,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-    Creates the NDT-WinRM certificate template and publishes it on this enterprise CA.
+    Creates the WinRM certificate template and publishes it on this enterprise CA.
 
 .DESCRIPTION
     Run on the enterprise CA as an Enterprise Admin (the template lives in the forest Configuration partition).
@@ -11,13 +11,13 @@
       only obtain a certificate for its own name.
     - Server Authentication only, RSA 2048, key exchange, non-exportable private key.
     - No CA manager approval, no autoenrollment. Servers request it with Get-Certificate
-      (Applications\WinRMPS7\install.ps1 -CertTemplate NDT-WinRM).
+      (Applications\WinRMPS7\install.ps1 -CertTemplate WinRM).
     - Read + Enroll for the enroll group only (default Domain Computers).
 
     Idempotent: an existing template is left as it is; publishing on the CA is (re)checked.
 
 .PARAMETER TemplateName
-    Template name (also the display name). Default NDT-WinRM.
+    Template name (also the display name). Default WinRM.
 
 .PARAMETER ValidityYears
     Certificate validity in years, 1-5. Default 2.
@@ -27,7 +27,7 @@
 #>
 param (
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
-    [string]$TemplateName = 'NDT-WinRM',
+    [string]$TemplateName = 'WinRM',
     [ValidateRange(1, 5)]
     [int]$ValidityYears = 2,
     [string]$EnrollGroup = 'Domain Computers'
@@ -129,6 +129,6 @@ try {
     Write-Host "Template '$TemplateName' is published on this CA."
 }
 catch {
-    Write-Error "NDT-WinRM template setup failed: $($_.Exception.Message)"
+    Write-Error "WinRM template setup failed: $($_.Exception.Message)"
     exit 1
 }
