@@ -29,8 +29,10 @@ function Write-Log {
         [string]$Level = 'INFO'
     )
     $ts = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-    Write-Host "[$ts][$Level] $Message"
-    Add-Content -Path $script:LogFile -Value "[$ts][$Level] $Message" -ErrorAction SilentlyContinue
+    # File first: if the console fails, the line is still logged.
+    try { Add-Content -Path $script:LogFile -Value "[$ts][$Level] $Message" -ErrorAction SilentlyContinue } catch { }
+    # A dead console must not stop the script ($ErrorActionPreference is 'Stop').
+    try { Write-Host "[$ts][$Level] $Message" } catch { }
 }
 
 #endregion
@@ -156,6 +158,12 @@ function Remove-SoftwareDistribution {
 #endregion
 
 #region --- Main ----------------------------------------------------------
+
+# Log any terminating error (to the file first) so an early stop is visible in CleanupBeforeSysprep.log.
+trap {
+    Write-Log "Unhandled error: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)" 'ERROR'
+    break
+}
 
 $ScriptName = 'Action-CleanupBeforeSysprep'
 Write-Log "$ScriptName`: Starting."
