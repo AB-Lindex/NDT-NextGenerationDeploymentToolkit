@@ -219,14 +219,6 @@
       "ApiKey"
     ]
   },
-  "Enable WinRM PS7": {
-    "Script": "\\Applications\\WinRMPS7\\install.ps1",
-    "Description": "Enable PS7 remoting endpoints (PS7, PowerShell.7) and WinRM HTTPS on TCP/5986",
-    "Parameters": ["SkipHttps", "CertTemplate"],
-    "Parameters1": [],
-    "Parameters2": ["CertTemplate"],
-    "Parameters3": ["SkipHttps"]
-  },
   "Create NDT-WinRM Template": {
     "Script": "\\Applications\\PKI\\Enterprise CA\\Create-NDTWinRMTemplate.ps1",
     "Description": "Create and publish the NDT-WinRM certificate template (run on the enterprise CA)"
@@ -234,5 +226,10 @@
   "Install VS Code": {
     "Script": "\\Applications\\VS Code\\install.ps1",
     "Description": "Install Visual Studio Code"
+  },
+  "Enable WinRM PS7 and SSL": {
+    "Script": "\\Applications\\WinRMPS7\\install.ps1",
+    "Description": "Enable PS7 remoting endpoints (PS7, PowerShell.7) and WinRM HTTPS on TCP/5986 with a certificate from the internal PKI (CertTemplate from the machine block)",
+    "Parameters": ["CertTemplate"]
   }
 }

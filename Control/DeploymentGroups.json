@@ -272,5 +272,11 @@
        "Description": "Install VS Code",
        "Reference": "Install VS Code"
      }
+   },
+   "Enable WinRM PS7": {
+     "Step10": {
+       "Description": "Enable WinRM PS7 and SSL",
+       "Reference": "Enable WinRM PS7 and SSL"
+     }
    }
 }

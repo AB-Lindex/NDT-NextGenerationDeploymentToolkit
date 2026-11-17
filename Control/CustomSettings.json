@@ -125,6 +125,7 @@
     "Computername": "srv02",
     "IPAddress": "10.0.3.22/24",
     "AdminPassword": "Qantas-777",
+    "CertTemplate": "NDT-WinRM",
     "Sections": {
       "Locale": "Sweden",
       "NetworkSettings": "NicAuto",
@@ -133,7 +134,8 @@
     "DeploymentGroups": [
       "General Settings",
       "SMC",
-      "VS Code"
+      "VS Code",
+      "Enable WinRM PS7"
     ]
   },
   "00:15:5D:02:40:1A": {
