@@ -449,8 +449,10 @@ Invoke-Command  -ComputerName srv02.corp.dev -ConfigurationName PS7 -UseSSL -Ses
 
 Run it after the PowerShell 7 install step and after the domain join/rename so the certificate carries the final FQDN. By default the certificate is self-signed (valid 5 years), so clients must skip the CA/CN check as shown (or trust the certificate). The script is idempotent. Optional parameters (MAC block or section keys):
 
-- `SkipHttps` - switch, JSON boolean: `"SkipHttps": true` = no 5986 listener (PS7 endpoint and 5985 only). A string value such as `"NO"` is rejected.
+- `SkipHttps` - switch, JSON boolean: `"SkipHttps": true` = no 5986 listener (PS7 endpoint and 5985 only). A string value such as `"NO"` is rejected. Mutually exclusive with `CertTemplate` (setting both fails the step before anything is changed).
 - `CertTemplate` - name of an enterprise CA template, e.g. `"CertTemplate": "NDT-WinRM"`. The server then requests its own certificate from the CA for the listener, so clients that trust the CA connect with plain `-UseSSL` (still by FQDN, no session option needed). Needs a domain-joined server that may enroll on the template and a reachable CA; if enrollment fails the step fails (no fallback to self-signed).
+
+In `DeploymentActions.json` the working key is `Parameters` (both names; only keys present in the machine's settings are passed). The keys `Parameters1`..`Parameters3` are ignored by the engine and only document the valid combinations: 1 = none (self-signed, 5985 + 5986), 2 = `CertTemplate` (CA certificate), 3 = `SkipHttps` (HTTP 5985 only).
 
 `Applications\PKI\Enterprise CA\Create-NDTWinRMTemplate.ps1` (action `Create NDT-WinRM Template`) creates and publishes that template. Run it on the enterprise CA as an Enterprise Admin. The template builds subject and DNS name from Active Directory (never supplied in the request, so a server can only get a certificate for its own name), allows Server Authentication only, uses a non-exportable RSA 2048 key and 2-year validity (`-ValidityYears`, 1-5), and grants Read + Enroll only to `Domain Computers` (`-EnrollGroup`). It is idempotent: an existing template is left unchanged.
 ### Repo installers and your own installers

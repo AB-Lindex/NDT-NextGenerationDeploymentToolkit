@@ -21,7 +21,7 @@
 
 .PARAMETER SkipHttps
     Switch. Skips the HTTPS listener on TCP/5986 (PS7 endpoint and TCP/5985 only). From a MAC block or
-    section set "SkipHttps": true (a JSON boolean, not a string).
+    section set "SkipHttps": true (a JSON boolean, not a string). Cannot be combined with -CertTemplate.
 
 .PARAMETER CertTemplate
     Name of an enterprise CA certificate template (e.g. NDT-WinRM, see
@@ -45,6 +45,8 @@ function Invoke-Native {
 }
 
 try {
+    if ($SkipHttps -and $CertTemplate) { throw "-SkipHttps and -CertTemplate cannot be combined: a CA certificate is only used for the HTTPS listener. Set only one of them." }
+
     $pwsh = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
     if (-not (Test-Path $pwsh)) { throw "PowerShell 7 not found at $pwsh. Run the PowerShell 7 install step first." }
 

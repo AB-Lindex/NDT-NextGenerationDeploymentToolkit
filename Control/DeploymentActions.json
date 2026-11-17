@@ -221,8 +221,11 @@
   },
   "Enable WinRM PS7": {
     "Script": "\\Applications\\WinRMPS7\\install.ps1",
-    "Description": "Enable PS7 remoting endpoint (PowerShell.7) and WinRM HTTPS on TCP/5986",
-    "Parameters": ["SkipHttps", "CertTemplate"]
+    "Description": "Enable PS7 remoting endpoints (PS7, PowerShell.7) and WinRM HTTPS on TCP/5986",
+    "Parameters": ["SkipHttps", "CertTemplate"],
+    "Parameters1": [],
+    "Parameters2": ["CertTemplate"],
+    "Parameters3": ["SkipHttps"]
   },
   "Create NDT-WinRM Template": {
     "Script": "\\Applications\\PKI\\Enterprise CA\\Create-NDTWinRMTemplate.ps1",
