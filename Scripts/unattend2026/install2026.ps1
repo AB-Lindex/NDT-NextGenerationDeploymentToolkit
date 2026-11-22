@@ -357,12 +357,33 @@ if (-not $mapped) {
 # NOTE: Get-Command is not used here because the PS5 process $PATH is frozen at
 # launch and will not reflect the PS7 installer's PATH changes. We probe the known
 # install path directly instead.
-$pwshExe = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
-if (-not (Test-Path $pwshExe)) {
+function Get-PwshPath {
+    # 1. Classic MSI install
+    $p = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    if (Test-Path $p) { return $p }
+
+    # 2. Packaged (MSIX) install, e.g. the inbox PowerShell 7 on Windows Server 2028.
+    #    The folder name contains the version, so ask the package manager for it.
+    $pkg = Get-AppxPackage -Name Microsoft.PowerShell -AllUsers -ErrorAction SilentlyContinue |
+        Sort-Object Version -Descending | Select-Object -First 1
+    if ($pkg -and $pkg.InstallLocation) {
+        $p = Join-Path $pkg.InstallLocation 'pwsh.exe'
+        if (Test-Path $p) { return $p }
+    }
+
+    # 3. App execution alias (per user)
+    $p = "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe"
+    if (Test-Path $p) { return $p }
+    return $null
+}
+
+$pwshExe = Get-PwshPath
+if (-not $pwshExe) {
     Write-Log "PowerShell 7 not found - installing at $(Get-Date)"
     powershell.exe -ExecutionPolicy Bypass -File 'Z:\Applications\PowerShell7\Install.ps1'
     Write-Log "PowerShell 7 install exited with code $LASTEXITCODE at $(Get-Date)"
-    if (-not (Test-Path $pwshExe)) {
+    $pwshExe = Get-PwshPath
+    if (-not $pwshExe) {
         Write-Log 'pwsh.exe still not found after install - aborting' -Level ERROR
         net use Z: /delete /yes
         Invoke-FinishAction -Success $false -Detail 'PowerShell 7 installation failed'
