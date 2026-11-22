@@ -1,6 +1,7 @@
 {
   "ReferenceImage": {
-    "Script": "\\Applications\\CreateReference\\Install.ps1"
+    "Script": "\\Applications\\CreateReference\\Install.ps1",
+    "PowerShell": "powershell5"
   },
   "Admin password never expires": {
     "Script": "\\Applications\\AdminPasswordNeverExpire\\Install-Local.ps1"
