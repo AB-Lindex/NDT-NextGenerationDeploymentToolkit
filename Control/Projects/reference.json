@@ -1,0 +1,53 @@
+{
+    "02:00:01:01:00:40": {
+    "OS": "VLWIN2025DCC",
+    "Computername": "ref-w2025dcc",
+    "AdminPassword": "P@ssw0rd",
+    "JoinDomain": "WORKGROUP",
+    "Sections": {
+        "Locale": "Sweden"
+    },
+    "DeploymentGroups": [
+        "CreateReferenceImage"
+    ]
+  },
+    "02:00:01:01:00:41": {
+    "OS": "WIN2025DCC",
+    "Computername": "ref-w2025dccsql",
+    "AdminPassword": "P@ssw0rd",
+    "JoinDomain": "WORKGROUP",
+    "Sections": {
+        "Locale": "Sweden"
+    },
+    "DeploymentGroups": [
+        "MS SQL 2025 Developer Edition",
+        "CreateReferenceImage"
+    ]
+  },
+  "02:00:01:01:00:42": {
+    "OS": "VLWIN2025DCG",
+    "Computername": "ref-w2025dcg",
+    "AdminPassword": "P@ssw0rd",
+    "JoinDomain": "WORKGROUP",
+    "Sections": {
+        "Locale": "Sweden"
+    },
+    "DeploymentGroups": [
+        "reference image GUI Version",
+        "CreateReferenceImage"
+    ]
+  },
+    "02:00:01:01:00:43": {
+    "OS": "VLWIN2022DCG",
+    "Computername": "ref-w2022dcg",
+    "AdminPassword": "P@ssw0rd",
+    "JoinDomain": "WORKGROUP",
+    "Sections": {
+        "Locale": "Sweden"
+    },
+    "DeploymentGroups": [
+        "reference image GUI Version",
+        "CreateReferenceImage"
+    ]
+  }
+}

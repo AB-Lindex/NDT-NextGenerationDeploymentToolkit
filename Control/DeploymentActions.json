@@ -69,6 +69,18 @@
     "Description": "Install Nuget provider for PowerShell",
     "Powershell": "powershell5"
   },
+  "Lets Encrypt Root Cert": {
+    "Script": "\\Applications\\ImportRootCert\\install.ps1",
+    "Description": "Install Lets Encrypt Root Certificate"
+  },
+  "PS Help Modules": {
+    "Script": "\\Applications\\PowerShell Help Update\\install.ps1",
+    "Description": "Update Powershell Help Modules"
+  },
+  "Visual C++ Redistributable": {
+    "Script": "\\Applications\\Microsoft Visual C++ Redistributable\\install.ps1",
+    "Description": "Install Visual C++ Redistributable"
+  },
   "Install VMware Tools": {
     "Script": "\\Applications\\VMware Tools\\install.ps1",
     "Description": "Install VMware Tools",
@@ -77,7 +89,7 @@
   "Install iPXE": {
     "Script": "\\Applications\\iPXE\\install.ps1",
     "Description": "Install iPXE bootloader",
-    "powershell": "powershell5"
+    "Powershell": "powershell5"
   },
   "Install NDT": {
     "Script": "\\Applications\\NDT Setup\\install.ps1",

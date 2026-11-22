@@ -75,7 +75,17 @@
       "Reference": "Reboot"
     }
   },
+  "Reference Image GUI Version": {
+    "Step10": {
+      "Description": "Microsoft visual C++ Redistributable",
+      "Reference": "Visual C++ Redistributable"
+    }
+  },
   "CreateReferenceImage": {
+    "Step5": {
+      "Description": "Install Lets Encrypt Root Certificate",
+      "Reference": "Lets Encrypt Root Cert"
+    },
     "Step10": {
       "Description": "Install Nuget",
       "Reference": "InstallNuget"
