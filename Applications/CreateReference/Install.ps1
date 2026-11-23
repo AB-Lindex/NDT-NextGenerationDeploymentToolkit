@@ -98,11 +98,16 @@ try {
     Write-Warning "  Some temporary files could not be removed: $_"
 }
 
-# Clear event logs (optional)
+# Clear event logs (optional). Output is discarded: wevtutil printed a blank line per log into the transcript, and
+# protected logs (e.g. LiveId) are expected to refuse, so only a count of those is reported.
 Write-Output "Clearing event logs..."
 try {
-    wevtutil el | ForEach-Object { wevtutil cl $_ } 2>$null
-    Write-Output "  [OK] Event logs cleared"
+    $evtFailed = 0
+    foreach ($evtLog in @(wevtutil.exe el)) {
+        wevtutil.exe cl $evtLog 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { $evtFailed++ }
+    }
+    Write-Output "  [OK] Event logs cleared ($evtFailed protected logs skipped)"
 } catch {
     Write-Warning "  Could not clear all event logs: $_"
 }
@@ -140,10 +145,14 @@ $wimDest    = "$bootDrive\sources\boot.wim"
 $sdiDest    = "$bootDrive\Boot\boot.sdi"
 $guidFile   = "$bootDrive\WinPE-BCD-GUID.txt"
 
-# PEFirmwareType: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2). Decides which WinPE loader the BCD entry points at.
-$firmwareType = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name 'PEFirmwareType' -ErrorAction SilentlyContinue).PEFirmwareType
-if ($firmwareType -notin 1, 2) {
-    Write-Error "Could not detect firmware type (PEFirmwareType='$firmwareType')"
+# Firmware: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2). Decides which WinPE loader the BCD entry points at.
+# The PEFirmwareType registry value and %firmware_type% only exist inside WinPE, so ask the kernel (Windows 8 / 2012 and later).
+if (-not ('NDT.FirmwareInfo' -as [type])) {
+    Add-Type -Namespace NDT -Name FirmwareInfo -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetFirmwareType(out uint firmwareType);'
+}
+[uint32]$firmwareType = 0
+if (-not [NDT.FirmwareInfo]::GetFirmwareType([ref]$firmwareType) -or $firmwareType -notin 1, 2) {
+    Write-Error "Could not detect firmware type (GetFirmwareType returned $firmwareType)"
     exit 1
 }
 $isUEFI = ($firmwareType -eq 2)
