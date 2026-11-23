@@ -114,8 +114,8 @@ prompt. See the repository README.
 
 | ISO | Firmware | Use |
 |---|---|---|
-| `boot2026.iso` | Hybrid BIOS/EFI (`MakeWinPEMedia`) | Gen 1 VMs and reference-image capture. Keeps the "Press any key to boot from CD" prompt. |
-| `boot2026-uefi.iso` | UEFI-only, no-prompt (`oscdimg` + `efisys_noprompt.bin`) | Gen 2 VMs. Boots straight into WinPE with no keypress, so unattended deployment is not blocked. |
+| `boot2026.iso` | Hybrid BIOS/EFI (`MakeWinPEMedia`) | Gen 1 VMs. Keeps the "Press any key to boot from CD" prompt. Reference-image prep on a BIOS VM stages its `boot.wim` locally. |
+| `boot2026-uefi.iso` | UEFI-only, no-prompt (`oscdimg` + `efisys_noprompt.bin`) | Gen 2 VMs. Boots straight into WinPE with no keypress, so unattended deployment is not blocked. Reference-image prep on a UEFI VM stages its `boot.wim` locally. |
 
 Both ISOs are built from the same staging tree, so the WinPE contents are identical - only the El Torito boot sector differs.
 

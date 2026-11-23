@@ -139,10 +139,23 @@ $bootDrive  = $env:SystemDrive          # C:
 $wimDest    = "$bootDrive\sources\boot.wim"
 $sdiDest    = "$bootDrive\Boot\boot.sdi"
 $guidFile   = "$bootDrive\WinPE-BCD-GUID.txt"
-$isoPath    = "Z:\Boot\boot2026.iso"
+
+# PEFirmwareType: 1 = BIOS (Gen 1), 2 = UEFI (Gen 2). Decides which WinPE loader the BCD entry points at.
+$firmwareType = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name 'PEFirmwareType' -ErrorAction SilentlyContinue).PEFirmwareType
+if ($firmwareType -notin 1, 2) {
+    Write-Error "Could not detect firmware type (PEFirmwareType='$firmwareType')"
+    exit 1
+}
+$isUEFI = ($firmwareType -eq 2)
+Write-Output "  Firmware: $(if ($isUEFI) { 'UEFI (Gen 2)' } else { 'BIOS (Gen 1)' })"
+
+# The ISO matching the firmware: it is also the media the VM needs for the unattended boot into WinPE after the capture
+# (boot2026-uefi.iso has no "press any key" prompt). boot.wim and boot.sdi are the same in both.
+$isoPath = if ($isUEFI) { "Z:\Boot\boot2026-uefi.iso" } else { "Z:\Boot\boot2026.iso" }
+Write-Output "  Boot ISO: $isoPath"
 
 if (-not (Test-Path $isoPath)) {
-    Write-Error "ISO not found at $isoPath"
+    Write-Error "ISO not found at $isoPath (build it with New-NDTPEImage)"
     exit 1
 }
 try {
@@ -281,8 +294,11 @@ if (-not $winpeGuid) {
 }
 
 $ramdisk = "ramdisk=[$bootDrive]\sources\boot.wim,{ramdiskoptions}"
+# UEFI boots winload.efi (inside boot.wim); the BIOS path is the one the Gen 1 version of this script used.
+$winload = if ($isUEFI) { '\Windows\System32\Boot\winload.efi' } else { '\Windows\System32\winload.exe' }
+Write-RefLog "  firmware      : $(if ($isUEFI) { 'UEFI' } else { 'BIOS' }) -> loader $winload"
 $out = Invoke-Bcdedit '/set', $winpeGuid, 'device',     $ramdisk                    ; Write-RefLog "  set device    : $out"
-$out = Invoke-Bcdedit '/set', $winpeGuid, 'path',       '\Windows\System32\winload.exe' ; Write-RefLog "  set path      : $out"
+$out = Invoke-Bcdedit '/set', $winpeGuid, 'path',       $winload                    ; Write-RefLog "  set path      : $out"
 $out = Invoke-Bcdedit '/set', $winpeGuid, 'osdevice',   $ramdisk                    ; Write-RefLog "  set osdevice  : $out"
 $out = Invoke-Bcdedit '/set', $winpeGuid, 'systemroot', '\Windows'                  ; Write-RefLog "  set systemroot: $out"
 $out = Invoke-Bcdedit '/set', $winpeGuid, 'detecthal',  'Yes'                       ; Write-RefLog "  set detecthal : $out"

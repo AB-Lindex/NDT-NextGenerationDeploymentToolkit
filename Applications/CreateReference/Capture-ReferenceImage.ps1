@@ -48,7 +48,7 @@ if (-not $OutputPath) {
 
 # Verify we're in WinPE.
 # The registry key HKLM:\SYSTEM\CurrentControlSet\Control\MiniNT is created
-# exclusively by the WinPE kernel — it is absent on all full Windows installs.
+# exclusively by the WinPE kernel - it is absent on all full Windows installs.
 # This is the same check MDT/ZTIUtility.vbs uses internally.
 $inWinPE = Test-Path "HKLM:\SYSTEM\CurrentControlSet\Control\MiniNT"
 if (-not $inWinPE) {
@@ -118,7 +118,7 @@ Write-Output "Starting image capture..."
 Write-Output "This may take 20-60 minutes depending on system size."
 Write-Output ""
 
-# DISM log — named after the WIM so parallel captures don't collide.
+# DISM log - named after the WIM so parallel captures don't collide.
 # Persisted on the deployment share for post-mortem analysis.
 $dismLogBase = [System.IO.Path]::GetFileNameWithoutExtension($OutputPath)
 $dismLog = Join-Path $outputDir "$dismLogBase-dism.log"
@@ -127,8 +127,10 @@ if (Test-Path $dismLog) {
     Remove-Item $dismLog -Force
 }
 
-# Capture exclusions (wimscript.ini format). C:\Boot is the BIOS system partition's boot folder; it is
-# rebuilt by bcdboot on every deployment, so it must not be baked into the image. \NDT-ReferenceLogs holds
+# Capture exclusions (wimscript.ini format). \Boot, \sources, \NDT-PE and \WinPE-BCD-GUID.txt are the WinPE
+# ramdisk staging written by CreateReference\Install.ps1 (boot.sdi, boot.wim) and Start-Refresh.ps1; on BIOS
+# \Boot is also the system partition's boot folder. bcdboot rebuilds boot files on every deployment, so none of
+# it belongs in the image. \NDT-ReferenceLogs holds
 # the reference-prep logs (CreateReference\Install.ps1, CleanupBeforeSysprep.ps1). The first five lines
 # repeat DISM's built-in defaults, which a custom ConfigFile would otherwise not be guaranteed to keep.
 $dismConfig = Join-Path $env:TEMP 'ndt-capture-wimscript.ini'
@@ -142,6 +144,9 @@ $dismConfig = Join-Path $env:TEMP 'ndt-capture-wimscript.ini'
     '\RECYCLER'
     '\Windows\CSC'
     '\Boot'
+    '\sources'
+    '\NDT-PE'
+    '\WinPE-BCD-GUID.txt'
     '\NDT-ReferenceLogs'
 ) | Set-Content -Path $dismConfig -Encoding Unicode
 
@@ -164,7 +169,7 @@ $dismArgs = @(
 )
 
 try {
-    # Run DISM directly — do NOT capture to a variable.
+    # Run DISM directly - do NOT capture to a variable.
     # Capturing with $out = & dism.exe ... 2>&1 buffers all output until DISM exits,
     # making progress invisible and hiding the failure reason until the very end.
     Write-Output "Calling: dism.exe $($dismArgs -join ' ')"

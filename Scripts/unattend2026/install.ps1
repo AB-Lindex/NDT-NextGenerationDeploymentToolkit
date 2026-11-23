@@ -171,7 +171,8 @@ if ($captureMode) {
         foreach ($stagedFile in 'WinPE-BCD-GUID.txt', 'sources\boot.wim', 'Boot\boot.sdi') {
             Remove-Item -Path "${referenceDrive}:\$stagedFile" -Force -ErrorAction SilentlyContinue
         }
-        # Install.ps1 created C:\sources just for boot.wim. C:\Boot is the BIOS system partition's own boot folder (bcdboot), so it stays.
+        # Install.ps1 created C:\sources just for boot.wim. C:\Boot can be the BIOS system partition's own boot folder (bcdboot), so it stays;
+        # Capture-ReferenceImage.ps1 excludes \Boot, \sources and \NDT-PE from the WIM either way.
         $sourcesDir = "${referenceDrive}:\sources"
         if ((Test-Path -LiteralPath $sourcesDir) -and -not (Get-ChildItem -LiteralPath $sourcesDir -Force | Select-Object -First 1)) {
             Remove-Item -LiteralPath $sourcesDir -Force -ErrorAction SilentlyContinue

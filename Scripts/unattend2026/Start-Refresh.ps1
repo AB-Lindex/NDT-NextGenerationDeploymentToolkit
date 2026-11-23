@@ -115,7 +115,10 @@ $wimPath = $osInfo.Path
 if (-not (Test-Path $wimPath)) { Write-Error "WIM not found: $wimPath"; exit 1 }
 if (-not (Test-Path $isoPath)) { Write-Error "WinPE ISO not found: $isoPath (build it with New-NDTPEImage)"; exit 1 }
 
-$firmware = if ($env:firmware_type -eq 'UEFI') { 'UEFI' } else { 'BIOS' }
+# $env:firmware_type only exists inside WinPE; in a running OS read PEFirmwareType (1 = BIOS, 2 = UEFI).
+$firmwareType = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control' -Name 'PEFirmwareType' -ErrorAction SilentlyContinue).PEFirmwareType
+if ($firmwareType -notin 1, 2) { Write-Error "Could not detect firmware type (PEFirmwareType='$firmwareType')."; exit 1 }
+$firmware = if ($firmwareType -eq 2) { 'UEFI' } else { 'BIOS' }
 
 Write-Host "  MAC          : $mac"
 Write-Host "  Config file  : Control\$($machineSource[$mac.ToUpper()])"
