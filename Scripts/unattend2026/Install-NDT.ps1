@@ -173,7 +173,7 @@ if (-not $machineConfig.DeploymentGroups) {
 # This allows script Parameters to be resolved from shared sections (e.g. SQLAO).
 $effective = Get-NDTEffectiveSetting -Machine $machineConfig -SectionCatalog $sections
 $effectiveSettings = $effective.Settings
-foreach ($note in $effective.Notes | Where-Object { $_ -like 'Resolved reference*' }) { Write-Log $note -ForegroundColor Gray }
+foreach ($note in $effective.Notes | Where-Object { $_ -like 'Resolved reference*' -or $_ -like 'Ignored (comment)*' }) { Write-Log $note -ForegroundColor Gray }
 foreach ($warning in $effective.Warnings) { Write-Log $warning -Level WARN }
 
 Write-Log "Effective settings keys: $($effectiveSettings.Keys -join ', ')" -ForegroundColor Gray
@@ -217,8 +217,9 @@ if (Test-Path $progressPath) {
 # Count total steps across all groups for percent-complete tracking
 $totalStepCount = 0
 foreach ($g in $deploymentGroupRefs) {
+    if (([string]$g).StartsWith('_')) { continue }
     $grp = $deploymentGroups.$g
-    if ($grp) { $totalStepCount += ($grp.PSObject.Properties | Measure-Object).Count }
+    if ($grp) { $totalStepCount += @($grp.PSObject.Properties | Where-Object { -not $_.Name.StartsWith('_') }).Count }
 }
 $failedSteps = @()
 Write-Log "Total deployment steps: $totalStepCount  |  Already completed: $($completedSteps.Count)" -ForegroundColor Gray
@@ -229,6 +230,11 @@ Write-Log '=============================' -ForegroundColor Green
 
 # Process each deployment group
 foreach ($deploymentGroupName in $deploymentGroupRefs) {
+    # Entries starting with _ are comments (parked groups/steps).
+    if (([string]$deploymentGroupName).StartsWith('_')) {
+        Write-Log "Ignored (comment): group '$deploymentGroupName'" -ForegroundColor Gray
+        continue
+    }
     $deploymentGroup = $deploymentGroups.$deploymentGroupName
 
     if (-not $deploymentGroup) {
@@ -241,6 +247,10 @@ foreach ($deploymentGroupName in $deploymentGroupRefs) {
     # Execute each deployment step from the deployment group
     foreach ($stepProperty in $deploymentGroup.PSObject.Properties) {
     $stepName = $stepProperty.Name
+    if ($stepName.StartsWith('_')) {
+        Write-Log "Ignored (comment): step '$stepName' in group '$deploymentGroupName'" -ForegroundColor Gray
+        continue
+    }
     $stepInfo = $stepProperty.Value
     
     # Create unique step identifier including group name

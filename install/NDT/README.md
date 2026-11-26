@@ -68,7 +68,7 @@ Watch-NDTDeployment -Computername srv05
 | `Get-NDTComputer` / `Add-NDTComputer` / `Set-NDTComputer` / `Remove-NDTComputer` | Manage per-machine entries in `CustomSettings.json` and in `Control\Projects\**\*.json` (see below). |
 | `Remove-NDTProgress` | Delete a computer's NDT Monitor progress file (called by `Add-`/`Remove-NDTComputer`). |
 | `Get-NDTOs` / `Add-NDTOs` / `Set-NDTOs` / `Remove-NDTOs` | Manage the OS catalog in `OS.json`. |
-| `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration (machine block and its source file, duplicate or unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action). Returns `$true`/`$false`. |
+| `Test-NDTDeployment` | Read-only dry-run validation of a machine's full deployment configuration (machine block and its source file, duplicate or unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action). Entries starting with `_` (machine `Sections`, `DeploymentGroups`, group step keys) are comments, also skipped at deploy time: shown as `[IGNORED]`, never counted. Returns `$true`/`$false`. |
 | `Watch-NDTDeployment` | Live progress bar for a machine (by `-Computername` or `-MAC`) until the NDT Monitor reports Done. `-TimeoutMinutes`, `-PollSeconds`, `-MonitorUrl`, `-SkipCertificateCheck`. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). Add only. |
 | `Get-NDTCatalog` / `Test-NDTComputerEntry` | Read-only helpers for front ends: available OS/sections/groups, and validation + key-overlap check of a proposed entry. |

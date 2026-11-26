@@ -2177,7 +2177,9 @@ function Resolve-NDTMachineOS {
 
     $refs = Get-NDTMemberValue $Machine 'Sections'
     if (-not $refs) { return $null }
-    $names = if ($refs -is [System.Collections.IDictionary]) { @($refs.Values) } else { @($refs.PSObject.Properties | ForEach-Object { $_.Value }) }
+    $pairs = if ($refs -is [System.Collections.IDictionary]) { @($refs.Keys | ForEach-Object { [PSCustomObject]@{ Name = $_; Value = $refs[$_] } }) } else { @($refs.PSObject.Properties) }
+    # Entries starting with _ are comments (parked), as in Test-NDTDeployment.
+    $names = @($pairs | Where-Object { -not ([string]$_.Name).StartsWith('_') -and -not ([string]$_.Value).StartsWith('_') } | ForEach-Object { $_.Value })
     foreach ($name in $names) {
         $section = $SectionCatalog.PSObject.Properties[[string]$name]
         $secOs   = if ($section) { [string](Get-NDTMemberValue $section.Value 'OS') } else { '' }
@@ -2211,6 +2213,10 @@ function Get-NDTEffectiveSetting {
     $refs = $Machine.PSObject.Properties['Sections']
     if ($refs -and $refs.Value) {
         foreach ($sp in $refs.Value.PSObject.Properties) {
+            if ($sp.Name.StartsWith('_') -or ([string]$sp.Value).StartsWith('_')) {
+                $notes.Add("Ignored (comment): section $($sp.Name) -> $($sp.Value)")
+                continue
+            }
             $section = $SectionCatalog.PSObject.Properties[[string]$sp.Value]
             if ($section) {
                 $loaded[$sp.Name] = $section.Value
@@ -3019,6 +3025,7 @@ function Test-NDTComputerEntry {
     if ($Entry['Sections']) {
         foreach ($label in $Entry['Sections'].Keys) {
             $secName = [string]$Entry['Sections'][$label]
+            if (([string]$label).StartsWith('_') -or $secName.StartsWith('_')) { continue }
             $sec     = $snJson.PSObject.Properties[$secName]
             if (-not $sec) { $errors.Add("Section '$secName' not found in Sections.json."); continue }
             $isSystem = [bool]($sec.Value.PSObject.Properties['System'] -and $sec.Value.System -eq $true)
@@ -3031,10 +3038,11 @@ function Test-NDTComputerEntry {
     # -- Groups, actions, scripts
     $refs = [System.Collections.Generic.List[string]]::new()
     foreach ($g in @($Entry['DeploymentGroups'])) {
-        if (-not $g) { continue }
+        if (-not $g -or ([string]$g).StartsWith('_')) { continue }
         $grp = $dgJson.PSObject.Properties[[string]$g]
         if (-not $grp) { $errors.Add("DeploymentGroup '$g' not found in DeploymentGroups.json."); continue }
         foreach ($step in $grp.Value.PSObject.Properties) {
+            if ($step.Name.StartsWith('_')) { continue }
             $ref = [string]$step.Value.Reference
             if ($ref -and -not $refs.Contains($ref)) { $refs.Add($ref) }
         }
@@ -3070,7 +3078,10 @@ function Test-NDTDeployment {
           - Each DeploymentGroups group exists in DeploymentGroups.json
           - Each step's Reference key exists in DeploymentActions.json
           - Each script file referenced in DeploymentActions.json exists on disk
-        No changes are made  -  this is a read-only validation.
+        Entries starting with _ (machine Sections names/values, DeploymentGroups
+        entries, group step keys) are treated as comments: printed in gray as
+        [IGNORED] and never counted as a failure or warning.
+        are made  -  this is a read-only validation. are made  -  this is a read-only validation.
         Returns \$true if all checks passed, \$false if any check failed.
     .PARAMETER MAC
         MAC address of the machine to validate (colon-separated, any case).
@@ -3111,6 +3122,13 @@ function Test-NDTDeployment {
             if ($Detail) { Write-Host "         $Detail" -ForegroundColor Red }
             $script:checkErrors++
         }
+    }
+
+    # Entries whose name or value starts with '_' are comments: shown, never counted.
+    function Write-Ignored {
+        param([string]$Label, [string]$Detail = '')
+        Write-Host "  [IGNORED] $Label" -ForegroundColor DarkGray
+        if ($Detail) { Write-Host "            $Detail" -ForegroundColor DarkGray }
     }
 
     $normalMAC = $MAC.ToUpper()
@@ -3206,6 +3224,10 @@ function Test-NDTDeployment {
         Write-Host "`n[4] Sections" -ForegroundColor White
         foreach ($sectionProp in $machine.Sections.PSObject.Properties) {
             $sectionName = $sectionProp.Value
+            if ($sectionProp.Name.StartsWith('_') -or ([string]$sectionName).StartsWith('_')) {
+                Write-Ignored "[$($sectionProp.Name)] '$sectionName'"
+                continue
+            }
             $exists = [bool]$sectionsCatalog.PSObject.Properties[$sectionName]
             Write-Check "[$($sectionProp.Name)] '$sectionName'" $exists
             if ($exists) {
@@ -3228,12 +3250,14 @@ function Test-NDTDeployment {
             $wimRelPath = $osEntry.Value.Path
             $wimIndex   = $osEntry.Value.Index
             $wimAbsPath = Join-Path $LocalPath $wimRelPath.TrimStart('\')
-            Write-Check 'WIM file exists on disk' (Test-Path $wimAbsPath) "$wimRelPath  (index $wimIndex)"
+            $wimFound = Test-Path $wimAbsPath
+            Write-Check 'WIM file' $wimFound $(if ($wimFound) { "$wimRelPath  (index $wimIndex)" } else { "NOT FOUND: $wimAbsPath  (index $wimIndex)" })
 
             # OS-specific unattend template (optional; absent = default template).
             if ($osEntry.Value.Unattend) {
-                $unattendAbs = Join-Path $LocalPath ($osEntry.Value.Unattend).TrimStart('\')
-                Write-Check 'Unattend template exists on disk' (Test-Path $unattendAbs) $osEntry.Value.Unattend
+                $unattendAbs   = Join-Path $LocalPath ($osEntry.Value.Unattend).TrimStart('\')
+                $unattendFound = Test-Path $unattendAbs
+                Write-Check 'Unattend template' $unattendFound $(if ($unattendFound) { $osEntry.Value.Unattend } else { "NOT FOUND: $unattendAbs" })
             }
         }
     }
@@ -3244,11 +3268,19 @@ function Test-NDTDeployment {
         $resolvedRefs = [System.Collections.Generic.List[string]]::new()
 
         foreach ($groupName in $machine.DeploymentGroups) {
+            if (([string]$groupName).StartsWith('_')) {
+                Write-Ignored "Group '$groupName'"
+                continue
+            }
             $groupEntry = $groups.PSObject.Properties[$groupName]
             Write-Check "Group '$groupName'" ([bool]$groupEntry)
 
             if ($groupEntry) {
                 foreach ($stepProp in $groupEntry.Value.PSObject.Properties) {
+                    if ($stepProp.Name.StartsWith('_')) {
+                        Write-Ignored "Step '$($stepProp.Name)' in '$groupName'"
+                        continue
+                    }
                     $ref = $stepProp.Value.Reference
                     if ($ref -and -not $resolvedRefs.Contains($ref)) {
                         $resolvedRefs.Add($ref)

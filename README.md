@@ -373,6 +373,8 @@ Named groups of ordered steps. Each step has a `Reference` key into `DeploymentA
 }
 ```
 
+**Parking entries with `_`:** in a machine block, a `Sections` entry (label or section name) or a `DeploymentGroups` name that starts with `_` is a comment: deployment skips it (its settings are not loaded, the group does not run) and logs `Ignored (comment)`. The same applies to a step key starting with `_` inside a group. `Test-NDTDeployment` shows these as `[IGNORED]`.
+
 ### DeploymentActions.json
 
 Action definitions — what to run:
@@ -480,7 +482,7 @@ The module also lives on the share (`install\NDT`) and is imported by WinPE, the
 | `New-NDTPEImage` | Build the WinPE WIM and both ISOs, inject drivers, update the WDS boot image (`-SkipISO`, `-SkipWDS`, `-RegisterOnly`, `-DriverPath`, `-RootCACertName`, `-PS7`). |
 | `Get-/Add-/Set-/Remove-NDTComputer` | Manage machine blocks in `CustomSettings.json` and `Control\Projects\**\*.json` (`Add-NDTComputer -File` picks the Projects file; `SourceFile` on `Get-NDTComputer` output). |
 | `Get-/Add-/Set-/Remove-NDTOs` | Manage the OS catalog in `OS.json` (`-Unattend` sets the per-OS template). |
-| `Test-NDTDeployment` | Read-only dry run for a MAC: machine block and its source file, duplicate/unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action. Returns `$true`/`$false`. |
+| `Test-NDTDeployment` | Read-only dry run for a MAC: machine block and its source file, duplicate/unreadable machine files, sections, OS key, WIM, groups, actions, script paths, finish action. Entries starting with `_` (machine `Sections`, `DeploymentGroups`, group step keys) are comments, also skipped at deploy time: shown as `[IGNORED]`, never counted. Returns `$true`/`$false`. |
 | `Watch-NDTDeployment` | Live progress bar for a machine until it reports Done. |
 | `Remove-NDTProgress` | Delete a machine's monitor progress file. |
 | `New-NDTComputerTui` | PowerShell 7 terminal form for adding a computer (needs `Microsoft.PowerShell.ConsoleGuiTools`). |
