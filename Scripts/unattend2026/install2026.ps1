@@ -376,7 +376,7 @@ function Get-PwshPath {
     if (Test-Path $p) { return $p }
     return $null
 }
-# extra comment for testing
+
 $pwshExe = Get-PwshPath
 if (-not $pwshExe) {
     Write-Log "PowerShell 7 not found - installing at $(Get-Date)"
