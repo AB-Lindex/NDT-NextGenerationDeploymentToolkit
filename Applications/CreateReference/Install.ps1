@@ -168,7 +168,7 @@ if (-not (Test-Path $isoPath)) {
     exit 1
 }
 try {
-    $mount = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
+    $null = Mount-DiskImage -ImagePath $isoPath -ErrorAction Stop
 
     # The drive letter can be assigned a moment after Mount-DiskImage returns (Get-Volume then reports an empty
     # letter, which made the path ":\Boot\boot.sdi"). Wait for it; fall back to the volume GUID path, which works
