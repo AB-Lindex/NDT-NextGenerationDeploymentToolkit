@@ -497,8 +497,15 @@ function Update-NDT {
         (e.g. 'Applications' if you keep site-customised installers there).
         Control is always preserved.
 
+    .PARAMETER Force
+        Re-apply the update even when the share is already on the latest commit
+        (by default Update-NDT does nothing in that case).
+
     .EXAMPLE
         Update-NDT
+
+    .EXAMPLE
+        Update-NDT -Force
 
     .EXAMPLE
         Update-NDT -WhatIf
@@ -524,7 +531,9 @@ function Update-NDT {
         [Parameter()]
         [string]$Thumbprint,
         [Parameter()]
-        [string[]]$Preserve
+        [string[]]$Preserve,
+        [Parameter()]
+        [switch]$Force
     )
 
     #region -- Pre-flight: must be an existing NDT install -----------------------
@@ -545,13 +554,28 @@ function Update-NDT {
     # version.json records the repo ModuleVersion this share was last updated to.
     $versionFile    = Join-Path $LocalPath 'version.json'
     $currentVersion = 'unknown'
+    $currentCommit  = $null
     if (Test-Path $versionFile) {
         try {
             $vj = Get-Content $versionFile -Raw | ConvertFrom-Json
             if ($vj.Version) { $currentVersion = $vj.Version }
+            if ($vj.Commit)  { $currentCommit  = $vj.Commit }
         } catch {
             Write-Verbose "  Could not read existing version.json: $_"
         }
+    }
+
+    # Resolve the incoming repo version (latest commit on the branch; the project
+    # commits a timestamp as the commit message, so it is readable and increasing).
+    $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
+    $newVersion = if ($repoInfo) { $repoInfo.Version } else { 'unknown' }
+    $newCommit  = if ($repoInfo) { $repoInfo.Commit }  else { $null }
+
+    # Already on the latest commit: nothing to do unless -Force. If either side is
+    # unknown (offline, no version.json) we cannot prove it, so the update proceeds.
+    if (-not $Force -and $newCommit -and $currentCommit -and $newCommit -eq $currentCommit) {
+        Write-Host "NDT is already up to date (version $currentVersion, commit $currentCommit). Use -Force to re-apply anyway." -ForegroundColor Green
+        return
     }
     #endregion
 
@@ -601,11 +625,6 @@ function Update-NDT {
         # before any share file is touched.
         Test-NDTModuleImport -ManifestPath (Join-Path $repoRoot 'install\NDT\ndt.psd1')
 
-        # Resolve the incoming repo version (latest commit on the branch; the project
-        # commits a timestamp as the commit message, so it is readable and increasing).
-        $repoInfo   = Get-NDTRepoVersion -RepoZipUrl $RepoZipUrl
-        $newVersion = if ($repoInfo) { $repoInfo.Version } else { 'unknown' }
-        $newCommit  = if ($repoInfo) { $repoInfo.Commit }  else { $null }
         Write-Host "NDT version: $currentVersion -> $newVersion" -ForegroundColor Cyan
 
         if ($PSCmdlet.ShouldProcess($LocalPath, 'Apply upgrade (refresh code, preserve config)')) {

@@ -143,7 +143,7 @@ Other `New-NDTPEImage` inputs:
 
 ## Updating a share
 
-`Update-NDT` refreshes the code of an existing share and preserves `Control\*.json`, credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Rebuild the boot image with `New-NDTPEImage` afterwards if `install.ps1`, drivers or the WinPE launcher changed.
+`Update-NDT` refreshes the code of an existing share and preserves `Control\*.json`, credentials, WIMs, certificates, `Applications2026\`, `Reference\` and `Logs\`. If the share is already on the latest repo commit it does nothing; use `-Force` to re-apply anyway. A timestamped backup of `Control\` and `install\` is taken first (`-NoBackup` skips it). Rebuild the boot image with `New-NDTPEImage` afterwards if `install.ps1`, drivers or the WinPE launcher changed.
 
 The installers in `Applications\` are the repository's versions and are overwritten by `Update-NDT`, so do not edit them in place on a share. Put a useful improvement into the repo (pull request) so every share gets it. For a company-specific installer, copy it to a name that is not in the repo (for example `Applications\VS Code - Company\` or `Applications2026\VS Code\`) and point a new action in `DeploymentActions.json` at it; `Update-NDT` leaves those alone. `Update-NDT -Preserve 'Applications'` keeps all existing files in `Applications\` and only adds new ones. Files removed from the repo are never deleted from a share; remove retired installers by hand.
 
