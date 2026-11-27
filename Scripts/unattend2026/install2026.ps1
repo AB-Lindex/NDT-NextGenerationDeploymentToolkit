@@ -358,11 +358,15 @@ if (-not $mapped) {
 # launch and will not reflect the PS7 installer's PATH changes. We probe the known
 # install path directly instead.
 function Get-PwshPath {
+    param([switch]$ClassicOnly)
+
     # 1. Classic MSI install
     $p = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
     if (Test-Path $p) { return $p }
+    if ($ClassicOnly) { return $null }
 
     # 2. Packaged (MSIX) install, e.g. the inbox PowerShell 7 on Windows Server 2028.
+    #    Only a fallback: the MSI is preferred (PowerShell 7.7+ is MSIX-only, per user, and not seen by services).
     #    The folder name contains the version, so ask the package manager for it.
     $pkg = Get-AppxPackage -Name Microsoft.PowerShell -AllUsers -ErrorAction SilentlyContinue |
         Sort-Object Version -Descending | Select-Object -First 1
@@ -377,9 +381,9 @@ function Get-PwshPath {
     return $null
 }
 
-$pwshExe = Get-PwshPath
+$pwshExe = Get-PwshPath -ClassicOnly
 if (-not $pwshExe) {
-    Write-Log "PowerShell 7 not found - installing at $(Get-Date)"
+    Write-Log "PowerShell 7 (MSI) not found - installing at $(Get-Date)"
     powershell.exe -ExecutionPolicy Bypass -File 'Z:\Applications\PowerShell7\Install.ps1'
     Write-Log "PowerShell 7 install exited with code $LASTEXITCODE at $(Get-Date)"
     $pwshExe = Get-PwshPath
@@ -389,7 +393,11 @@ if (-not $pwshExe) {
         Invoke-FinishAction -Success $false -Detail 'PowerShell 7 installation failed'
         exit 1
     }
-    Write-Log 'PowerShell 7 installed successfully' -ForegroundColor Green
+    if ($pwshExe -like "$env:ProgramFiles\PowerShell\7\*") {
+        Write-Log 'PowerShell 7 installed successfully' -ForegroundColor Green
+    } else {
+        Write-Log "The MSI install did not produce $env:ProgramFiles\PowerShell\7\pwsh.exe - falling back to the packaged PowerShell: $pwshExe" -Level WARN
+    }
 } else {
     Write-Log 'PowerShell 7 already installed - skipping'
 }

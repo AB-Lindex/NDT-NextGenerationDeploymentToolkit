@@ -168,11 +168,26 @@ if (-not (Test-Path $isoPath)) {
     exit 1
 }
 try {
-    $mount    = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
-    $isoDrive = ($mount | Get-Volume).DriveLetter + ":"
+    $mount = Mount-DiskImage -ImagePath $isoPath -PassThru -ErrorAction Stop
 
-    $sdiSource = "$isoDrive\Boot\boot.sdi"
-    $wimSource = "$isoDrive\sources\boot.wim"
+    # The drive letter can be assigned a moment after Mount-DiskImage returns (Get-Volume then reports an empty
+    # letter, which made the path ":\Boot\boot.sdi"). Wait for it; fall back to the volume GUID path, which works
+    # for Test-Path/Copy-Item without a letter.
+    $isoRoot = $null
+    for ($try = 0; $try -lt 30 -and -not $isoRoot; $try++) {
+        $isoVol = Get-DiskImage -ImagePath $isoPath | Get-Volume
+        if ($isoVol -and [int][char]$isoVol.DriveLetter -ne 0) { $isoRoot = "$($isoVol.DriveLetter):\" }
+        elseif ($try -ge 10 -and $isoVol -and $isoVol.Path) { $isoRoot = $isoVol.Path }
+        else { Start-Sleep -Seconds 1 }
+    }
+    if (-not $isoRoot) {
+        Write-Error "The mounted ISO $isoPath has no drive letter or volume path after 30 s"
+        exit 1
+    }
+    Write-Output "  ISO mounted at: $isoRoot"
+
+    $sdiSource = Join-Path $isoRoot 'Boot\boot.sdi'
+    $wimSource = Join-Path $isoRoot 'sources\boot.wim'
     foreach ($f in @($sdiSource, $wimSource)) {
         if (-not (Test-Path $f)) {
             Write-Error "Expected file not found inside ISO: $f"
